@@ -15,6 +15,7 @@ from pyalex import Domains
 from pyalex import Fields
 from pyalex import Funders
 from pyalex import Institutions
+from pyalex import Keywords
 from pyalex import Publishers
 from pyalex import Sources
 from pyalex import Subfields
@@ -36,6 +37,7 @@ OPEN_ALEX_ENTITIES = [
     Fields,
     Funders,
     Institutions,
+    Keywords,
     Publishers,
     Sources,
     Subfields,

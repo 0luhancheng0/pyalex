@@ -14,6 +14,7 @@ from pyalex import Domains
 from pyalex import Fields
 from pyalex import Funders
 from pyalex import Institutions
+from pyalex import Keywords
 from pyalex import Publishers
 from pyalex import Sources
 from pyalex import Subfields
@@ -831,6 +832,59 @@ def subfields(
                 query = query.search(search)
             if field_id:
                 query = query.filter(field={"id": field_id})
+            
+            # Print debug URL before making the request
+            _print_debug_url(query)
+            results = query.get(limit=limit)
+            _output_results(results, output_format)
+            
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def keywords(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for keywords"
+    )] = None,
+    limit: Annotated[int, typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return"
+    )] = 10,
+    output_format: Annotated[str, typer.Option(
+        "--format", "-f",
+        help="Output format: json, name, table, summary"
+    )] = "table",
+    keyword_id: Annotated[Optional[str], typer.Argument(
+        help="Specific keyword ID to retrieve"
+    )] = None,
+):
+    """
+    Search and retrieve keywords from OpenAlex.
+    
+    Examples:
+      pyalex keywords --search "artificial intelligence"
+      pyalex keywords --limit 5
+      pyalex keywords cardiac-imaging
+    """
+    try:
+        if keyword_id:
+            # Get specific keyword
+            keyword = Keywords()[keyword_id]
+            if _verbose_mode:
+                typer.echo(
+                    f"[DEBUG] API URL: {Keywords().url}/{keyword_id}", 
+                    err=True
+                )
+            _output_results(keyword, output_format, single=True)
+        else:
+            # Search keywords
+            query = Keywords()
+            
+            if search:
+                query = query.search(search)
             
             # Print debug URL before making the request
             _print_debug_url(query)
