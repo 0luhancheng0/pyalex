@@ -51,6 +51,17 @@ def test_topics_help():
     assert "Search and retrieve topics from OpenAlex" in result.stdout
 
 
+def test_keywords_help():
+    """Test that the keywords subcommand help works."""
+    result = subprocess.run(
+        ["pyalex", "keywords", "--help"], 
+        capture_output=True, 
+        text=True
+    )
+    assert result.returncode == 0
+    assert "Search and retrieve keywords from OpenAlex" in result.stdout
+
+
 def test_works_search():
     """Test that works search returns results."""
     result = subprocess.run(

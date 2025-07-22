@@ -18,6 +18,8 @@ from pyalex.api import Funders
 from pyalex.api import Institution
 from pyalex.api import Institutions
 from pyalex.api import Journals
+from pyalex.api import Keyword
+from pyalex.api import Keywords
 from pyalex.api import OpenAlexResponseList
 from pyalex.api import People
 from pyalex.api import Publisher
@@ -43,6 +45,8 @@ __all__ = [
     "Source",
     "Funder",
     "Funders",
+    "Keywords",
+    "Keyword",
     "Publishers",
     "Publisher",
     "Institutions",
