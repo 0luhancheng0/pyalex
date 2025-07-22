@@ -15,9 +15,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12"
 ]
 license = {text = "MIT"}
-dependencies = ["requests", "urllib3"]
+dependencies = ["requests", "urllib3", "typer", "prettytable"]
 dynamic = ["version"]
 requires-python = ">=3.8"
+
+[project.scripts]
+pyalex = "pyalex.cli:app"
 
 [project.optional-dependencies]
 lint = ["ruff"]

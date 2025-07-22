@@ -42,7 +42,7 @@ class AlexConfig(dict):
 
 
 config = AlexConfig(
-    email=None,
+    email="0lh.cheng0@gmail.com",
     api_key=None,
     user_agent=f"pyalex/{__version__}",
     openalex_url="https://api.openalex.org",

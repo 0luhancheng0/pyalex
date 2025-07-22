@@ -43,6 +43,45 @@ PyAlex requires Python 3.8 or later.
 pip install pyalex
 ```
 
+## Command Line Interface
+
+PyAlex now includes a command line interface (CLI) for quick queries to OpenAlex. After installation, you can use the `pyalex` command:
+
+```bash
+# Search for works (table format by default)
+pyalex works --search "machine learning" --limit 5
+
+# Search for authors  
+pyalex authors --search "Andrew Ng" --limit 3
+
+# Search for topics
+pyalex topics --search "artificial intelligence" --limit 3
+
+# Get specific entities by ID
+pyalex works W2741809807
+pyalex authors A1234567890
+pyalex topics T1234567890
+
+# Different output formats
+pyalex works --search "climate change" --format json
+pyalex works --search "climate change" --format title
+pyalex works --search "climate change" --format table  # default
+pyalex works --search "climate change" --format summary
+
+# Filter options
+pyalex works --author-id "A1234567890" --year 2023
+pyalex authors --institution-id "I1234567890"
+```
+
+For more options, use the help command:
+
+```bash
+pyalex --help
+pyalex works --help
+pyalex authors --help  
+pyalex topics --help
+```
+
 ## Getting started
 
 PyAlex offers support for all [Entity Objects](https://docs.openalex.org/api-entities/entities-overview): [Works](https://docs.openalex.org/api-entities/works), [Authors](https://docs.openalex.org/api-entities/authors), [Sources](https://docs.openalex.org/api-entities/sourcese), [Institutions](https://docs.openalex.org/api-entities/institutions), [Topics](https://docs.openalex.org/api-entities/topics), [Publishers](https://docs.openalex.org/api-entities/publishers), and [Funders](https://docs.openalex.org/api-entities/funders).
