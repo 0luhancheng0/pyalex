@@ -5,6 +5,8 @@ Tests for PyAlex CLI
 import subprocess
 import json
 import pytest
+import tempfile
+import os
 
 
 def test_cli_help():
@@ -62,6 +64,17 @@ def test_keywords_help():
     assert "Search and retrieve keywords from OpenAlex" in result.stdout
 
 
+def test_show_help():
+    """Test that the show subcommand help works."""
+    result = subprocess.run(
+        ["pyalex", "show", "--help"], 
+        capture_output=True, 
+        text=True
+    )
+    assert result.returncode == 0
+    assert "Display a JSON file containing OpenAlex data" in result.stdout
+
+
 def test_works_search():
     """Test that works search returns results."""
     result = subprocess.run(
@@ -88,6 +101,66 @@ def test_works_summary_format():
     assert "[1]" in result.stdout  # Should show numbered results
     assert "Title:" in result.stdout
     assert "ID:" in result.stdout
+
+
+def test_show_json_file():
+    """Test that show command works with JSON files."""
+    # Create a temporary JSON file with sample data
+    sample_data = [
+        {
+            "id": "https://openalex.org/W1234567890",
+            "display_name": "Test Work",
+            "publication_year": 2023,
+            "cited_by_count": 42,
+            "primary_location": {
+                "source": {
+                    "display_name": "Test Journal"
+                }
+            }
+        }
+    ]
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        json.dump(sample_data, f)
+        temp_file = f.name
+    
+    try:
+        # Test table format
+        result = subprocess.run(
+            ["pyalex", "show", temp_file, "--format", "table"],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        assert "Test Work" in result.stdout
+        assert "2023" in result.stdout
+        
+        # Test JSON format
+        result = subprocess.run(
+            ["pyalex", "show", temp_file, "--format", "json"],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0
+        # Should be valid JSON output
+        parsed = json.loads(result.stdout)
+        assert len(parsed) == 1
+        assert parsed[0]["display_name"] == "Test Work"
+        
+    finally:
+        # Clean up temp file
+        os.unlink(temp_file)
+
+
+def test_show_nonexistent_file():
+    """Test that show command handles nonexistent files gracefully."""
+    result = subprocess.run(
+        ["pyalex", "show", "nonexistent_file.json"],
+        capture_output=True,
+        text=True
+    )
+    assert result.returncode == 1
+    assert "not found" in result.stderr
 
 
 if __name__ == "__main__":

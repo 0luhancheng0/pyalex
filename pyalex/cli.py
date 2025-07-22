@@ -3,6 +3,8 @@
 PyAlex CLI - Command line interface for the OpenAlex database
 """
 import json
+import os
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -284,39 +286,106 @@ def works_from_ids(
             typer.echo("Error: No work IDs found in input", err=True)
             raise typer.Exit(1)
         
-        if _verbose_mode:
-            typer.echo(f"[DEBUG] Processing {len(work_ids)} work IDs", err=True)
-        
-        # Retrieve each work
-        works = []
+        # Clean up all work IDs (remove URL prefix if present)
+        cleaned_work_ids = []
         for work_id in work_ids:
-            # Clean up the work ID (remove URL prefix if present)
-            clean_id = work_id.replace('https://openalex.org/', '')
+            if isinstance(work_id, str):
+                # Remove URL prefix if present
+                clean_id = work_id.replace('https://openalex.org/', '').strip()
+                # Also handle cases where there might be extra slashes or whitespace
+                clean_id = clean_id.strip('/')
+                # Remove quotes that might be added by jq or other tools
+                clean_id = clean_id.strip('"\'')
+                if clean_id:  # Only add non-empty IDs
+                    cleaned_work_ids.append(clean_id)
+        
+        if not cleaned_work_ids:
+            typer.echo("Error: No valid work IDs found after cleaning input", err=True)
+            raise typer.Exit(1)
+        
+        if _verbose_mode:
+            typer.echo(f"[DEBUG] Processing {len(cleaned_work_ids)} work IDs", err=True)
+            typer.echo(f"[DEBUG] First few IDs: {cleaned_work_ids[:3]}", err=True)
+        
+        # Retrieve works in batches of up to 50 (OpenAlex limit for OR filters)
+        works = []
+        batch_size = 50
+        
+        for i in range(0, len(cleaned_work_ids), batch_size):
+            batch_ids = cleaned_work_ids[i:i + batch_size]
+            
+            if _verbose_mode:
+                typer.echo(
+                    f"[DEBUG] Fetching batch {i//batch_size + 1}: "
+                    f"{len(batch_ids)} works", 
+                    err=True
+                )
             
             try:
+                # Create OR filter for batch of work IDs
+                # Format: "W123|W456|W789"
+                id_filter = "|".join(batch_ids)
+                
+                # Query works using OR filter
+                query = Works().filter(openalex_id=id_filter)
+                
                 if _verbose_mode:
-                    typer.echo(f"[DEBUG] Fetching work: {clean_id}", err=True)
+                    typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
                 
-                work = Works()[clean_id]
+                # Get all results for this batch (no limit since we know count)
+                batch_results = query.get(limit=len(batch_ids))
                 
-                if _verbose_mode:
-                    typer.echo(f"[DEBUG] API URL: {Works().url}/{clean_id}", err=True)
-                
-                # Convert abstract if requested
-                if include_abstract:
-                    work = _add_abstract_to_work(work)
-                
-                works.append(work)
+                if batch_results:
+                    # Convert abstracts if requested
+                    if include_abstract:
+                        batch_results = [
+                            _add_abstract_to_work(work) for work in batch_results
+                        ]
+                    
+                    works.extend(batch_results)
+                    
+                    if _verbose_mode:
+                        typer.echo(
+                            f"[DEBUG] Successfully retrieved {len(batch_results)} "
+                            f"works from batch", 
+                            err=True
+                        )
+                else:
+                    if _verbose_mode:
+                        typer.echo(
+                            "[DEBUG] No works returned for batch", 
+                            err=True
+                        )
                 
             except Exception as e:
                 if _verbose_mode:
                     typer.echo(
-                        f"[DEBUG] Failed to fetch work {clean_id}: {e}", 
+                        f"[DEBUG] Failed to fetch batch: {e}", 
                         err=True
                     )
+                    # Fall back to individual requests for this batch
+                    typer.echo(
+                        "[DEBUG] Falling back to individual requests for batch", 
+                        err=True
+                    )
+                    
+                    for clean_id in batch_ids:
+                        try:
+                            work = Works()[clean_id]
+                            if include_abstract:
+                                work = _add_abstract_to_work(work)
+                            works.append(work)
+                        except Exception as individual_error:
+                            typer.echo(
+                                f"Warning: Could not retrieve work {clean_id}: "
+                                f"{individual_error}", 
+                                err=True
+                            )
+                            continue
                 else:
                     typer.echo(
-                        f"Warning: Could not retrieve work {clean_id}: {e}", 
+                        f"Warning: Could not retrieve batch of {len(batch_ids)} "
+                        f"works: {e}", 
                         err=True
                     )
                 continue
@@ -1141,6 +1210,108 @@ def _format_summary(item):
             )
     
     return " | ".join(summary_parts)
+
+
+@app.command()
+def show(
+    file_path: Annotated[Optional[str], typer.Argument(
+        help="Path to the JSON file to display (if not provided, reads from stdin)"
+    )] = None,
+    output_format: Annotated[str, typer.Option(
+        "--format", "-f",
+        help="Output format: json, name, table, summary"
+    )] = "table",
+):
+    """
+    Display a JSON file containing OpenAlex data in table format.
+    
+    This command takes a JSON file saved from previous PyAlex queries
+    and displays it in a human-readable format. If no file path is provided,
+    it reads JSON data from stdin.
+    
+    Examples:
+      pyalex show reviews.json
+      pyalex show reviews.json --format summary
+      pyalex show cited_by_reviews.json --format table
+      cat reviews.json | pyalex show --format summary
+      echo '{"display_name": "Test Work", "id": "W123"}' | pyalex show
+    """
+    try:
+        # Read from file or stdin
+        if file_path:
+            # Check if file exists
+            if not os.path.exists(file_path):
+                typer.echo(f"Error: File '{file_path}' not found.", err=True)
+                raise typer.Exit(1)
+            
+            # Read and parse JSON file
+            try:
+                with open(file_path, encoding='utf-8') as f:
+                    data = json.load(f)
+            except json.JSONDecodeError as e:
+                typer.echo(f"Error: Invalid JSON in file '{file_path}': {e}", err=True)
+                raise typer.Exit(1) from e
+            except Exception as e:
+                typer.echo(f"Error reading file '{file_path}': {e}", err=True)
+                raise typer.Exit(1) from e
+        else:
+            # Read from stdin
+            import sys
+            
+            try:
+                stdin_content = sys.stdin.read().strip()
+                
+                if not stdin_content:
+                    typer.echo("Error: No input provided via stdin", err=True)
+                    raise typer.Exit(1)
+                
+                # Parse JSON from stdin
+                data = json.loads(stdin_content)
+                
+            except json.JSONDecodeError as e:
+                typer.echo(f"Error: Invalid JSON from stdin: {e}", err=True)
+                raise typer.Exit(1) from e
+            except Exception as e:
+                typer.echo(f"Error reading from stdin: {e}", err=True)
+                raise typer.Exit(1) from e
+        
+        # Handle different data structures
+        if isinstance(data, dict):
+            # Single entity
+            if _verbose_mode:
+                source = f"file: {file_path}" if file_path else "stdin"
+                typer.echo(
+                    f"[DEBUG] Displaying single entity from {source}", 
+                    err=True
+                )
+            _output_results(data, output_format, single=True)
+        elif isinstance(data, list):
+            # List of entities
+            if _verbose_mode:
+                source = f"file: {file_path}" if file_path else "stdin"
+                typer.echo(
+                    f"[DEBUG] Displaying {len(data)} entities from {source}", 
+                    err=True
+                )
+            if not data:
+                typer.echo("No data found in the input.")
+                return
+            _output_results(data, output_format, single=False)
+        else:
+            source = f"file '{file_path}'" if file_path else "stdin"
+            typer.echo(
+                f"Error: Unexpected data format from {source}. "
+                f"Expected JSON object or array.", 
+                err=True
+            )
+            raise typer.Exit(1) from None
+            
+    except typer.Exit:
+        # Re-raise typer.Exit to maintain proper exit codes
+        raise
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":
