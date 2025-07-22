@@ -20,11 +20,13 @@ from pyalex import Subfields
 from pyalex import Topics
 from pyalex import Works
 from pyalex import config
+from pyalex import invert_abstract
 
 
 # Global verbose state
 _verbose_mode = False
 
+MAX_WIDTH = 100
 
 app = typer.Typer(
     name="pyalex",
@@ -62,6 +64,15 @@ def _print_debug_url(query):
         typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
 
 
+def _add_abstract_to_work(work_dict):
+    """Convert inverted abstract index to readable abstract for a work."""
+    if (isinstance(work_dict, dict) and 
+        'abstract_inverted_index' in work_dict and 
+        work_dict['abstract_inverted_index'] is not None):
+        work_dict['abstract'] = invert_abstract(work_dict['abstract_inverted_index'])
+    return work_dict
+
+
 @app.command()
 def works(
     search: Annotated[Optional[str], typer.Option(
@@ -80,6 +91,22 @@ def works(
         "--year",
         help="Filter by publication year (e.g. '2020' or range '2019:2021')"
     )] = None,
+    work_type: Annotated[Optional[str], typer.Option(
+        "--type",
+        help="Filter by work type (e.g. 'article', 'book', 'dataset')"
+    )] = None,
+    topic_id: Annotated[Optional[str], typer.Option(
+        "--topic-id",
+        help="Filter by primary topic OpenAlex ID"
+    )] = None,
+    subfield_id: Annotated[Optional[str], typer.Option(
+        "--subfield-id",
+        help="Filter by primary topic subfield OpenAlex ID"
+    )] = None,
+    include_abstract: Annotated[bool, typer.Option(
+        "--abstract",
+        help="Include full abstracts in output (when available)"
+    )] = True,
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
@@ -99,6 +126,10 @@ def works(
       pyalex works --search "machine learning"
       pyalex works --author-id "A1234567890" --limit 5
       pyalex works --year "2019:2020" --limit 10
+      pyalex works --type "article" --search "COVID-19"
+      pyalex works --topic-id "T10002" --limit 5
+      pyalex works --subfield-id "SF12345" --limit 5
+      pyalex works --search "AI" --abstract --format summary
       pyalex works W1234567890
     """
     try:
@@ -107,6 +138,9 @@ def works(
             work = Works()[work_id]
             if _verbose_mode:
                 typer.echo(f"[DEBUG] API URL: {Works().url}/{work_id}", err=True)
+            # Convert abstract for single work if requested
+            if include_abstract:
+                work = _add_abstract_to_work(work)
             _output_results(work, output_format, single=True)
         else:
             # Search works
@@ -152,6 +186,15 @@ def works(
                         )
                         raise typer.Exit(1) from None
             
+            if work_type:
+                query = query.filter(type=work_type)
+            
+            if topic_id:
+                query = query.filter(primary_topic={"id": topic_id})
+            
+            if subfield_id:
+                query = query.filter(primary_topic={"subfield": {"id": subfield_id}})
+            
             # Print debug URL before making the request
             _print_debug_url(query)
             
@@ -169,9 +212,123 @@ def works(
             if results is None:
                 typer.echo("No results returned from API", err=True)
                 return
+            
+            # Convert abstracts for all works in results if requested
+            if results and include_abstract:
+                results = [_add_abstract_to_work(work) for work in results]
                 
             _output_results(results, output_format)
             
+    except Exception as e:
+        if _verbose_mode:
+            import traceback
+            typer.echo("[DEBUG] Full traceback:", err=True)
+            traceback.print_exc()
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def works_from_ids(
+    include_abstract: Annotated[bool, typer.Option(
+        "--abstract",
+        help="Include full abstracts in output (when available)"
+    )] = False,
+    output_format: Annotated[str, typer.Option(
+        "--format", "-f",
+        help="Output format: json, title, table, summary"
+    )] = "table",
+):
+    """
+    Retrieve multiple works by their OpenAlex IDs from stdin.
+    
+    This command reads a list of work IDs from stdin (one per line or as a JSON array)
+    and retrieves the full work details for each ID.
+    
+    Examples:
+      echo '["W1234", "W5678"]' | pyalex works-from-ids --format json
+      pyalex works --topic-id T12072 --format json | jq '[.[] | .referenced_works] \\
+        | flatten' | pyalex works-from-ids --abstract --format summary
+      echo -e "W1234567890\\nW9876543210" | pyalex works-from-ids --format table
+    """
+    import sys
+    
+    try:
+        # Read from stdin
+        stdin_content = sys.stdin.read().strip()
+        
+        if not stdin_content:
+            typer.echo("Error: No input provided via stdin", err=True)
+            raise typer.Exit(1)
+        
+        # Try to parse as JSON array first
+        work_ids = []
+        try:
+            import json as json_module
+            parsed = json_module.loads(stdin_content)
+            if isinstance(parsed, list):
+                work_ids = parsed
+            else:
+                typer.echo("Error: JSON input must be an array of work IDs", err=True)
+                raise typer.Exit(1)
+        except json_module.JSONDecodeError:
+            # If not valid JSON, treat as newline-separated IDs
+            work_ids = [
+                line.strip() 
+                for line in stdin_content.split('\n') 
+                if line.strip()
+            ]
+        
+        if not work_ids:
+            typer.echo("Error: No work IDs found in input", err=True)
+            raise typer.Exit(1)
+        
+        if _verbose_mode:
+            typer.echo(f"[DEBUG] Processing {len(work_ids)} work IDs", err=True)
+        
+        # Retrieve each work
+        works = []
+        for work_id in work_ids:
+            # Clean up the work ID (remove URL prefix if present)
+            clean_id = work_id.replace('https://openalex.org/', '')
+            
+            try:
+                if _verbose_mode:
+                    typer.echo(f"[DEBUG] Fetching work: {clean_id}", err=True)
+                
+                work = Works()[clean_id]
+                
+                if _verbose_mode:
+                    typer.echo(f"[DEBUG] API URL: {Works().url}/{clean_id}", err=True)
+                
+                # Convert abstract if requested
+                if include_abstract:
+                    work = _add_abstract_to_work(work)
+                
+                works.append(work)
+                
+            except Exception as e:
+                if _verbose_mode:
+                    typer.echo(
+                        f"[DEBUG] Failed to fetch work {clean_id}: {e}", 
+                        err=True
+                    )
+                else:
+                    typer.echo(
+                        f"Warning: Could not retrieve work {clean_id}: {e}", 
+                        err=True
+                    )
+                continue
+        
+        if not works:
+            typer.echo("Error: No works could be retrieved", err=True)
+            raise typer.Exit(1)
+        
+        if _verbose_mode:
+            typer.echo(f"[DEBUG] Successfully retrieved {len(works)} works", err=True)
+        
+        _output_results(works, output_format)
+        
     except Exception as e:
         if _verbose_mode:
             import traceback
@@ -225,7 +382,7 @@ def authors(
             if search:
                 query = query.search(search)
             if institution_id:
-                query = query.filter(last_known_institution={"id": institution_id})
+                query = query.filter(last_known_institutions={"id": institution_id})
             
             # Print debug URL before making the request
             _print_debug_url(query)
@@ -752,12 +909,12 @@ def _output_table(results, single: bool = False):
     if 'publication_year' in first_result:  # Work
         table = PrettyTable()
         table.field_names = ["Name", "Year", "Journal", "Citations", "ID"]
-        table.max_width = 60
+        table.max_width = MAX_WIDTH
         table.align = "l"
         
         for result in results:
             title = (result.get('display_name') or result.get('title') or 
-                    'Unknown')[:60]
+                    'Unknown')[:MAX_WIDTH]
             year = result.get('publication_year', 'N/A')
             
             journal = 'N/A'
@@ -771,11 +928,13 @@ def _output_table(results, single: bool = False):
             
             table.add_row([title, year, journal, citations, openalex_id])
             
-    elif 'works_count' in first_result and 'last_known_institution' in first_result:
+    elif ('works_count' in first_result and 
+          ('last_known_institutions' in first_result or 
+           'last_known_institution' in first_result)):
         # Author
         table = PrettyTable()
         table.field_names = ["Name", "Works", "Citations", "Institution", "ID"]
-        table.max_width = 60
+        table.max_width = MAX_WIDTH
         table.align = "l"
         
         for result in results:
@@ -784,7 +943,15 @@ def _output_table(results, single: bool = False):
             citations = result.get('cited_by_count', 0)
             
             institution = 'N/A'
-            if result.get('last_known_institution'):
+            # Handle new field (list) and old field (single object) for compatibility
+            if result.get('last_known_institutions'):
+                # New field: last_known_institutions is a list, take the first one
+                institutions = result['last_known_institutions']
+                if institutions and len(institutions) > 0:
+                    inst = institutions[0]
+                    institution = (inst.get('display_name') or 'Unknown')[:30]
+            elif result.get('last_known_institution'):
+                # Fallback for old field for backward compatibility
                 inst = result['last_known_institution']
                 institution = (inst.get('display_name') or 'Unknown')[:30]
             
@@ -795,7 +962,7 @@ def _output_table(results, single: bool = False):
     elif 'country_code' in first_result:  # Institution
         table = PrettyTable()
         table.field_names = ["Name", "Country", "Works", "Citations", "ID"]
-        table.max_width = 60
+        table.max_width = MAX_WIDTH
         table.align = "l"
         
         for result in results:
@@ -810,7 +977,7 @@ def _output_table(results, single: bool = False):
     elif 'issn' in first_result or 'issn_l' in first_result:  # Source/Journal
         table = PrettyTable()
         table.field_names = ["Name", "Type", "ISSN", "Works", "ID"]
-        table.max_width = 60
+        table.max_width = MAX_WIDTH
         table.align = "l"
         
         for result in results:
@@ -827,7 +994,7 @@ def _output_table(results, single: bool = False):
     elif 'hierarchy_level' in first_result:  # Publisher
         table = PrettyTable()
         table.field_names = ["Name", "Level", "Works", "Sources", "ID"]
-        table.max_width = 60
+        table.max_width = MAX_WIDTH
         table.align = "l"
         
         for result in results:
@@ -842,7 +1009,7 @@ def _output_table(results, single: bool = False):
     elif 'works_count' in first_result:  # Topic, Domain, Field, Subfield, or Funder
         table = PrettyTable()
         table.field_names = ["Name", "Works", "Citations", "ID"]
-        table.max_width = 60
+        table.max_width = MAX_WIDTH
         table.align = "l"
         
         for result in results:
@@ -856,12 +1023,12 @@ def _output_table(results, single: bool = False):
     else:  # Generic fallback
         table = PrettyTable()
         table.field_names = ["Name", "ID"]
-        table.max_width = 60
+        table.max_width = MAX_WIDTH
         table.align = "l"
         
         for result in results:
             name = (result.get('display_name') or result.get('title') or 
-                   'Unknown')[:60]
+                   'Unknown')[:MAX_WIDTH]
             openalex_id = result.get('id', '').split('/')[-1]
             
             table.add_row([name, openalex_id])
@@ -890,15 +1057,34 @@ def _format_summary(item):
                 summary_parts.append(f"Journal: {source['display_name']}")
         if 'cited_by_count' in item:
             summary_parts.append(f"Citations: {item['cited_by_count']}")
+        
+        # Add abstract if available
+        if 'abstract' in item and item['abstract']:
+            abstract = item['abstract']
+            abstract_preview = (abstract[:200] + "..." 
+                              if len(abstract) > 200 else abstract)
+            summary_parts.append(f"Abstract: {abstract_preview}")
     
     elif 'works_count' in item:  # Author or Topic
         summary_parts.append(f"Works: {item['works_count']}")
         if 'cited_by_count' in item:
             summary_parts.append(f"Citations: {item['cited_by_count']}")
-        if 'last_known_institution' in item and item['last_known_institution']:
-            # Author
+        
+        # Handle new field (list) and old field (single object) for compatibility
+        if 'last_known_institutions' in item and item['last_known_institutions']:
+            # New field: last_known_institutions is a list, take the first one
+            institutions = item['last_known_institutions']
+            if institutions and len(institutions) > 0:
+                inst = institutions[0]
+                summary_parts.append(
+                    f"Institution: {inst.get('display_name', 'Unknown')}"
+                )
+        elif 'last_known_institution' in item and item['last_known_institution']:
+            # Fallback for old field for backward compatibility
             inst = item['last_known_institution']
-            summary_parts.append(f"Institution: {inst.get('display_name', 'Unknown')}")
+            summary_parts.append(
+                f"Institution: {inst.get('display_name', 'Unknown')}"
+            )
     
     return " | ".join(summary_parts)
 
