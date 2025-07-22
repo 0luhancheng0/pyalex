@@ -158,8 +158,14 @@ def _flatten_kv(d, prefix=None, logical="+"):
 
         return ",".join(t)
     elif isinstance(d, list):
-        list_str = logical.join([f"{_quote_oa_value(i)}" for i in d])
-        return f"{prefix}:{list_str}"
+        if logical == "+":
+            # For filter conditions on the same field, each should be separate
+            # e.g., publication_year:>2018,publication_year:<2021
+            return ",".join([f"{prefix}:{_quote_oa_value(i)}" for i in d])
+        else:
+            # For OR conditions, join with the logical operator
+            list_str = logical.join([f"{_quote_oa_value(i)}" for i in d])
+            return f"{prefix}:{list_str}"
     else:
         return f"{prefix}:{_quote_oa_value(d)}"
 
@@ -537,7 +543,55 @@ class BaseOpenAlex:
         else:
             raise ValueError("Unknown response format")
 
-    def get(self, return_meta=False, page=None, per_page=None, cursor=None):
+    def get(self, return_meta=False, page=None, per_page=None, cursor=None, limit=None):
+        # Handle the new limit parameter
+        if limit is not None:
+            if not isinstance(limit, int) or limit < 1:
+                raise ValueError("limit should be a positive integer")
+            
+            # If limit is <= 200, use regular pagination
+            if limit <= 200:
+                per_page = limit
+            else:
+                # Use cursor pagination for larger limits
+                # Collect all results using the existing paginate method
+                results = []
+                paginator = self.paginate(
+                    method="cursor", cursor=cursor or "*", per_page=200, n_max=limit
+                )
+                for batch in paginator:
+                    results.extend(batch)
+                    if len(results) >= limit:
+                        break
+                
+                # Trim to exact limit
+                results = results[:limit]
+                
+                # Create a result object similar to what _get_from_url returns
+                if results:
+                    # Use the meta from the last batch but update count
+                    final_result = OpenAlexResponseList(
+                        [dict(r) for r in results], 
+                        {"count": len(results)}, 
+                        self.resource_class
+                    )
+                else:
+                    # Return empty result with proper structure
+                    final_result = OpenAlexResponseList(
+                        [], {"count": 0}, self.resource_class
+                    )
+                
+                if return_meta:
+                    warnings.warn(
+                        "return_meta is deprecated, call .meta on the result",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    return final_result, final_result.meta
+                else:
+                    return final_result
+
+        # Original logic for per_page validation and execution
         if per_page is not None and (
             not isinstance(per_page, int) or (per_page < 1 or per_page > 200)
         ):
