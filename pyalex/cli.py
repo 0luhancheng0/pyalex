@@ -5,7 +5,8 @@ PyAlex CLI - Command line interface for the OpenAlex database
 import datetime
 import json
 import os
-from pathlib import Path
+import sys
+import traceback
 from typing import Optional
 
 import typer
@@ -68,6 +69,18 @@ def _print_debug_url(query):
         typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
 
 
+def _print_debug_results(results):
+    """Print debug information about results when verbose mode is enabled."""
+    if _verbose_mode and results is not None:
+        typer.echo(f"[DEBUG] Results type: {type(results)}", err=True)
+        if hasattr(results, '__len__'):
+            typer.echo(f"[DEBUG] Results length: {len(results)}", err=True)
+        if hasattr(results, 'meta') and results.meta:
+            count = results.meta.get('count')
+            if count is not None:
+                typer.echo(f"[DEBUG] Total count from meta: {count}", err=True)
+
+
 def _add_abstract_to_work(work_dict):
     """Convert inverted abstract index to readable abstract for a work."""
     if (isinstance(work_dict, dict) and 
@@ -112,6 +125,15 @@ def works(
         "--subfield-id",
         help="Filter by primary topic subfield OpenAlex ID"
     )] = None,
+    funder_id: Annotated[Optional[str], typer.Option(
+        "--funder-id",
+        help="Filter by funder OpenAlex ID"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'oa_status', 'publication_year', "
+             "'type', 'is_retracted', 'cited_by_count')"
+    )] = None,
     include_abstract: Annotated[bool, typer.Option(
         "--abstract",
         help="Include full abstracts in output (when available)"
@@ -140,7 +162,10 @@ def works(
       pyalex works --type "article" --search "COVID-19"
       pyalex works --topic-id "T10002" --limit 5
       pyalex works --subfield-id "SF12345" --limit 5
+      pyalex works --funder-id "F4320332161" --limit 5
       pyalex works --search "AI" --abstract --format summary
+      pyalex works --group-by "oa_status" --format table
+      pyalex works --group-by "publication_year" --search "COVID-19"
       pyalex works W1234567890
     """
     try:
@@ -243,15 +268,34 @@ def works(
             if subfield_id:
                 query = query.filter(primary_topic={"subfield": {"id": subfield_id}})
             
+            if funder_id:
+                query = query.filter(grants={"funder": funder_id})
+
+            # Handle group_by parameter
+            if group_by:
+                query = query.group_by(group_by)
+                
+                # Print debug URL before making the request
+                _print_debug_url(query)
+                
+                try:
+                    # For group-by operations, retrieve all groups by default
+                    results = query.get(limit=100000)  # High limit to get all groups
+                    _print_debug_results(results)
+                except Exception as api_error:
+                    typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
+                    raise
+                
+                # Output grouped results
+                _output_grouped_results(results, output_format)
+                return
+            
             # Print debug URL before making the request
             _print_debug_url(query)
             
             try:
                 results = query.get(limit=limit)
-                if _verbose_mode:
-                    typer.echo(f"[DEBUG] Results type: {type(results)}", err=True)
-                    if hasattr(results, '__len__'):
-                        typer.echo(f"[DEBUG] Results length: {len(results)}", err=True)
+                _print_debug_results(results)
             except Exception as api_error:
                 typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
                 raise
@@ -277,29 +321,289 @@ def works(
 
 
 @app.command()
-def works_from_ids(
+def from_ids(
     include_abstract: Annotated[bool, typer.Option(
         "--abstract",
-        help="Include full abstracts in output (when available)"
+        help="Include full abstracts in output for works (when available)"
     )] = False,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
-        help="Output format: json, title, table, summary"
+        help="Output format: json, name/title, table, summary"
     )] = "table",
 ):
     """
-    Retrieve multiple works by their OpenAlex IDs from stdin.
+    Retrieve multiple entities by their OpenAlex IDs from stdin.
     
-    This command reads a list of work IDs from stdin (one per line or as a JSON array)
-    and retrieves the full work details for each ID.
+    This command automatically detects the entity type from the ID prefix and retrieves
+    the appropriate entities. It can handle mixed entity types in the same input.
+    
+    Supported ID prefixes:
+    - W: Works
+    - A: Authors  
+    - I: Institutions
+    - S: Sources (journals/venues)
+    - T: Topics
+    - P: Publishers
+    - F: Funders
+    - D: Domains
+    - SF: Subfields
     
     Examples:
-      echo '["W1234", "W5678"]' | pyalex works-from-ids --format json
-      pyalex works --topic-id T12072 --format json | jq '[.[] | .referenced_works] \\
-        | flatten' | pyalex works-from-ids --abstract --format summary
-      echo -e "W1234567890\\nW9876543210" | pyalex works-from-ids --format table
+      echo '["W1234", "A5678", "I9012"]' | pyalex from-ids --format json
+      echo -e "A1234567890\\nW9876543210" | pyalex from-ids --format table
+      echo '["W1234"]' | pyalex from-ids --abstract --format summary
     """
-    import sys
+    try:
+        # Read from stdin
+        stdin_content = sys.stdin.read().strip()
+        
+        if not stdin_content:
+            typer.echo("Error: No input provided via stdin", err=True)
+            raise typer.Exit(1)
+        
+        # Try to parse as JSON array first
+        entity_ids = []
+        try:
+            parsed = json.loads(stdin_content)
+            if isinstance(parsed, list):
+                entity_ids = parsed
+            else:
+                typer.echo(
+                    "Error: JSON input must be an array of entity IDs",
+                    err=True
+                )
+                raise typer.Exit(1)
+        except json.JSONDecodeError:
+            # If not valid JSON, treat as newline-separated IDs
+            entity_ids = [
+                line.strip() 
+                for line in stdin_content.split('\n') 
+                if line.strip()
+            ]
+        
+        if not entity_ids:
+            typer.echo("Error: No entity IDs found in input", err=True)
+            raise typer.Exit(1)
+        
+        # Clean up all entity IDs (remove URL prefix if present)
+        cleaned_entity_ids = []
+        for entity_id in entity_ids:
+            if isinstance(entity_id, str):
+                # Remove URL prefix if present
+                clean_id = entity_id.replace('https://openalex.org/', '').strip()
+                # Also handle cases where there might be extra slashes or whitespace
+                clean_id = clean_id.strip('/')
+                # Remove quotes that might be added by jq or other tools
+                clean_id = clean_id.strip('"\'')
+                if clean_id:  # Only add non-empty IDs
+                    cleaned_entity_ids.append(clean_id)
+        
+        if not cleaned_entity_ids:
+            typer.echo(
+                "Error: No valid entity IDs found after cleaning input",
+                err=True
+            )
+            raise typer.Exit(1)
+        
+        if _verbose_mode:
+            typer.echo(
+                f"[DEBUG] Processing {len(cleaned_entity_ids)} entity IDs",
+                err=True
+            )
+            typer.echo(f"[DEBUG] First few IDs: {cleaned_entity_ids[:3]}", err=True)
+        
+        # Group IDs by entity type
+        entity_groups = {}
+        for entity_id in cleaned_entity_ids:
+            entity_class, entity_name, entity_plural = _detect_entity_type(entity_id)
+            
+            if entity_class not in entity_groups:
+                entity_groups[entity_class] = {
+                    'ids': [],
+                    'name': entity_name,
+                    'plural': entity_plural
+                }
+            entity_groups[entity_class]['ids'].append(entity_id)
+        
+        if _verbose_mode:
+            for _entity_class, group in entity_groups.items():
+                typer.echo(
+                    f"[DEBUG] Found {len(group['ids'])} {group['plural']}: "
+                    f"{group['ids'][:3]}{'...' if len(group['ids']) > 3 else ''}",
+                    err=True
+                )
+        
+        # Retrieve entities for each type
+        all_entities = []
+        for entity_class, group in entity_groups.items():
+            entity_name = group['name']
+            entity_plural = group['plural']
+            entity_ids_for_type = group['ids']
+            
+            # Determine special processing based on entity type
+            special_processing = None
+            if entity_class == Works and include_abstract:
+                special_processing = _add_abstract_to_work
+            
+            # Retrieve entities in batches of up to 50 (OpenAlex limit for OR filters)
+            batch_size = 50
+            
+            for i in range(0, len(entity_ids_for_type), batch_size):
+                batch_ids = entity_ids_for_type[i:i + batch_size]
+                
+                if _verbose_mode:
+                    typer.echo(
+                        f"[DEBUG] Fetching {entity_plural} batch "
+                        f"{i//batch_size + 1}: {len(batch_ids)} entities", 
+                        err=True
+                    )
+                
+                try:
+                    # Create OR filter for batch of entity IDs
+                    # Format: "A123|A456|A789"
+                    id_filter = "|".join(batch_ids)
+                    
+                    # Query entities using OR filter
+                    # Keywords use 'id' field instead of 'openalex_id'
+                    if entity_class == Keywords:
+                        query = entity_class().filter(id=id_filter)
+                    else:
+                        query = entity_class().filter(openalex_id=id_filter)
+                    
+                    if _verbose_mode:
+                        typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
+                    
+                    # Get all results for this batch (no limit since we want all 
+                    # requested entities)
+                    batch_results = query.get()
+                    
+                    if batch_results:
+                        # Apply special processing if provided
+                        if special_processing:
+                            batch_results = [
+                                special_processing(entity) for entity in batch_results
+                            ]
+                        
+                        all_entities.extend(batch_results)
+                        
+                        if _verbose_mode:
+                            typer.echo(
+                                f"[DEBUG] Successfully retrieved {len(batch_results)} "
+                                f"{entity_plural} from batch", 
+                                err=True
+                            )
+                    else:
+                        if _verbose_mode:
+                            typer.echo(
+                                f"[DEBUG] No {entity_plural} returned for batch", 
+                                err=True
+                            )
+                    
+                except Exception as e:
+                    if _verbose_mode:
+                        typer.echo(
+                            f"[DEBUG] Failed to fetch batch: {e}", 
+                            err=True
+                        )
+                        # Fall back to individual requests for this batch
+                        typer.echo(
+                            "[DEBUG] Falling back to individual requests for batch", 
+                            err=True
+                        )
+                        
+                        for clean_id in batch_ids:
+                            try:
+                                entity = entity_class()[clean_id]
+                                if special_processing:
+                                    entity = special_processing(entity)
+                                all_entities.append(entity)
+                            except Exception as individual_error:
+                                typer.echo(
+                                    f"Warning: Could not retrieve {entity_name} "
+                                    f"{clean_id}: {individual_error}", 
+                                    err=True
+                                )
+                                continue
+                    else:
+                        typer.echo(
+                            f"Warning: Could not retrieve batch of {len(batch_ids)} "
+                            f"{entity_plural}: {e}", 
+                            err=True
+                        )
+                    continue
+        
+        if not all_entities:
+            typer.echo("Error: No entities could be retrieved", err=True)
+            raise typer.Exit(1)
+        
+        if _verbose_mode:
+            typer.echo(
+                f"[DEBUG] Successfully retrieved {len(all_entities)} total entities",
+                err=True
+            )
+        
+        _output_results(all_entities, output_format)
+        
+    except Exception as e:
+        if _verbose_mode:
+            typer.echo("[DEBUG] Full traceback:", err=True)
+            traceback.print_exc()
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+def _detect_entity_type(entity_id):
+    """
+    Detect the entity type from an OpenAlex ID prefix.
+    
+    Returns:
+        tuple: (entity_class, entity_name, entity_plural)
+        
+    Raises:
+        ValueError: If entity ID format is not recognized
+    """
+    # Mapping of ID prefixes to entity classes and names
+    prefix_mapping = {
+        'W': (Works, "work", "works"),
+        'A': (Authors, "author", "authors"),
+        'I': (Institutions, "institution", "institutions"),
+        'S': (Sources, "source", "sources"),
+        'T': (Topics, "topic", "topics"),
+        'P': (Publishers, "publisher", "publishers"),
+        'F': (Funders, "funder", "funders"),
+        'D': (Domains, "domain", "domains"),
+        'SF': (Subfields, "subfield", "subfields"),
+    }
+    
+    # Check for subfield first (SF prefix)
+    if entity_id.startswith('SF') and len(entity_id) > 2 and entity_id[2:].isdigit():
+        return prefix_mapping['SF']
+    
+    # Check single letter prefixes - only if ID looks like standard OpenAlex format
+    # Standard format: letter followed by numbers (e.g., W123456789, A5083138872)
+    if len(entity_id) > 1 and entity_id[0].upper() in prefix_mapping:
+        # Verify it follows the pattern: letter + digits
+        if entity_id[1:].isdigit():
+            prefix = entity_id[0].upper()
+            return prefix_mapping[prefix]
+    
+    # Raise error for unrecognized formats
+    raise ValueError(f"Unrecognized entity ID format: {entity_id}. "
+                    f"Supported prefixes: {', '.join(prefix_mapping.keys())}")
+
+
+def _entities_from_ids(
+    entity_class, entity_name, entity_plural, special_processing=None
+):
+    """
+    Generic function to retrieve multiple entities by their OpenAlex IDs from stdin.
+    
+    Args:
+        entity_class: The PyAlex class (e.g., Authors, Works, etc.)
+        entity_name: Singular name for display (e.g., "author", "work")
+        entity_plural: Plural name for display (e.g., "authors", "works")
+        special_processing: Optional function to apply special processing to each entity
+    """
     
     try:
         # Read from stdin
@@ -310,95 +614,108 @@ def works_from_ids(
             raise typer.Exit(1)
         
         # Try to parse as JSON array first
-        work_ids = []
+        entity_ids = []
         try:
-            import json as json_module
-            parsed = json_module.loads(stdin_content)
+            parsed = json.loads(stdin_content)
             if isinstance(parsed, list):
-                work_ids = parsed
+                entity_ids = parsed
             else:
-                typer.echo("Error: JSON input must be an array of work IDs", err=True)
+                typer.echo(
+                    f"Error: JSON input must be an array of {entity_name} IDs",
+                    err=True
+                )
                 raise typer.Exit(1)
-        except json_module.JSONDecodeError:
+        except json.JSONDecodeError:
             # If not valid JSON, treat as newline-separated IDs
-            work_ids = [
+            entity_ids = [
                 line.strip() 
                 for line in stdin_content.split('\n') 
                 if line.strip()
             ]
         
-        if not work_ids:
-            typer.echo("Error: No work IDs found in input", err=True)
+        if not entity_ids:
+            typer.echo(f"Error: No {entity_name} IDs found in input", err=True)
             raise typer.Exit(1)
         
-        # Clean up all work IDs (remove URL prefix if present)
-        cleaned_work_ids = []
-        for work_id in work_ids:
-            if isinstance(work_id, str):
+        # Clean up all entity IDs (remove URL prefix if present)
+        cleaned_entity_ids = []
+        for entity_id in entity_ids:
+            if isinstance(entity_id, str):
                 # Remove URL prefix if present
-                clean_id = work_id.replace('https://openalex.org/', '').strip()
+                clean_id = entity_id.replace('https://openalex.org/', '').strip()
                 # Also handle cases where there might be extra slashes or whitespace
                 clean_id = clean_id.strip('/')
                 # Remove quotes that might be added by jq or other tools
                 clean_id = clean_id.strip('"\'')
                 if clean_id:  # Only add non-empty IDs
-                    cleaned_work_ids.append(clean_id)
+                    cleaned_entity_ids.append(clean_id)
         
-        if not cleaned_work_ids:
-            typer.echo("Error: No valid work IDs found after cleaning input", err=True)
+        if not cleaned_entity_ids:
+            typer.echo(
+                f"Error: No valid {entity_name} IDs found after cleaning input",
+                err=True
+            )
             raise typer.Exit(1)
         
         if _verbose_mode:
-            typer.echo(f"[DEBUG] Processing {len(cleaned_work_ids)} work IDs", err=True)
-            typer.echo(f"[DEBUG] First few IDs: {cleaned_work_ids[:3]}", err=True)
+            typer.echo(
+                f"[DEBUG] Processing {len(cleaned_entity_ids)} {entity_name} IDs",
+                err=True
+            )
+            typer.echo(f"[DEBUG] First few IDs: {cleaned_entity_ids[:3]}", err=True)
         
-        # Retrieve works in batches of up to 50 (OpenAlex limit for OR filters)
-        works = []
+        # Retrieve entities in batches of up to 50 (OpenAlex limit for OR filters)
+        entities = []
         batch_size = 50
         
-        for i in range(0, len(cleaned_work_ids), batch_size):
-            batch_ids = cleaned_work_ids[i:i + batch_size]
+        for i in range(0, len(cleaned_entity_ids), batch_size):
+            batch_ids = cleaned_entity_ids[i:i + batch_size]
             
             if _verbose_mode:
                 typer.echo(
                     f"[DEBUG] Fetching batch {i//batch_size + 1}: "
-                    f"{len(batch_ids)} works", 
+                    f"{len(batch_ids)} {entity_plural}", 
                     err=True
                 )
             
             try:
-                # Create OR filter for batch of work IDs
-                # Format: "W123|W456|W789"
+                # Create OR filter for batch of entity IDs
+                # Format: "A123|A456|A789"
                 id_filter = "|".join(batch_ids)
                 
-                # Query works using OR filter
-                query = Works().filter(openalex_id=id_filter)
+                # Query entities using OR filter
+                # Keywords use 'id' field instead of 'openalex_id'
+                if entity_class == Keywords:
+                    query = entity_class().filter(id=id_filter)
+                else:
+                    query = entity_class().filter(openalex_id=id_filter)
                 
                 if _verbose_mode:
                     typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
                 
-                # Get all results for this batch (no limit since we know count)
-                batch_results = query.get(limit=len(batch_ids))
+                # Get all results for this batch (no limit since we want all 
+                # requested entities)
+                batch_results = query.get()
                 
                 if batch_results:
-                    # Convert abstracts if requested
-                    if include_abstract:
+                    # Apply special processing if provided
+                    if special_processing:
                         batch_results = [
-                            _add_abstract_to_work(work) for work in batch_results
+                            special_processing(entity) for entity in batch_results
                         ]
                     
-                    works.extend(batch_results)
+                    entities.extend(batch_results)
                     
                     if _verbose_mode:
                         typer.echo(
                             f"[DEBUG] Successfully retrieved {len(batch_results)} "
-                            f"works from batch", 
+                            f"{entity_plural} from batch", 
                             err=True
                         )
                 else:
                     if _verbose_mode:
                         typer.echo(
-                            "[DEBUG] No works returned for batch", 
+                            f"[DEBUG] No {entity_plural} returned for batch", 
                             err=True
                         )
                 
@@ -416,37 +733,39 @@ def works_from_ids(
                     
                     for clean_id in batch_ids:
                         try:
-                            work = Works()[clean_id]
-                            if include_abstract:
-                                work = _add_abstract_to_work(work)
-                            works.append(work)
+                            entity = entity_class()[clean_id]
+                            if special_processing:
+                                entity = special_processing(entity)
+                            entities.append(entity)
                         except Exception as individual_error:
                             typer.echo(
-                                f"Warning: Could not retrieve work {clean_id}: "
-                                f"{individual_error}", 
+                                f"Warning: Could not retrieve {entity_name} "
+                                f"{clean_id}: {individual_error}", 
                                 err=True
                             )
                             continue
                 else:
                     typer.echo(
                         f"Warning: Could not retrieve batch of {len(batch_ids)} "
-                        f"works: {e}", 
+                        f"{entity_plural}: {e}", 
                         err=True
                     )
                 continue
         
-        if not works:
-            typer.echo("Error: No works could be retrieved", err=True)
+        if not entities:
+            typer.echo(f"Error: No {entity_plural} could be retrieved", err=True)
             raise typer.Exit(1)
         
         if _verbose_mode:
-            typer.echo(f"[DEBUG] Successfully retrieved {len(works)} works", err=True)
+            typer.echo(
+                f"[DEBUG] Successfully retrieved {len(entities)} {entity_plural}",
+                err=True
+            )
         
-        _output_results(works, output_format)
+        return entities
         
     except Exception as e:
         if _verbose_mode:
-            import traceback
             typer.echo("[DEBUG] Full traceback:", err=True)
             traceback.print_exc()
         typer.echo(f"Error: {e}", err=True)
@@ -462,6 +781,11 @@ def authors(
     institution_id: Annotated[Optional[str], typer.Option(
         "--institution-id",
         help="Filter by institution OpenAlex ID"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'cited_by_count', 'has_orcid', "
+             "'works_count')"
     )] = None,
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
@@ -481,6 +805,8 @@ def authors(
     Examples:
       pyalex authors --search "John Smith"
       pyalex authors --institution-id "I1234567890" --limit 5
+      pyalex authors --group-by "cited_by_count" --format summary
+      pyalex authors --group-by "has_orcid" --format table
       pyalex authors A1234567890
     """
     try:
@@ -499,9 +825,35 @@ def authors(
             if institution_id:
                 query = query.filter(last_known_institutions={"id": institution_id})
             
+            # Handle group_by parameter
+            if group_by:
+                query = query.group_by(group_by)
+                
+                # Print debug URL before making the request
+                _print_debug_url(query)
+                
+                try:
+                    # For group-by operations, retrieve all groups by default
+                    results = query.get(limit=100000)  # High limit to get all groups
+                    if _verbose_mode:
+                        typer.echo(f"[DEBUG] Results type: {type(results)}", err=True)
+                        if hasattr(results, '__len__'):
+                            typer.echo(
+                                f"[DEBUG] Results length: {len(results)}", 
+                                err=True
+                            )
+                except Exception as api_error:
+                    typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
+                    raise
+                
+                # Output grouped results
+                _output_grouped_results(results, output_format)
+                return
+            
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -572,6 +924,7 @@ def topics(
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -584,6 +937,11 @@ def sources(
     search: Annotated[Optional[str], typer.Option(
         "--search", "-s",
         help="Search term for sources"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'type', 'is_oa', 'country_code', "
+             "'works_count', 'cited_by_count')"
     )] = None,
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
@@ -603,6 +961,8 @@ def sources(
     Examples:
       pyalex sources --search "Nature"
       pyalex sources --limit 5
+      pyalex sources --group-by "type" --format table
+      pyalex sources --group-by "is_oa" --search "machine learning"
       pyalex sources S1234567890
     """
     try:
@@ -619,9 +979,28 @@ def sources(
             if search:
                 query = query.search(search)
             
+            # Handle group_by parameter
+            if group_by:
+                query = query.group_by(group_by)
+                
+                # Print debug URL before making the request
+                _print_debug_url(query)
+                
+                # For group-by operations, retrieve all groups by default
+                if limit == 10:  # Default limit, get all groups
+                    results = query.get()
+                else:
+                    results = query.get(limit=limit)
+                
+                _print_debug_results(results)
+                # Output grouped results
+                _output_grouped_results(results, output_format)
+                return
+            
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -638,6 +1017,11 @@ def institutions(
     country_code: Annotated[Optional[str], typer.Option(
         "--country",
         help="Filter by country code (e.g. US, UK, CA)"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'country_code', 'continent', "
+             "'type', 'cited_by_count', 'works_count')"
     )] = None,
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
@@ -657,6 +1041,8 @@ def institutions(
     Examples:
       pyalex institutions --search "Harvard"
       pyalex institutions --country US --limit 5
+      pyalex institutions --group-by "country_code"
+      pyalex institutions --group-by "type" --format summary
       pyalex institutions I1234567890
     """
     try:
@@ -678,9 +1064,29 @@ def institutions(
             if country_code:
                 query = query.filter(country_code=country_code)
             
+            # Handle group_by parameter
+            if group_by:
+                query = query.group_by(group_by)
+                
+                # Print debug URL before making the request
+                _print_debug_url(query)
+                
+                try:
+                    # For group-by operations, retrieve all groups by default
+                    results = query.get(limit=100000)  # High limit to get all groups
+                    _print_debug_results(results)
+                except Exception as api_error:
+                    typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
+                    raise
+                
+                # Output grouped results
+                _output_grouped_results(results, output_format)
+                return
+            
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -693,6 +1099,11 @@ def publishers(
     search: Annotated[Optional[str], typer.Option(
         "--search", "-s",
         help="Search term for publishers"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'country_codes', 'hierarchy_level', "
+             "'works_count', 'cited_by_count')"
     )] = None,
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
@@ -712,6 +1123,8 @@ def publishers(
     Examples:
       pyalex publishers --search "Elsevier"
       pyalex publishers --limit 5
+      pyalex publishers --group-by "country_codes" --format table
+      pyalex publishers --group-by "hierarchy_level" --search "nature"
       pyalex publishers P1234567890
     """
     try:
@@ -731,9 +1144,28 @@ def publishers(
             if search:
                 query = query.search(search)
             
+            # Handle group_by parameter
+            if group_by:
+                query = query.group_by(group_by)
+                
+                # Print debug URL before making the request
+                _print_debug_url(query)
+                
+                # For group-by operations, retrieve all groups by default
+                if limit == 10:  # Default limit, get all groups
+                    results = query.get()
+                else:
+                    results = query.get(limit=limit)
+                
+                _print_debug_results(results)
+                # Output grouped results
+                _output_grouped_results(results, output_format)
+                return
+            
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -746,6 +1178,11 @@ def funders(
     search: Annotated[Optional[str], typer.Option(
         "--search", "-s",
         help="Search term for funders"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'country_code', 'grants_count', "
+             "'works_count', 'cited_by_count')"
     )] = None,
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
@@ -765,6 +1202,8 @@ def funders(
     Examples:
       pyalex funders --search "NSF"
       pyalex funders --limit 5
+      pyalex funders --group-by "country_code" --format table
+      pyalex funders --group-by "grants_count" --search "national"
       pyalex funders F1234567890
     """
     try:
@@ -784,9 +1223,28 @@ def funders(
             if search:
                 query = query.search(search)
             
+            # Handle group_by parameter
+            if group_by:
+                query = query.group_by(group_by)
+                
+                # Print debug URL before making the request
+                _print_debug_url(query)
+                
+                # For group-by operations, retrieve all groups by default
+                if limit == 10:  # Default limit, get all groups
+                    results = query.get()
+                else:
+                    results = query.get(limit=limit)
+                
+                _print_debug_results(results)
+                # Output grouped results
+                _output_grouped_results(results, output_format)
+                return
+            
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -840,6 +1298,7 @@ def domains(
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -899,6 +1358,7 @@ def fields(
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -958,6 +1418,7 @@ def subfields(
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -1011,6 +1472,7 @@ def keywords(
             # Print debug URL before making the request
             _print_debug_url(query)
             results = query.get(limit=limit)
+            _print_debug_results(results)
             _output_results(results, output_format)
             
     except Exception as e:
@@ -1210,6 +1672,61 @@ def _output_table(results, single: bool = False):
             table.add_row([name, openalex_id])
     
     typer.echo(table)
+
+
+def _output_grouped_results(results, output_format: str):
+    """Output grouped results in the specified format."""
+    if results is None:
+        typer.echo("No grouped results found.")
+        return
+    
+    # When group-by is used, the results list itself contains the grouped data
+    grouped_data = results
+    
+    if not grouped_data:
+        typer.echo("No grouped results found.")
+        return
+    
+    if output_format == "json":
+        # Output the raw grouped data as JSON
+        typer.echo(json.dumps([dict(item) for item in grouped_data], indent=2))
+    elif output_format == "table":
+        # Create a table for grouped results
+        table = PrettyTable()
+        table.field_names = ["Key", "Display Name", "Count"]
+        table.max_width = MAX_WIDTH
+        table.align = "l"
+        
+        for group in grouped_data:
+            key = group.get('key', 'Unknown')
+            display_name = group.get('key_display_name', key)
+            count = group.get('count', 0)
+            
+            table.add_row([key, display_name, f"{count:,}"])
+        
+        typer.echo(table)
+    elif output_format == "summary":
+        # Output summary format
+        total_count = sum(group.get('count', 0) for group in grouped_data)
+        typer.echo(f"Total groups: {len(grouped_data)}")
+        typer.echo(f"Total items: {total_count:,}")
+        typer.echo()
+        
+        for i, group in enumerate(grouped_data, 1):
+            key = group.get('key', 'Unknown')
+            display_name = group.get('key_display_name', key)
+            count = group.get('count', 0)
+            percentage = (count / total_count * 100) if total_count > 0 else 0
+            
+            typer.echo(f"[{i}] {display_name}: {count:,} ({percentage:.1f}%)")
+    elif output_format in ["title", "name"]:
+        # Just output the group names
+        for group in grouped_data:
+            display_name = group.get('key_display_name') or group.get('key', 'Unknown')
+            typer.echo(display_name)
+    else:
+        typer.echo(f"Unknown output format: {output_format}", err=True)
+        raise typer.Exit(1) from None
 
 
 def _format_summary(item):
