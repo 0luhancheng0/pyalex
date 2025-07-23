@@ -26,10 +26,13 @@ from pyalex import Topics
 from pyalex import Works
 from pyalex import config
 from pyalex import invert_abstract
+from pyalex.api import set_auto_approve
+from pyalex.api import set_silent_mode
 
 
 # Global verbose state
 _verbose_mode = False
+_auto_approve = False
 
 MAX_WIDTH = 100
 
@@ -48,14 +51,22 @@ def main(
         "--verbose", "-v",
         help="Enable verbose output including API URLs for debugging"
     )] = False,
+    auto_approve: Annotated[bool, typer.Option(
+        "--yes", "-y",
+        help="Automatically approve large queries without prompting"
+    )] = False,
 ):
     """
     PyAlex CLI - Access the OpenAlex database from the command line.
     
     OpenAlex doesn't require authentication for most requests.
     """
-    global _verbose_mode
+    global _verbose_mode, _auto_approve
     _verbose_mode = verbose
+    _auto_approve = auto_approve
+    
+    # Set the auto-approve flag in the API
+    set_auto_approve(auto_approve)
     
     if verbose:
         typer.echo(f"Email: {config.email}")
@@ -141,7 +152,7 @@ def works(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, title, table, summary"
@@ -169,6 +180,9 @@ def works(
       pyalex works W1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if work_id:
             # Get specific work
             work = Works()[work_id]
@@ -354,6 +368,9 @@ def from_ids(
       echo '["W1234"]' | pyalex from-ids --abstract --format summary
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         # Read from stdin
         stdin_content = sys.stdin.read().strip()
         
@@ -592,185 +609,6 @@ def _detect_entity_type(entity_id):
                     f"Supported prefixes: {', '.join(prefix_mapping.keys())}")
 
 
-def _entities_from_ids(
-    entity_class, entity_name, entity_plural, special_processing=None
-):
-    """
-    Generic function to retrieve multiple entities by their OpenAlex IDs from stdin.
-    
-    Args:
-        entity_class: The PyAlex class (e.g., Authors, Works, etc.)
-        entity_name: Singular name for display (e.g., "author", "work")
-        entity_plural: Plural name for display (e.g., "authors", "works")
-        special_processing: Optional function to apply special processing to each entity
-    """
-    
-    try:
-        # Read from stdin
-        stdin_content = sys.stdin.read().strip()
-        
-        if not stdin_content:
-            typer.echo("Error: No input provided via stdin", err=True)
-            raise typer.Exit(1)
-        
-        # Try to parse as JSON array first
-        entity_ids = []
-        try:
-            parsed = json.loads(stdin_content)
-            if isinstance(parsed, list):
-                entity_ids = parsed
-            else:
-                typer.echo(
-                    f"Error: JSON input must be an array of {entity_name} IDs",
-                    err=True
-                )
-                raise typer.Exit(1)
-        except json.JSONDecodeError:
-            # If not valid JSON, treat as newline-separated IDs
-            entity_ids = [
-                line.strip() 
-                for line in stdin_content.split('\n') 
-                if line.strip()
-            ]
-        
-        if not entity_ids:
-            typer.echo(f"Error: No {entity_name} IDs found in input", err=True)
-            raise typer.Exit(1)
-        
-        # Clean up all entity IDs (remove URL prefix if present)
-        cleaned_entity_ids = []
-        for entity_id in entity_ids:
-            if isinstance(entity_id, str):
-                # Remove URL prefix if present
-                clean_id = entity_id.replace('https://openalex.org/', '').strip()
-                # Also handle cases where there might be extra slashes or whitespace
-                clean_id = clean_id.strip('/')
-                # Remove quotes that might be added by jq or other tools
-                clean_id = clean_id.strip('"\'')
-                if clean_id:  # Only add non-empty IDs
-                    cleaned_entity_ids.append(clean_id)
-        
-        if not cleaned_entity_ids:
-            typer.echo(
-                f"Error: No valid {entity_name} IDs found after cleaning input",
-                err=True
-            )
-            raise typer.Exit(1)
-        
-        if _verbose_mode:
-            typer.echo(
-                f"[DEBUG] Processing {len(cleaned_entity_ids)} {entity_name} IDs",
-                err=True
-            )
-            typer.echo(f"[DEBUG] First few IDs: {cleaned_entity_ids[:3]}", err=True)
-        
-        # Retrieve entities in batches of up to 50 (OpenAlex limit for OR filters)
-        entities = []
-        batch_size = 50
-        
-        for i in range(0, len(cleaned_entity_ids), batch_size):
-            batch_ids = cleaned_entity_ids[i:i + batch_size]
-            
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] Fetching batch {i//batch_size + 1}: "
-                    f"{len(batch_ids)} {entity_plural}", 
-                    err=True
-                )
-            
-            try:
-                # Create OR filter for batch of entity IDs
-                # Format: "A123|A456|A789"
-                id_filter = "|".join(batch_ids)
-                
-                # Query entities using OR filter
-                # Keywords use 'id' field instead of 'openalex_id'
-                if entity_class == Keywords:
-                    query = entity_class().filter(id=id_filter)
-                else:
-                    query = entity_class().filter(openalex_id=id_filter)
-                
-                if _verbose_mode:
-                    typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
-                
-                # Get all results for this batch (no limit since we want all 
-                # requested entities)
-                batch_results = query.get()
-                
-                if batch_results:
-                    # Apply special processing if provided
-                    if special_processing:
-                        batch_results = [
-                            special_processing(entity) for entity in batch_results
-                        ]
-                    
-                    entities.extend(batch_results)
-                    
-                    if _verbose_mode:
-                        typer.echo(
-                            f"[DEBUG] Successfully retrieved {len(batch_results)} "
-                            f"{entity_plural} from batch", 
-                            err=True
-                        )
-                else:
-                    if _verbose_mode:
-                        typer.echo(
-                            f"[DEBUG] No {entity_plural} returned for batch", 
-                            err=True
-                        )
-                
-            except Exception as e:
-                if _verbose_mode:
-                    typer.echo(
-                        f"[DEBUG] Failed to fetch batch: {e}", 
-                        err=True
-                    )
-                    # Fall back to individual requests for this batch
-                    typer.echo(
-                        "[DEBUG] Falling back to individual requests for batch", 
-                        err=True
-                    )
-                    
-                    for clean_id in batch_ids:
-                        try:
-                            entity = entity_class()[clean_id]
-                            if special_processing:
-                                entity = special_processing(entity)
-                            entities.append(entity)
-                        except Exception as individual_error:
-                            typer.echo(
-                                f"Warning: Could not retrieve {entity_name} "
-                                f"{clean_id}: {individual_error}", 
-                                err=True
-                            )
-                            continue
-                else:
-                    typer.echo(
-                        f"Warning: Could not retrieve batch of {len(batch_ids)} "
-                        f"{entity_plural}: {e}", 
-                        err=True
-                    )
-                continue
-        
-        if not entities:
-            typer.echo(f"Error: No {entity_plural} could be retrieved", err=True)
-            raise typer.Exit(1)
-        
-        if _verbose_mode:
-            typer.echo(
-                f"[DEBUG] Successfully retrieved {len(entities)} {entity_plural}",
-                err=True
-            )
-        
-        return entities
-        
-    except Exception as e:
-        if _verbose_mode:
-            typer.echo("[DEBUG] Full traceback:", err=True)
-            traceback.print_exc()
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
 
 @app.command()
 def authors(
@@ -790,7 +628,7 @@ def authors(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -810,6 +648,9 @@ def authors(
       pyalex authors A1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if author_id:
             # Get specific author
             author = Authors()[author_id]
@@ -882,7 +723,7 @@ def topics(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -902,6 +743,9 @@ def topics(
       pyalex topics T1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if topic_id:
             # Get specific topic
             topic = Topics()[topic_id]
@@ -946,7 +790,7 @@ def sources(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -966,6 +810,9 @@ def sources(
       pyalex sources S1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if source_id:
             # Get specific source
             source = Sources()[source_id]
@@ -987,7 +834,7 @@ def sources(
                 _print_debug_url(query)
                 
                 # For group-by operations, retrieve all groups by default
-                if limit == 10:  # Default limit, get all groups
+                if limit == 1000000:  # Default limit, get all groups
                     results = query.get()
                 else:
                     results = query.get(limit=limit)
@@ -1026,7 +873,7 @@ def institutions(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -1046,6 +893,9 @@ def institutions(
       pyalex institutions I1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if institution_id:
             # Get specific institution
             institution = Institutions()[institution_id]
@@ -1108,7 +958,7 @@ def publishers(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -1128,6 +978,9 @@ def publishers(
       pyalex publishers P1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if publisher_id:
             # Get specific publisher
             publisher = Publishers()[publisher_id]
@@ -1152,7 +1005,7 @@ def publishers(
                 _print_debug_url(query)
                 
                 # For group-by operations, retrieve all groups by default
-                if limit == 10:  # Default limit, get all groups
+                if limit == 1000000:  # Default limit, get all groups
                     results = query.get()
                 else:
                     results = query.get(limit=limit)
@@ -1187,7 +1040,7 @@ def funders(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -1207,6 +1060,9 @@ def funders(
       pyalex funders F1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if funder_id:
             # Get specific funder
             funder = Funders()[funder_id]
@@ -1231,7 +1087,7 @@ def funders(
                 _print_debug_url(query)
                 
                 # For group-by operations, retrieve all groups by default
-                if limit == 10:  # Default limit, get all groups
+                if limit == 1000000:  # Default limit, get all groups
                     results = query.get()
                 else:
                     results = query.get(limit=limit)
@@ -1261,7 +1117,7 @@ def domains(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -1279,6 +1135,9 @@ def domains(
       pyalex domains D1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if domain_id:
             # Get specific domain
             domain = Domains()[domain_id]
@@ -1319,7 +1178,7 @@ def fields(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -1337,6 +1196,9 @@ def fields(
       pyalex fields F1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if field_id:
             # Get specific field
             field = Fields()[field_id]
@@ -1379,7 +1241,7 @@ def subfields(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -1397,6 +1259,9 @@ def subfields(
       pyalex subfields SF1234567890
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if subfield_id:
             # Get specific subfield
             subfield = Subfields()[subfield_id]
@@ -1435,7 +1300,7 @@ def keywords(
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
-    )] = 10,
+    )] = 1000000,
     output_format: Annotated[str, typer.Option(
         "--format", "-f",
         help="Output format: json, name, table, summary"
@@ -1453,6 +1318,9 @@ def keywords(
       pyalex keywords cardiac-imaging
     """
     try:
+        # Set silent mode for JSON output to suppress informational messages
+        set_silent_mode(output_format == "json")
+        
         if keyword_id:
             # Get specific keyword
             keyword = Keywords()[keyword_id]

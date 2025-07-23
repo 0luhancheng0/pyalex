@@ -13,6 +13,53 @@ except ImportError:
     __version__ = "0.0.0"
 
 
+# Constants
+DEFAULT_MAX_RETRIES = 0
+DEFAULT_RETRY_BACKOFF_FACTOR = 0.1
+DEFAULT_RETRY_HTTP_CODES = [429, 500, 503]
+
+# API Limits and Thresholds
+MAX_PER_PAGE = 200
+MIN_PER_PAGE = 1
+MAX_RECORD_IDS = 100
+LARGE_QUERY_THRESHOLD = 10000
+DEFAULT_MAX_RESULTS = 10000
+
+# Pagination Defaults
+CURSOR_START_VALUE = "*"
+PAGE_START_VALUE = 1
+
+# Global auto-approve setting for large queries
+_AUTO_APPROVE = False
+
+# Global silent mode for suppressing informational messages (e.g., for JSON output)
+_SILENT_MODE = False
+
+
+def set_auto_approve(auto_approve):
+    """Set the global auto-approve setting for large queries.
+    
+    Parameters
+    ----------
+    auto_approve : bool
+        Whether to automatically approve large queries without prompting.
+    """
+    global _AUTO_APPROVE
+    _AUTO_APPROVE = auto_approve
+
+
+def set_silent_mode(silent):
+    """Set the global silent mode for suppressing informational messages.
+    
+    Parameters
+    ----------
+    silent : bool
+        Whether to suppress informational messages (useful for JSON output).
+    """
+    global _SILENT_MODE
+    _SILENT_MODE = silent
+
+
 class AlexConfig(dict):
     """Configuration class for OpenAlex API.
 
@@ -46,9 +93,9 @@ config = AlexConfig(
     api_key=None,
     user_agent=f"pyalex/{__version__}",
     openalex_url="https://api.openalex.org",
-    max_retries=0,
-    retry_backoff_factor=0.1,
-    retry_http_codes=[429, 500, 503],
+    max_retries=DEFAULT_MAX_RETRIES,
+    retry_backoff_factor=DEFAULT_RETRY_BACKOFF_FACTOR,
+    retry_http_codes=DEFAULT_RETRY_HTTP_CODES,
 )
 
 
@@ -333,8 +380,8 @@ class Paginator:
         Maximum number of results.
     """
 
-    VALUE_CURSOR_START = "*"
-    VALUE_NUMBER_START = 1
+    VALUE_CURSOR_START = CURSOR_START_VALUE
+    VALUE_NUMBER_START = PAGE_START_VALUE
 
     def __init__(
         self, endpoint_class, method="cursor", value=None, per_page=None, n_max=None
@@ -345,6 +392,7 @@ class Paginator:
         self.per_page = per_page
         self.n_max = n_max
         self.n = 0
+        self._first_page = True  # Track if this is the first page
 
         self._next_value = value
         self._session = _get_requests_session()
@@ -370,7 +418,7 @@ class Paginator:
 
         if self.per_page is not None and (
             not isinstance(self.per_page, int)
-            or (self.per_page < 1 or self.per_page > 200)
+            or (self.per_page < MIN_PER_PAGE or self.per_page > MAX_PER_PAGE)
         ):
             raise ValueError("per_page should be a integer between 1 and 200")
 
@@ -378,6 +426,35 @@ class Paginator:
             self.endpoint_class._add_params("per-page", self.per_page)
 
         r = self.endpoint_class._get_from_url(self.endpoint_class.url, self._session)
+
+        # Print count information on first page and check for approval if needed
+        if self._first_page and hasattr(r, 'meta') and r.meta and 'count' in r.meta:
+            total_count = r.meta['count']
+            if not _SILENT_MODE:
+                print(f"Total results found: {total_count:,}")
+            
+            # Require user approval for large queries (unless auto-approved)
+            # Only prompt if we're actually retrieving more than the threshold
+            actual_retrieval = min(total_count, self.n_max or total_count)
+            if actual_retrieval > LARGE_QUERY_THRESHOLD and not _AUTO_APPROVE:
+                try:
+                    response = input(
+                        f"This query will retrieve {actual_retrieval:,} results. "
+                        "Do you want to continue? (y/N): "
+                    ).strip().lower()
+                    if response not in ['y', 'yes']:
+                        if not _SILENT_MODE:
+                            print("Query cancelled by user.")
+                        raise StopIteration from None
+                except (EOFError, KeyboardInterrupt):
+                    if not _SILENT_MODE:
+                        print("\nQuery cancelled by user.")
+                    raise StopIteration from None
+            elif actual_retrieval > LARGE_QUERY_THRESHOLD and _AUTO_APPROVE:
+                if not _SILENT_MODE:
+                    print(f"Auto-approving query for {actual_retrieval:,} results.")
+            
+            self._first_page = False
 
         if self.method == "cursor":
             self._next_value = r.meta["next_cursor"]
@@ -447,8 +524,10 @@ class BaseOpenAlex:
 
     def __getitem__(self, record_id):
         if isinstance(record_id, list):
-            if len(record_id) > 100:
-                raise ValueError("OpenAlex does not support more than 100 ids")
+            if len(record_id) > MAX_RECORD_IDS:
+                raise ValueError(
+                    f"OpenAlex does not support more than {MAX_RECORD_IDS} ids"
+                )
 
             return self.filter_or(openalex_id=record_id).get(per_page=len(record_id))
         elif isinstance(record_id, str):
@@ -549,15 +628,18 @@ class BaseOpenAlex:
             if not isinstance(limit, int) or limit < 1:
                 raise ValueError("limit should be a positive integer")
             
-            # If limit is <= 200, use regular pagination
-            if limit <= 200:
+            # If limit is <= MAX_PER_PAGE, use regular pagination
+            if limit <= MAX_PER_PAGE:
                 per_page = limit
             else:
                 # Use cursor pagination for larger limits
                 # Collect all results using the existing paginate method
                 results = []
                 paginator = self.paginate(
-                    method="cursor", cursor=cursor or "*", per_page=200, n_max=limit
+                    method="cursor", 
+                    cursor=cursor or "*", 
+                    per_page=MAX_PER_PAGE, 
+                    n_max=limit
                 )
                 for batch in paginator:
                     results.extend(batch)
@@ -593,7 +675,8 @@ class BaseOpenAlex:
 
         # Original logic for per_page validation and execution
         if per_page is not None and (
-            not isinstance(per_page, int) or (per_page < 1 or per_page > 200)
+            not isinstance(per_page, int) 
+            or (per_page < MIN_PER_PAGE or per_page > MAX_PER_PAGE)
         ):
             raise ValueError("per_page should be an integer between 1 and 200")
 
@@ -603,6 +686,39 @@ class BaseOpenAlex:
             self._add_params("cursor", cursor)
 
         resp_list = self._get_from_url(self.url)
+
+        # Print count information for direct queries (not paginated) and check approval
+        if hasattr(resp_list, 'meta') and resp_list.meta and 'count' in resp_list.meta:
+            total_count = resp_list.meta['count']
+            if not _SILENT_MODE:
+                print(f"Total results found: {total_count:,}")
+            
+            # Require user approval for large queries (unless auto-approved)
+            # Only prompt if we're actually retrieving more than the threshold
+            actual_retrieval = min(total_count, per_page or MAX_PER_PAGE)
+            if actual_retrieval > LARGE_QUERY_THRESHOLD and not _AUTO_APPROVE:
+                try:
+                    response = input(
+                        f"This query will retrieve {actual_retrieval:,} results. "
+                        "Do you want to continue? (y/N): "
+                    ).strip().lower()
+                    if response not in ['y', 'yes']:
+                        if not _SILENT_MODE:
+                            print("Query cancelled by user.")
+                        # Return empty result
+                        return OpenAlexResponseList(
+                            [], {"count": 0}, self.resource_class
+                        )
+                except (EOFError, KeyboardInterrupt):
+                    if not _SILENT_MODE:
+                        print("\nQuery cancelled by user.")
+                    # Return empty result
+                    return OpenAlexResponseList(
+                        [], {"count": 0}, self.resource_class
+                    )
+            elif actual_retrieval > LARGE_QUERY_THRESHOLD and _AUTO_APPROVE:
+                if not _SILENT_MODE:
+                    print(f"Auto-approving query for {actual_retrieval:,} results.")
 
         if return_meta:
             warnings.warn(
@@ -614,7 +730,14 @@ class BaseOpenAlex:
         else:
             return resp_list
 
-    def paginate(self, method="cursor", page=1, per_page=None, cursor="*", n_max=10000):
+    def paginate(
+        self, 
+        method="cursor", 
+        page=PAGE_START_VALUE, 
+        per_page=None, 
+        cursor=CURSOR_START_VALUE, 
+        n_max=DEFAULT_MAX_RESULTS
+    ):
         """Paginate results from the API.
 
         Parameters
