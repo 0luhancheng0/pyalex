@@ -2,6 +2,7 @@
 """
 PyAlex CLI - Command line interface for the OpenAlex database
 """
+import datetime
 import json
 import os
 from pathlib import Path
@@ -94,6 +95,11 @@ def works(
         "--year",
         help="Filter by publication year (e.g. '2020' or range '2019:2021')"
     )] = None,
+    publication_date: Annotated[Optional[str], typer.Option(
+        "--date",
+        help="Filter by publication date (e.g. '2020-01-01' or "
+             "range '2019-01-01:2020-12-31')"
+    )] = None,
     work_type: Annotated[Optional[str], typer.Option(
         "--type",
         help="Filter by work type (e.g. 'article', 'book', 'dataset')"
@@ -129,6 +135,8 @@ def works(
       pyalex works --search "machine learning"
       pyalex works --author-id "A1234567890" --limit 5
       pyalex works --year "2019:2020" --limit 10
+      pyalex works --date "2020-01-01:2020-12-31" --limit 10
+      pyalex works --date "2020-06-15" --limit 5
       pyalex works --type "article" --search "COVID-19"
       pyalex works --topic-id "T10002" --limit 5
       pyalex works --subfield-id "SF12345" --limit 5
@@ -185,6 +193,43 @@ def works(
                         typer.echo(
                             "Error: Invalid year format. Use a single year or range "
                             "(e.g., '2020' or '2019:2020')", 
+                            err=True
+                        )
+                        raise typer.Exit(1) from None
+            
+            if publication_date:
+                # Handle publication date ranges (e.g., "2019-01-01:2020-12-31") 
+                # or single dates
+                if ":" in publication_date:
+                    try:
+                        start_date, end_date = publication_date.split(":")
+                        start_date = start_date.strip()
+                        end_date = end_date.strip()
+                        
+                        # Validate date format (basic check for YYYY-MM-DD)
+                        datetime.datetime.strptime(start_date, "%Y-%m-%d")
+                        datetime.datetime.strptime(end_date, "%Y-%m-%d")
+                        
+                        # For inclusive range, we need >= start_date and <= end_date
+                        # We'll use from_publication_date and to_publication_date
+                        query = query.filter(from_publication_date=start_date)
+                        query = query.filter(to_publication_date=end_date)
+                    except ValueError as ve:
+                        typer.echo(
+                            "Error: Invalid date range format. Use "
+                            "'YYYY-MM-DD:YYYY-MM-DD' (e.g., '2019-01-01:2020-12-31')", 
+                            err=True
+                        )
+                        raise typer.Exit(1) from ve
+                else:
+                    try:
+                        # Validate single date format
+                        datetime.datetime.strptime(publication_date.strip(), "%Y-%m-%d")
+                        query = query.filter(publication_date=publication_date.strip())
+                    except ValueError:
+                        typer.echo(
+                            "Error: Invalid date format. Use YYYY-MM-DD format "
+                            "(e.g., '2020-01-01') or range '2019-01-01:2020-12-31'", 
                             err=True
                         )
                         raise typer.Exit(1) from None
@@ -478,6 +523,10 @@ def topics(
         "--field-id",
         help="Filter by field OpenAlex ID" 
     )] = None,
+    subfield_id: Annotated[Optional[str], typer.Option(
+        "--subfield-id",
+        help="Filter by subfield OpenAlex ID"
+    )] = None,
     limit: Annotated[int, typer.Option(
         "--limit", "-l",
         help="Maximum number of results to return"
@@ -496,6 +545,8 @@ def topics(
     Examples:
       pyalex topics --search "artificial intelligence"
       pyalex topics --domain-id "D1234567890" --limit 5
+      pyalex topics --field-id "F1234567890" --limit 5
+      pyalex topics --subfield-id "SF1234567890" --limit 5
       pyalex topics T1234567890
     """
     try:
@@ -515,6 +566,8 @@ def topics(
                 query = query.filter(domain={"id": domain_id})
             if field_id:
                 query = query.filter(field={"id": field_id})
+            if subfield_id:
+                query = query.filter(subfield={"id": subfield_id})
             
             # Print debug URL before making the request
             _print_debug_url(query)

@@ -27,7 +27,7 @@ $(PAPERS_JSON): | $(OUTPUT_DIR)
 	pyalex works --topic-id $(TOPIC_ID) --year "$(TIME_PERIOD)" --format json --limit $(PAPERS_LIMIT) > $(PAPERS_JSON)
 
 $(REVIEWS_JSON): | $(OUTPUT_DIR)
-	pyalex works --topic-id $(TOPIC_ID) --search review --year $(REVIEW_YEAR) --format json --abstract --limit $(REVIEWS_LIMIT) > $(REVIEWS_JSON)
+	pyalex works --topic-id $(TOPIC_ID) --search "review,survey" --year $(REVIEW_YEAR) --format json --abstract --limit $(REVIEWS_LIMIT) > $(REVIEWS_JSON)
 
 $(CITED_BY_REVIEWS_JSON): $(REVIEWS_JSON)
 	cat $(REVIEWS_JSON) | jq "[.[].referenced_works] | flatten | unique" | pyalex works-from-ids --format json > $(CITED_BY_REVIEWS_JSON)
