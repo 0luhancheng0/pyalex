@@ -163,5 +163,51 @@ def test_show_nonexistent_file():
     assert "not found" in result.stderr
 
 
+def test_works_publication_date():
+    """Test that works search with publication date filter works."""
+    result = subprocess.run(
+        ["pyalex", "works", "--date", "2020-01-01", "--limit", "1"],
+        capture_output=True,
+        text=True
+    )
+    assert result.returncode == 0
+    # Should return some output (table or other format)
+    assert len(result.stdout.strip()) > 0
+
+
+def test_works_publication_date_range():
+    """Test that works search with publication date range filter works."""
+    result = subprocess.run(
+        ["pyalex", "works", "--date", "2020-01-01:2020-01-31", "--limit", "1"],
+        capture_output=True,
+        text=True
+    )
+    assert result.returncode == 0
+    # Should return some output (table or other format)
+    assert len(result.stdout.strip()) > 0
+
+
+def test_works_publication_date_invalid():
+    """Test that works search with invalid publication date fails."""
+    result = subprocess.run(
+        ["pyalex", "works", "--date", "invalid-date", "--limit", "1"],
+        capture_output=True,
+        text=True
+    )
+    assert result.returncode == 1
+    assert "Invalid date format" in result.stderr
+
+
+def test_works_publication_date_invalid_range():
+    """Test that works search with invalid publication date range fails."""
+    result = subprocess.run(
+        ["pyalex", "works", "--date", "2020-13-01:2020-14-01", "--limit", "1"],
+        capture_output=True,
+        text=True
+    )
+    assert result.returncode == 1
+    assert "Invalid date range format" in result.stderr
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
