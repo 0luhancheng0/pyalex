@@ -26,6 +26,8 @@ from pyalex import Topics
 from pyalex import Works
 from pyalex import config
 from pyalex import invert_abstract
+from pyalex.api import OpenAlexResponseList
+from pyalex.api import Work
 from pyalex.api import set_auto_approve
 from pyalex.api import set_silent_mode
 
@@ -136,9 +138,15 @@ def works(
         "--subfield-id",
         help="Filter by primary topic subfield OpenAlex ID"
     )] = None,
-    funder_id: Annotated[Optional[str], typer.Option(
-        "--funder-id",
-        help="Filter by funder OpenAlex ID"
+    funder_ids: Annotated[Optional[str], typer.Option(
+        "--funder-ids",
+        help="Filter by funder OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --funder-ids 'F123,F456,F789')"
+    )] = None,
+    award_ids: Annotated[Optional[str], typer.Option(
+        "--award-ids",
+        help="Filter by grant award ID(s). Use comma-separated values for "
+             "OR logic (e.g., --award-ids 'AWARD123,AWARD456')"
     )] = None,
     group_by: Annotated[Optional[str], typer.Option(
         "--group-by",
@@ -173,7 +181,9 @@ def works(
       pyalex works --type "article" --search "COVID-19"
       pyalex works --topic-id "T10002" --limit 5
       pyalex works --subfield-id "SF12345" --limit 5
-      pyalex works --funder-id "F4320332161" --limit 5
+      pyalex works --funder-ids "F4320332161" --limit 5
+      pyalex works --funder-ids "F123,F456,F789" --limit 5
+      pyalex works --award-ids "AWARD123,AWARD456" --limit 5
       pyalex works --search "AI" --abstract --format summary
       pyalex works --group-by "oa_status" --format table
       pyalex works --group-by "publication_year" --search "COVID-19"
@@ -182,6 +192,10 @@ def works(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         if work_id:
             # Get specific work
@@ -282,8 +296,52 @@ def works(
             if subfield_id:
                 query = query.filter(primary_topic={"subfield": {"id": subfield_id}})
             
-            if funder_id:
-                query = query.filter(grants={"funder": funder_id})
+            if funder_ids:
+                # Parse comma-separated funder IDs
+                funder_list = [
+                    fid.strip() for fid in funder_ids.split(',') if fid.strip()
+                ]
+                # Clean up funder IDs (remove URL prefix if present)
+                cleaned_funder_list = []
+                for fid in funder_list:
+                    clean_id = fid.replace('https://openalex.org/', '').strip()
+                    clean_id = clean_id.strip('/')
+                    if clean_id:
+                        cleaned_funder_list.append(clean_id)
+                
+                if len(cleaned_funder_list) == 1:
+                    # Single funder ID
+                    query = query.filter(grants={"funder": cleaned_funder_list[0]})
+                elif len(cleaned_funder_list) <= 50:
+                    # Multiple funder IDs (<=50) - use OR logic by joining with |
+                    funder_or_filter = "|".join(cleaned_funder_list)
+                    query = query.filter(grants={"funder": funder_or_filter})
+                else:
+                    # More than 50 funder IDs - need to split into multiple queries
+                    # This will be handled after the main query setup by executing 
+                    # multiple queries and combining results
+                    query._large_funder_list = cleaned_funder_list
+            
+            if award_ids:
+                # Parse comma-separated award IDs
+                award_list = [
+                    aid.strip() for aid in award_ids.split(',') if aid.strip()
+                ]
+                # Clean up award IDs (remove URL prefix if present)
+                cleaned_award_list = []
+                for aid in award_list:
+                    clean_id = aid.replace('https://openalex.org/', '').strip()
+                    clean_id = clean_id.strip('/')
+                    if clean_id:
+                        cleaned_award_list.append(clean_id)
+                
+                if len(cleaned_award_list) == 1:
+                    # Single award ID
+                    query = query.filter(grants={"award_id": cleaned_award_list[0]})
+                else:
+                    # Multiple award IDs - use OR logic by joining with |
+                    award_or_filter = "|".join(cleaned_award_list)
+                    query = query.filter(grants={"award_id": award_or_filter})
 
             # Handle group_by parameter
             if group_by:
@@ -308,7 +366,94 @@ def works(
             _print_debug_url(query)
             
             try:
-                results = query.get(limit=limit)
+                # Check if we need to handle large funder list (>50 funder IDs)
+                if hasattr(query, '_large_funder_list'):
+                    large_funder_list = query._large_funder_list
+                    # Remove the temporary attribute
+                    delattr(query, '_large_funder_list')
+                    
+                    if output_format != "json":
+                        typer.echo(
+                            f"Processing {len(large_funder_list)} funder IDs "
+                            "in batches of 50...", 
+                            err=True
+                        )
+                    
+                    all_results = []
+                    seen_work_ids = set()  # To avoid duplicates
+                    batch_size = 50
+                    
+                    for i in range(0, len(large_funder_list), batch_size):
+                        batch_funders = large_funder_list[i:i + batch_size]
+                        
+                        if _verbose_mode:
+                            typer.echo(
+                                f"[DEBUG] Processing funder batch "
+                                f"{i//batch_size + 1}: {len(batch_funders)} funders", 
+                                err=True
+                            )
+                        
+                        # Create a new query for this batch by copying original
+                        batch_query = Works()
+                        
+                        # Re-apply all the same filters from the original query
+                        if hasattr(query, 'params') and query.params:
+                            # Copy all parameters except the funder filter
+                            import copy
+                            batch_query.params = copy.deepcopy(query.params)
+                            # Remove any existing funder filter
+                            if ('filter' in batch_query.params and 
+                                'grants' in batch_query.params['filter']):
+                                if 'funder' in batch_query.params['filter']['grants']:
+                                    del batch_query.params['filter']['grants']['funder']
+                        
+                        # Add the batch funder filter
+                        funder_or_filter = "|".join(batch_funders)
+                        batch_query = batch_query.filter(
+                            grants={"funder": funder_or_filter}
+                        )
+                        
+                        if _verbose_mode:
+                            typer.echo(
+                                f"[DEBUG] Batch API URL: {batch_query.url}", 
+                                err=True
+                            )
+                        
+                        # Execute the batch query
+                        batch_results = batch_query.get(limit=limit)
+                        
+                        if batch_results:
+                            # Filter out duplicates based on work ID
+                            for work in batch_results:
+                                work_id = work.get('id')
+                                if work_id and work_id not in seen_work_ids:
+                                    seen_work_ids.add(work_id)
+                                    all_results.append(work)
+                        
+                        if _verbose_mode:
+                            batch_count = len(batch_results) if batch_results else 0
+                            typer.echo(
+                                f"[DEBUG] Batch {i//batch_size + 1} returned "
+                                f"{batch_count} results", 
+                                err=True
+                            )
+                    
+                    # Create a result object similar to what query.get() returns
+                    results = OpenAlexResponseList(
+                        all_results, {"count": len(all_results)}, Work
+                    )
+                    
+                    if output_format != "json":
+                        typer.echo(
+                            f"Combined {len(all_results)} unique results from "
+                            f"{len(large_funder_list)} funder IDs", 
+                            err=True
+                        )
+                    
+                else:
+                    # Normal single query execution
+                    results = query.get(limit=limit)
+                
                 _print_debug_results(results)
             except Exception as api_error:
                 typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
@@ -370,6 +515,10 @@ def from_ids(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         # Read from stdin
         stdin_content = sys.stdin.read().strip()
@@ -651,6 +800,10 @@ def authors(
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
         
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
+        
         if author_id:
             # Get specific author
             author = Authors()[author_id]
@@ -746,6 +899,10 @@ def topics(
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
         
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
+        
         if topic_id:
             # Get specific topic
             topic = Topics()[topic_id]
@@ -812,6 +969,10 @@ def sources(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         if source_id:
             # Get specific source
@@ -895,6 +1056,10 @@ def institutions(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         if institution_id:
             # Get specific institution
@@ -981,6 +1146,10 @@ def publishers(
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
         
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
+        
         if publisher_id:
             # Get specific publisher
             publisher = Publishers()[publisher_id]
@@ -1032,6 +1201,10 @@ def funders(
         "--search", "-s",
         help="Search term for funders"
     )] = None,
+    country_code: Annotated[Optional[str], typer.Option(
+        "--country",
+        help="Filter by country code (e.g. US, UK, CA)"
+    )] = None,
     group_by: Annotated[Optional[str], typer.Option(
         "--group-by",
         help="Group results by field (e.g. 'country_code', 'grants_count', "
@@ -1054,6 +1227,7 @@ def funders(
     
     Examples:
       pyalex funders --search "NSF"
+      pyalex funders --country US --limit 5
       pyalex funders --limit 5
       pyalex funders --group-by "country_code" --format table
       pyalex funders --group-by "grants_count" --search "national"
@@ -1062,6 +1236,10 @@ def funders(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         if funder_id:
             # Get specific funder
@@ -1078,6 +1256,8 @@ def funders(
             
             if search:
                 query = query.search(search)
+            if country_code:
+                query = query.filter(country_code=country_code)
             
             # Handle group_by parameter
             if group_by:
@@ -1137,6 +1317,10 @@ def domains(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         if domain_id:
             # Get specific domain
@@ -1198,6 +1382,10 @@ def fields(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         if field_id:
             # Get specific field
@@ -1262,6 +1450,10 @@ def subfields(
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
         
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
+        
         if subfield_id:
             # Get specific subfield
             subfield = Subfields()[subfield_id]
@@ -1320,6 +1512,10 @@ def keywords(
     try:
         # Set silent mode for JSON output to suppress informational messages
         set_silent_mode(output_format == "json")
+        
+        # Auto-approve large queries for JSON output to prevent interactive prompts
+        if output_format == "json":
+            set_auto_approve(True)
         
         if keyword_id:
             # Get specific keyword

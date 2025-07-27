@@ -60,6 +60,18 @@ def set_silent_mode(silent):
     _SILENT_MODE = silent
 
 
+def get_silent_mode():
+    """Get the current silent mode setting.
+    
+    Returns
+    -------
+    bool
+        Whether silent mode is enabled.
+    """
+    global _SILENT_MODE
+    return _SILENT_MODE
+
+
 class AlexConfig(dict):
     """Configuration class for OpenAlex API.
 
@@ -520,7 +532,9 @@ class BaseOpenAlex:
                 "Object has no attribute 'filter_search'. Did you mean 'search_filter'?"
             )
 
-        return getattr(self, key)
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{key}'"
+        )
 
     def __getitem__(self, record_id):
         if isinstance(record_id, list):
