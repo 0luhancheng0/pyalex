@@ -28,6 +28,10 @@ class OpenAlexID(BaseModel):
     mag: Optional[str] = None
     wikidata: Optional[str] = None
     wikipedia: Optional[str] = None
+    # Author-specific IDs
+    orcid: Optional[str] = None
+    scopus: Optional[str] = None
+    twitter: Optional[str] = None
 
 
 class DehydratedEntity(BaseModel):

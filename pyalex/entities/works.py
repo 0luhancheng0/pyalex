@@ -8,7 +8,6 @@ from pyalex.core.config import config
 from pyalex.core.response import OpenAlexResponseList
 from pyalex.core.utils import invert_abstract
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.work import Work as WorkModel
 from pyalex.models.work import WorkEntity
 
 
@@ -58,3 +57,4 @@ class Works(BaseOpenAlex):
     """Class representing a collection of work entities in OpenAlex."""
 
     resource_class = Work
+    resource_entity_class = WorkEntity

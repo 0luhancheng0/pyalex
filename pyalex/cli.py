@@ -32,6 +32,8 @@ from pyalex.api import Work
 
 # Global verbose state
 _debug_mode = False
+_dry_run_mode = False
+_batch_size = 100
 
 MAX_WIDTH = 300
 
@@ -50,14 +52,24 @@ def main(
         "--debug", "-d",
         help="Enable debug output including API URLs and internal details"
     )] = False,
+    dry_run: Annotated[bool, typer.Option(
+        "--dry-run",
+        help="Print a list of queries that would be run without executing them"
+    )] = False,
+    batch_size: Annotated[int, typer.Option(
+        "--batch-size",
+        help="Batch size for requests with multiple IDs (default: 50)"
+    )] = 50,
 ):
     """
     PyAlex CLI - Access the OpenAlex database from the command line.
     
     OpenAlex doesn't require authentication for most requests.
     """
-    global _debug_mode
+    global _debug_mode, _dry_run_mode, _batch_size
     _debug_mode = debug
+    _dry_run_mode = dry_run
+    _batch_size = batch_size
     
     if debug:
         from pyalex.logger import setup_cli_logging
@@ -67,6 +79,9 @@ def main(
         logger.debug(
             "Debug mode enabled - API URLs and internal details will be displayed"
         )
+    
+    if dry_run:
+        typer.echo(f"Dry run mode enabled - batch size: {batch_size}", err=True)
 
 
 def _print_debug_url(query):
@@ -81,6 +96,206 @@ def _print_debug_results(results):
     if _debug_mode and results is not None:
         from pyalex.logger import log_api_response
         log_api_response(results)
+
+
+def _print_dry_run_query(query_description, url=None, estimated_queries=None):
+    """Print dry run information."""
+    if _dry_run_mode:
+        typer.echo(f"[DRY RUN] {query_description}")
+        if url:
+            typer.echo(f"  URL: {url}")
+        if estimated_queries and estimated_queries > 1:
+            typer.echo(f"  Estimated queries: {estimated_queries}")
+
+
+def _clean_ids(id_list, url_prefix='https://openalex.org/'):
+    """Clean up a list of IDs by removing URL prefixes."""
+    cleaned_ids = []
+    for id_str in id_list:
+        clean_id = id_str.replace(url_prefix, '').strip()
+        clean_id = clean_id.strip('/')
+        if clean_id:
+            cleaned_ids.append(clean_id)
+    return cleaned_ids
+
+
+def _validate_and_apply_common_options(
+    query, all_results, limit, sample, seed, sort_by
+):
+    """
+    Validate common options and apply sorting and sampling to a query.
+    
+    Args:
+        query: The OpenAlex query object
+        all_results: Whether to get all results
+        limit: Result limit 
+        sample: Sample size
+        seed: Random seed
+        sort_by: Sort specification
+    
+    Returns:
+        Modified query object
+    """
+    # Validate sample and seed options
+    if sample is not None:
+        if sample < 1 or sample > 10000:
+            typer.echo("Error: --sample must be between 1 and 10,000", err=True)
+            raise typer.Exit(1)
+        if all_results:
+            typer.echo("Error: --sample and --all are mutually exclusive", err=True)
+            raise typer.Exit(1)
+    
+    # Apply sort options
+    if sort_by:
+        # Parse sort string - can be comma-separated for multiple sorts
+        sort_params = {}
+        for sort_item in sort_by.split(','):
+            sort_item = sort_item.strip()
+            if ':' in sort_item:
+                field, direction = sort_item.split(':', 1)
+                sort_params[field.strip()] = direction.strip()
+            else:
+                sort_params[sort_item] = "asc"  # Default direction
+        query = query.sort(**sort_params)
+    
+    # Apply sample options
+    if sample is not None:
+        query = query.sample(sample, seed=seed)
+    
+    return query
+
+
+def _execute_batched_queries(
+    id_list, 
+    create_query_func,
+    entity_name,
+    all_results=False,
+    limit=None,
+    json_path=None
+):
+    """
+    Execute batched queries for large lists of IDs using a query creation function.
+    
+    Args:
+        id_list: List of cleaned IDs to process in batches
+        create_query_func: Function that takes a list of batch IDs and returns a query
+        entity_name: Human-readable name for debug output
+        all_results: Whether to get all results
+        limit: Result limit
+        json_path: JSON output path
+    
+    Returns:
+        Combined results from all batches
+    """
+    if _dry_run_mode:
+        estimated_queries = (len(id_list) + _batch_size - 1) // _batch_size
+        _print_dry_run_query(
+            f"Batched query for {len(id_list)} {entity_name}",
+            estimated_queries=estimated_queries
+        )
+        return None
+    
+    if not json_path:
+        typer.echo(
+            f"Processing {len(id_list)} {entity_name} "
+            f"in batches of {_batch_size}...", 
+            err=True
+        )
+    
+    combined_results = []
+    seen_ids = set()  # To avoid duplicates
+    
+    for i in range(0, len(id_list), _batch_size):
+        batch_ids = id_list[i:i + _batch_size]
+        
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug(
+                f"Processing batch "
+                f"{i//_batch_size + 1}: {len(batch_ids)} {entity_name}"
+            )
+        
+        # Create query for this batch
+        batch_query = create_query_func(batch_ids)
+        
+        if _debug_mode:
+            typer.echo(
+                f"[DEBUG] Batch API URL: {batch_query.url}", 
+                err=True
+            )
+        
+        # Execute the batch query
+        if all_results:
+            # Get all results for this batch using pagination
+            batch_results = []
+            paginator = batch_query.paginate(
+                method="cursor", n_max=100000
+            )  # Large enough to get all
+            for page in paginator:
+                batch_results.extend(page)
+        elif limit is not None:
+            batch_results = batch_query.get(limit=limit)
+        else:
+            batch_results = batch_query.get()  # Default first page
+        
+        if batch_results:
+            # Filter out duplicates based on entity ID
+            for entity in batch_results:
+                entity_id_str = entity.get('id')
+                if entity_id_str and entity_id_str not in seen_ids:
+                    seen_ids.add(entity_id_str)
+                    combined_results.append(entity)
+        
+        if _debug_mode:
+            batch_count = len(batch_results) if batch_results else 0
+            typer.echo(
+                f"[DEBUG] Batch {i//_batch_size + 1} returned "
+                f"{batch_count} results", 
+                err=True
+            )
+    
+    # Create a result object similar to what query.get() returns
+    # Import the appropriate response class based on the first result
+    if combined_results:
+        first_result = combined_results[0]
+        
+        # Detect entity type and use appropriate model class
+        if 'display_name' in first_result and 'works_count' in first_result:
+            from pyalex.models.author import Author
+            result_class = Author
+        elif 'title' in first_result and 'publication_year' in first_result:
+            from pyalex.models.work import Work 
+            result_class = Work
+        elif 'display_name' in first_result and 'works_count' in first_result:
+            from pyalex.models.institution import Institution
+            result_class = Institution
+        else:
+            # Default fallback
+            from pyalex.models.base import BaseModel
+            result_class = BaseModel
+            
+        from pyalex.core.response import OpenAlexResponseList
+        results = OpenAlexResponseList(
+            combined_results, {"count": len(combined_results)}, result_class
+        )
+    else:
+        from pyalex.core.response import OpenAlexResponseList
+        from pyalex.models.base import BaseModel
+        results = OpenAlexResponseList(
+            [], {"count": 0}, BaseModel
+        )
+    
+    if not json_path:
+        typer.echo(
+            f"Combined {len(combined_results)} unique results from "
+            f"{len(id_list)} {entity_name}", 
+            err=True
+        )
+    
+    return results
+
+
 
 
 def _add_abstract_to_work(work_dict):
@@ -384,6 +599,20 @@ def works(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'publication_year', "
+             "'display_name:asc'). Multiple sorts: 'year:desc,cited_by_count:desc'"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = 0,
 ):
     """
     Search and retrieve works from OpenAlex.
@@ -403,6 +632,10 @@ def works(
       pyalex works --search "AI" --abstract --json ai_works.json
       pyalex works --group-by "oa_status"
       pyalex works --group-by "publication_year" --search "COVID-19"
+      pyalex works --sort-by "cited_by_count:desc" --limit 100
+      pyalex works --sample 50 --seed 123
+      pyalex works --search "climate change" \\
+        --sort-by "publication_year:desc,cited_by_count:desc"
     """
     try:
         # Check for mutually exclusive options
@@ -506,22 +739,17 @@ def works(
                 fid.strip() for fid in funder_ids.split(',') if fid.strip()
             ]
             # Clean up funder IDs (remove URL prefix if present)
-            cleaned_funder_list = []
-            for fid in funder_list:
-                clean_id = fid.replace('https://openalex.org/', '').strip()
-                clean_id = clean_id.strip('/')
-                if clean_id:
-                    cleaned_funder_list.append(clean_id)
+            cleaned_funder_list = _clean_ids(funder_list)
             
             if len(cleaned_funder_list) == 1:
                 # Single funder ID
                 query = query.filter(grants={"funder": cleaned_funder_list[0]})
-            elif len(cleaned_funder_list) <= 50:
-                # Multiple funder IDs (<=50) - use OR logic by joining with |
+            elif len(cleaned_funder_list) <= _batch_size:
+                # Multiple funder IDs (<=batch_size) - use OR logic by joining with |
                 funder_or_filter = "|".join(cleaned_funder_list)
                 query = query.filter(grants={"funder": funder_or_filter})
             else:
-                # More than 50 funder IDs - need to split into multiple queries
+                # More than batch_size funder IDs - need to split into multiple queries
                 # This will be handled after the main query setup by executing 
                 # multiple queries and combining results
                 query._large_funder_list = cleaned_funder_list
@@ -546,6 +774,11 @@ def works(
                 # Multiple award IDs - use OR logic by joining with |
                 award_or_filter = "|".join(cleaned_award_list)
                 query = query.filter(grants={"award_id": award_or_filter})
+
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
 
         # Handle group_by parameter
         if group_by:
@@ -573,34 +806,13 @@ def works(
         _print_debug_url(query)
         
         try:
-            # Check if we need to handle large funder list (>50 funder IDs)
+            # Check if we need to handle large funder list (>batch_size funder IDs)
             if hasattr(query, '_large_funder_list'):
                 large_funder_list = query._large_funder_list
                 # Remove the temporary attribute
                 delattr(query, '_large_funder_list')
                 
-                if not json_path:
-                    typer.echo(
-                        f"Processing {len(large_funder_list)} funder IDs "
-                        "in batches of 50...", 
-                        err=True
-                    )
-                
-                all_results = []
-                seen_work_ids = set()  # To avoid duplicates
-                batch_size = 50
-                
-                for i in range(0, len(large_funder_list), batch_size):
-                    batch_funders = large_funder_list[i:i + batch_size]
-                    
-                    if _debug_mode:
-                        from pyalex.logger import get_logger
-                        logger = get_logger()
-                        logger.debug(
-                            f"Processing funder batch "
-                            f"{i//batch_size + 1}: {len(batch_funders)} funders"
-                        )
-                    
+                def create_batch_query(batch_ids):
                     # Create a new query for this batch by copying original
                     batch_query = Works()
                     
@@ -615,63 +827,51 @@ def works(
                                 del batch_query.params['filter']['grants']['funder']
                     
                     # Add the batch funder filter
-                    funder_or_filter = "|".join(batch_funders)
-                    batch_query = batch_query.filter(
-                        grants={"funder": funder_or_filter}
-                    )
-                    
-                    if _debug_mode:
-                        typer.echo(
-                            f"[DEBUG] Batch API URL: {batch_query.url}", 
-                            err=True
-                        )
-                    
-                    # Execute the batch query
-                    if all_results:
-                        limit_to_use = None  # Get all results
-                    elif limit is not None:
-                        limit_to_use = limit  # Use specified limit
-                    else:
-                        limit_to_use = 25  # Default first page
-                    batch_results = batch_query.get(limit=limit_to_use)
-                    
-                    if batch_results:
-                        # Filter out duplicates based on work ID
-                        for work in batch_results:
-                            work_id_str = work.get('id')
-                            if work_id_str and work_id_str not in seen_work_ids:
-                                seen_work_ids.add(work_id_str)
-                                all_results.append(work)
-                    
-                    if _debug_mode:
-                        batch_count = len(batch_results) if batch_results else 0
-                        typer.echo(
-                            f"[DEBUG] Batch {i//batch_size + 1} returned "
-                            f"{batch_count} results", 
-                            err=True
-                        )
+                    funder_or_filter = "|".join(batch_ids)
+                    return batch_query.filter(grants={"funder": funder_or_filter})
                 
-                # Create a result object similar to what query.get() returns
-                results = OpenAlexResponseList(
-                    all_results, {"count": len(all_results)}, Work
+                # Use the general batching utility
+                results = _execute_batched_queries(
+                    large_funder_list, 
+                    create_batch_query,
+                    "funder IDs",
+                    all_results,
+                    limit,
+                    json_path
                 )
-                
-                if not json_path:
-                    typer.echo(
-                        f"Combined {len(all_results)} unique results from "
-                        f"{len(large_funder_list)} funder IDs", 
-                        err=True
-                    )
                 
             else:
                 # Normal single query execution
+                if _dry_run_mode:
+                    _print_dry_run_query(
+                        "Works query",
+                        url=query.url
+                    )
+                    return
+                
                 if all_results:
-                    limit_to_use = None  # Get all results
+                    # Get all results using pagination
+                    results = []
+                    paginator = query.paginate(
+                        method="cursor", n_max=100000
+                    )  # Large enough to get all
+                    for batch in paginator:
+                        results.extend(batch)
+                    
+                    # Create a result object similar to what query.get() returns
+                    if results:
+                        total_count = len(results)
+                        results = OpenAlexResponseList(
+                            results, {"count": total_count}, Work
+                        )
+                    else:
+                        results = OpenAlexResponseList(
+                            [], {"count": 0}, Work
+                        )
                 elif limit is not None:
-                    limit_to_use = limit  # Use specified limit
+                    results = query.get(limit=limit)
                 else:
-                    limit_to_use = 25  # Default first page
-                results = query.get(limit=limit_to_use)
+                    results = query.get()  # Default first page
             
             _print_debug_results(results)
         except Exception as api_error:
@@ -709,7 +909,7 @@ def authors(
     )] = None,
     institution_id: Annotated[Optional[str], typer.Option(
         "--institution-id",
-        help="Filter by institution OpenAlex ID"
+        help="Filter by institution OpenAlex ID (comma-separated for multiple IDs)"
     )] = None,
     group_by: Annotated[Optional[str], typer.Option(
         "--group-by",
@@ -728,6 +928,21 @@ def authors(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc'). Multiple sorts: 'works_count:desc,"
+             "cited_by_count:desc'"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = 0,
 ):
     """
     Search and retrieve authors from OpenAlex.
@@ -738,6 +953,8 @@ def authors(
       pyalex authors --institution-id "I1234567890" --limit 50
       pyalex authors --group-by "cited_by_count" --json results.json
       pyalex authors --group-by "has_orcid"
+      pyalex authors --sort-by "cited_by_count:desc" --limit 100
+      pyalex authors --sample 25 --seed 456
     """
     try:
         # Check for mutually exclusive options
@@ -751,8 +968,35 @@ def authors(
         if search:
             query = query.search(search)
         if institution_id:
-            query = query.filter(last_known_institutions={"id": institution_id})
+            # Parse comma-separated institution IDs
+            institution_list = [
+                iid.strip() for iid in institution_id.split(',') if iid.strip()
+            ]
+            # Clean up institution IDs (remove URL prefix if present)
+            cleaned_institution_list = _clean_ids(institution_list)
+            
+            if len(cleaned_institution_list) == 1:
+                # Single institution ID
+                query = query.filter(
+                    last_known_institutions={"id": cleaned_institution_list[0]}
+                )
+            elif len(cleaned_institution_list) <= _batch_size:
+                # Multiple institution IDs (<=batch_size) - use OR logic
+                institution_or_filter = "|".join(cleaned_institution_list)
+                query = query.filter(
+                    last_known_institutions={"id": institution_or_filter}
+                )
+            else:
+                # More than batch_size institution IDs - split into multiple queries
+                # This will be handled after the main query setup by executing 
+                # multiple queries and combining results
+                query._large_institution_list = cleaned_institution_list
         
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
+
         # Handle group_by parameter
         if group_by:
             query = query.group_by(group_by)
@@ -767,15 +1011,71 @@ def authors(
             return
         
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
-        _print_debug_results(results)
-        _output_results(results, json_path)
+        
+        try:
+            # Check if we need to handle large institution list (>batch_size IDs)
+            if hasattr(query, '_large_institution_list'):
+                large_institution_list = query._large_institution_list
+                # Remove the temporary attribute
+                delattr(query, '_large_institution_list')
+                
+                def create_batch_query(batch_ids):
+                    # Create a new query for this batch by copying original
+                    batch_query = Authors()
+                    
+                    # Re-apply all the same filters from the original query
+                    if hasattr(query, 'params') and query.params:
+                        # Copy all parameters except the institution filter
+                        batch_query.params = copy.deepcopy(query.params)
+                        # Remove any existing institution filter
+                        if ('filter' in batch_query.params and 
+                            'last_known_institutions' in batch_query.params['filter']):
+                            filter_params = batch_query.params['filter']
+                            inst_filter = filter_params['last_known_institutions']
+                            if 'id' in inst_filter:
+                                del inst_filter['id']
+                    
+                    # Add the batch institution filter
+                    institution_or_filter = "|".join(batch_ids)
+                    return batch_query.filter(
+                        last_known_institutions={"id": institution_or_filter}
+                    )
+                
+                # Use the general batching utility
+                results = _execute_batched_queries(
+                    large_institution_list, 
+                    create_batch_query,
+                    "institution IDs",
+                    all_results,
+                    limit,
+                    json_path
+                )
+            else:
+                # Standard single query execution
+                if _dry_run_mode:
+                    _print_dry_run_query(
+                        "Authors query",
+                        url=query.url
+                    )
+                    return
+                
+                if all_results:
+                    limit_to_use = None  # Get all results
+                elif limit is not None:
+                    limit_to_use = limit  # Use specified limit
+                else:
+                    limit_to_use = 25  # Default first page
+                results = query.get(limit=limit_to_use)
+            
+            _print_debug_results(results)
+            _output_results(results, json_path)
+                
+        except Exception as api_error:
+            if _debug_mode:
+                from pyalex.logger import get_logger
+                logger = get_logger()
+                logger.debug(f"API call failed: {api_error}")
+            raise
             
     except Exception as e:
         if _debug_mode:
@@ -816,6 +1116,20 @@ def topics(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = 0,
 ):
     """
     Search and retrieve topics from OpenAlex.
@@ -826,6 +1140,8 @@ def topics(
       pyalex topics --domain-id "D1234567890" --limit 50
       pyalex topics --field-id "F1234567890" --json topics.json
       pyalex topics --subfield-id "SF1234567890"
+      pyalex topics --sort-by "works_count:desc" --limit 100
+      pyalex topics --sample 20 --seed 789
     """
     try:
         # Check for mutually exclusive options
@@ -844,6 +1160,11 @@ def topics(
             query = query.filter(field={"id": field_id})
         if subfield_id:
             query = query.filter(subfield={"id": subfield_id})
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
         
         _print_debug_url(query)
         if all_results:
@@ -887,6 +1208,20 @@ def sources(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = 0,
 ):
     """
     Search and retrieve sources (journals/venues) from OpenAlex.
@@ -897,6 +1232,8 @@ def sources(
       pyalex sources --limit 100
       pyalex sources --group-by "type"
       pyalex sources --group-by "is_oa" --search "machine learning" --json sources.json
+      pyalex sources --sort-by "works_count:desc" --limit 50
+      pyalex sources --sample 30 --seed 101
     """
     try:
         # Check for mutually exclusive options
@@ -909,6 +1246,11 @@ def sources(
         
         if search:
             query = query.search(search)
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
         
         # Handle group_by parameter
         if group_by:
@@ -970,6 +1312,20 @@ def institutions(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = 0,
 ):
     """
     Search and retrieve institutions from OpenAlex.
@@ -980,6 +1336,8 @@ def institutions(
       pyalex institutions --country US --limit 100
       pyalex institutions --group-by "country_code" --json institutions.json
       pyalex institutions --group-by "type"
+      pyalex institutions --sort-by "works_count:desc" --limit 50
+      pyalex institutions --sample 25 --seed 202
     """
     try:
         # Check for mutually exclusive options
@@ -994,6 +1352,11 @@ def institutions(
             query = query.search(search)
         if country_code:
             query = query.filter(country_code=country_code)
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
         
         # Handle group_by parameter
         if group_by:
@@ -1050,6 +1413,20 @@ def publishers(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = 0,
 ):
     """
     Search and retrieve publishers from OpenAlex.
@@ -1058,13 +1435,25 @@ def publishers(
       pyalex publishers --search "Elsevier"
       pyalex publishers --all
       pyalex publishers --group-by "country_code" --json publishers.json
+      pyalex publishers --sort-by "works_count:desc" --limit 50
+      pyalex publishers --sample 15 --seed 303
     """
     try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
         # Search publishers
         query = Publishers()
         
         if search:
             query = query.search(search)
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
             
         # Handle group_by parameter
         if group_by:
@@ -1125,6 +1514,20 @@ def funders(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = None,
 ):
     """
     Search and retrieve funders from OpenAlex.
@@ -1133,8 +1536,15 @@ def funders(
       pyalex funders --search "NSF"
       pyalex funders --country US --all
       pyalex funders --group-by "country_code" --json funders.json
+      pyalex funders --sort-by "works_count:desc" --limit 50
+      pyalex funders --sample 10 --seed 404
     """
     try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
         # Search funders
         query = Funders()
         
@@ -1142,6 +1552,11 @@ def funders(
             query = query.search(search)
         if country_code:
             query = query.filter(country_code=country_code)
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
         
         # Handle group_by parameter
         if group_by:
@@ -1194,6 +1609,20 @@ def domains(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = None,
 ):
     """
     Search and retrieve domains from OpenAlex.
@@ -1201,10 +1630,44 @@ def domains(
     Examples:
       pyalex domains --search "Physical Sciences"
       pyalex domains --all --json domains.json
+      pyalex domains --sort-by "works_count:desc" --limit 10
+      pyalex domains --sample 3 --seed 505
     """
     try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
         # Search domains
         query = Domains()
+        
+        if search:
+            query = query.search(search)
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
+        
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
         
         if search:
             query = query.search(search)
@@ -1251,6 +1714,20 @@ def fields(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = None,
 ):
     """
     Search and retrieve fields from OpenAlex.
@@ -1259,8 +1736,15 @@ def fields(
       pyalex fields --search "Computer Science"
       pyalex fields --domain-id "D1234567890" --all
       pyalex fields --json fields.json
+      pyalex fields --sort-by "works_count:desc" --limit 20
+      pyalex fields --sample 5 --seed 606
     """
     try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
         # Search fields
         query = Fields()
         
@@ -1268,6 +1752,11 @@ def fields(
             query = query.search(search)
         if domain_id:
             query = query.filter(domain={"id": domain_id})
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
             
         _print_debug_url(query)
         if all_results:
@@ -1311,6 +1800,20 @@ def subfields(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = None,
 ):
     """
     Search and retrieve subfields from OpenAlex.
@@ -1319,8 +1822,15 @@ def subfields(
       pyalex subfields --search "Machine Learning"
       pyalex subfields --field-id "F1234567890" --all
       pyalex subfields --json subfields.json
+      pyalex subfields --sort-by "works_count:desc" --limit 30
+      pyalex subfields --sample 8 --seed 707
     """
     try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
         # Search subfields
         query = Subfields()
         
@@ -1328,6 +1838,11 @@ def subfields(
             query = query.search(search)
         if field_id:
             query = query.filter(field={"id": field_id})
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
             
         _print_debug_url(query)
         if all_results:
@@ -1367,6 +1882,20 @@ def keywords(
         "--json",
         help="Save results to JSON file at specified path"
     )] = None,
+    sort_by: Annotated[Optional[str], typer.Option(
+        "--sort-by",
+        help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+             "'display_name:asc')"
+    )] = None,
+    sample: Annotated[Optional[int], typer.Option(
+        "--sample",
+        help="Get random sample of results (max 10,000). "
+             "Use with --seed for reproducible results"
+    )] = None,
+    seed: Annotated[Optional[int], typer.Option(
+        "--seed",
+        help="Seed for random sampling (used with --sample)"
+    )] = None,
 ):
     """
     Search and retrieve keywords from OpenAlex.
@@ -1374,10 +1903,44 @@ def keywords(
     Examples:
       pyalex keywords --search "artificial intelligence"
       pyalex keywords --all --json keywords.json
+      pyalex keywords --sort-by "works_count:desc" --limit 25
+      pyalex keywords --sample 12 --seed 808
     """
     try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
         # Search keywords
         query = Keywords()
+        
+        if search:
+            query = query.search(search)
+        
+        # Apply common options (sort, sample)
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by
+        )
+            
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
         
         if search:
             query = query.search(search)
@@ -1549,10 +2112,9 @@ def from_ids(
                 )
             
             try:
-                # Process IDs in batches of up to 100 for OR operator efficiency
-                batch_size = 100
-                for i in range(0, len(ids), batch_size):
-                    batch_ids = ids[i:i + batch_size]
+                # Process IDs in batches using configurable batch size
+                for i in range(0, len(ids), _batch_size):
+                    batch_ids = ids[i:i + _batch_size]
                     
                     if len(batch_ids) == 1:
                         # Single ID - use direct retrieval
@@ -1574,9 +2136,9 @@ def from_ids(
                         
                         all_results.extend(batch_results)
                     
-                    if _debug_mode and len(ids) > batch_size:
+                    if _debug_mode and len(ids) > _batch_size:
                         typer.echo(
-                            f"[DEBUG] Processed batch {i//batch_size + 1} "
+                            f"[DEBUG] Processed batch {i//_batch_size + 1} "
                             f"({len(batch_ids)} IDs)", 
                             err=True
                         )

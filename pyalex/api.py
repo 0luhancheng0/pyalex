@@ -12,7 +12,9 @@ Note: Concept entities have been deprecated by OpenAlex in favor of Topics.
 
 # Core configuration and response classes
 from pyalex.core.config import config
-from pyalex.core.response import OpenAlexResponseList, QueryError
+from pyalex.core.pagination import Paginator  
+from pyalex.core.response import OpenAlexResponseList
+from pyalex.core.response import QueryError
 from pyalex.core.utils import invert_abstract
 
 # Entity classes
@@ -43,6 +45,7 @@ __all__ = [
     # Response classes
     "OpenAlexResponseList",
     "QueryError",
+    "Paginator",
     
     # Main entity classes
     "Work",

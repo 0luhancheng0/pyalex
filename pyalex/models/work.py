@@ -1,7 +1,5 @@
 """Work entity models."""
 
-from datetime import datetime
-from typing import Any
 from typing import List
 from typing import Optional
 
@@ -41,7 +39,7 @@ class WorkAuthorship(BaseModel):
 
 
 class WorkConcept(BaseModel):
-    """Work concept information."""
+    """Work concept information (deprecated)."""
     
     id: str
     wikidata: Optional[str] = None
@@ -63,7 +61,7 @@ class WorkMesh(BaseModel):
 class WorkGrant(BaseModel):
     """Work grant information."""
     
-    funder: Optional[DehydratedEntity] = None
+    funder: Optional[str] = None  # OpenAlex ID
     funder_display_name: Optional[str] = None
     award_id: Optional[str] = None
 
@@ -81,7 +79,7 @@ class WorkOpenAccess(BaseModel):
     """Work open access information."""
     
     is_oa: bool
-    oa_date: Optional[datetime] = None
+    oa_status: Optional[str] = None
     oa_url: Optional[str] = None
     any_repository_has_fulltext: bool
 
@@ -102,23 +100,69 @@ class WorkKeyword(BaseModel):
     score: float
 
 
+class WorkAPC(BaseModel):
+    """Work APC (Article Processing Charge) information."""
+    
+    value: Optional[int] = None
+    currency: Optional[str] = None
+    provenance: Optional[str] = None
+    value_usd: Optional[int] = None
+
+
+class WorkCountsByYear(BaseModel):
+    """Work citation counts by year."""
+    
+    year: int
+    cited_by_count: int
+
+
+class WorkCitationNormalizedPercentile(BaseModel):
+    """Work citation normalized percentile information."""
+    
+    value: Optional[float] = None
+    is_in_top_1_percent: Optional[bool] = None
+    is_in_top_10_percent: Optional[bool] = None
+
+
+class WorkTopic(BaseModel):
+    """Work topic information with hierarchical structure."""
+    
+    id: str
+    display_name: str
+    score: float
+    subfield: Optional[DehydratedEntity] = None
+    field: Optional[DehydratedEntity] = None
+    domain: Optional[DehydratedEntity] = None
+
+
 class WorkEntity(OpenAlexEntity):
     """Complete Work entity model."""
     
-    # Basic information
+    # Basic information - inherited from OpenAlexEntity:
+    # id: str
+    # display_name: Optional[str] = None
+    # ids: Optional[OpenAlexID] = None  
+    # created_date: Optional[datetime] = None
+    # updated_date: Optional[datetime] = None
+    
+    # Title (same as display_name)
     title: Optional[str] = None
-    display_name: Optional[str] = None
+    
+    # Publication information
     publication_year: Optional[int] = None
-    publication_date: Optional[datetime] = None
+    publication_date: Optional[str] = None  # ISO 8601 date string
     
     # Abstract
-    abstract_inverted_index: Optional[AbstractInvertedIndex] = None
+    abstract_inverted_index: Optional[dict] = None  # Using dict to allow dynamic keys
     
     # Identifiers and URLs
     doi: Optional[str] = None
-    language: Optional[str] = None
+    language: Optional[str] = None  # ISO 639-1 format
+    
+    # Locations
     primary_location: Optional[WorkLocation] = None
     locations: Optional[List[WorkLocation]] = None
+    locations_count: Optional[int] = None
     best_oa_location: Optional[WorkLocation] = None
     
     # Type and classification
@@ -127,49 +171,56 @@ class WorkEntity(OpenAlexEntity):
     
     # Authors and institutions
     authorships: Optional[List[WorkAuthorship]] = None
+    corresponding_author_ids: Optional[List[str]] = None
+    corresponding_institution_ids: Optional[List[str]] = None
+    institutions_distinct_count: Optional[int] = None
+    countries_distinct_count: Optional[int] = None
     
-    # Source information
-    host_venue: Optional[DehydratedEntity] = None  # Deprecated
-    primary_topic: Optional[DehydratedEntity] = None
-    topics: Optional[List[DehydratedEntity]] = None
+    # Topics and concepts
+    primary_topic: Optional[WorkTopic] = None
+    topics: Optional[List[WorkTopic]] = None
     keywords: Optional[List[WorkKeyword]] = None
-    
-    # Concepts (deprecated)
-    concepts: Optional[List[WorkConcept]] = None
+    concepts: Optional[List[WorkConcept]] = None  # Deprecated
     
     # MeSH terms
     mesh: Optional[List[WorkMesh]] = None
     
     # Citations and references
     cited_by_count: Optional[int] = None
-    citing_works_count: Optional[int] = None
-    referenced_works_count: Optional[int] = None
-    related_works: Optional[List[str]] = None
+    cited_by_api_url: Optional[str] = None
     referenced_works: Optional[List[str]] = None
+    related_works: Optional[List[str]] = None
+    citation_normalized_percentile: Optional[WorkCitationNormalizedPercentile] = None
+    fwci: Optional[float] = None  # Field-weighted Citation Impact
+    
+    # Counts by year
+    counts_by_year: Optional[List[WorkCountsByYear]] = None
     
     # Bibliographic info
     biblio: Optional[WorkBiblio] = None
     
-    # Open access
+    # Flags
     is_retracted: Optional[bool] = None
     is_paratext: Optional[bool] = None
+    has_fulltext: Optional[bool] = None
+    fulltext_origin: Optional[str] = None  # "pdf" or "ngrams"
+    
+    # Open access
     open_access: Optional[WorkOpenAccess] = None
+    license: Optional[str] = None
     
     # Grants and funding
     grants: Optional[List[WorkGrant]] = None
     
+    # APCs (Article Processing Charges)
+    apc_list: Optional[WorkAPC] = None
+    apc_paid: Optional[WorkAPC] = None
+    
     # Sustainable development goals
     sustainable_development_goals: Optional[List[WorkSustainableDevelopmentGoal]] = None
     
-    # APCs (Article Processing Charges)
-    apc_list: Optional[dict] = None
-    apc_paid: Optional[dict] = None
-    
-    # Counts by year
-    counts_by_year: Optional[List[dict]] = None
-    
-    # Updated date
-    updated_date: Optional[datetime] = None
+    # Indexing information
+    indexed_in: Optional[List[str]] = None
 
 
 # Legacy class for backward compatibility

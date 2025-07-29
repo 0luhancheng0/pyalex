@@ -150,14 +150,31 @@ class BaseOpenAlex:
 
         if self.params and "group-by" in self.params:
             return OpenAlexResponseList(
-                res_json["group_by"], res_json["meta"], self.resource_class
+                res_json["group_by"], res_json["meta"], self.resource_class, 
+                self.resource_entity_class
             )
         elif "results" in res_json:
             return OpenAlexResponseList(
-                res_json["results"], res_json["meta"], self.resource_class
+                res_json["results"], res_json["meta"], self.resource_class,
+                self.resource_entity_class
             )
         elif "id" in res_json:
-            return self.resource_class(res_json)
+            # Validate single entity if entity class is available
+            if hasattr(self, 'resource_entity_class') and self.resource_entity_class:
+                try:
+                    validated_entity = self.resource_entity_class(**res_json)
+                    # Convert back to dict for backward compatibility using model_dump
+                    # Use mode='json' to handle datetime serialization 
+                    validated_dict = validated_entity.model_dump(mode='json')
+                    return self.resource_class(validated_dict)
+                except Exception as e:
+                    logger.warning(
+                        f"Validation failed for {self.__class__.__name__}: {e}"
+                    )
+                    # Fall back to unvalidated dict
+                    return self.resource_class(res_json)
+            else:
+                return self.resource_class(res_json)
         else:
             raise ValueError("Unknown response format")
 
