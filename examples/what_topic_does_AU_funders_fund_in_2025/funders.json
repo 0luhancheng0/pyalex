@@ -1,0 +1,32 @@
+[
+  {
+    "id": "https://openalex.org/F4320334704",
+    "display_name": "Australian Research Council",
+    "works_count": 96875,
+    "cited_by_count": 3633995
+  },
+  {
+    "id": "https://openalex.org/F4320334705",
+    "display_name": "National Health and Medical Research Council",
+    "works_count": 46081,
+    "cited_by_count": 1540444
+  },
+  {
+    "id": "https://openalex.org/F4320315885",
+    "display_name": "Australian Government",
+    "works_count": 6052,
+    "cited_by_count": 123562
+  },
+  {
+    "id": "https://openalex.org/F4320320984",
+    "display_name": "University of Queensland",
+    "works_count": 4860,
+    "cited_by_count": 138612
+  },
+  {
+    "id": "https://openalex.org/F4320320974",
+    "display_name": "University of Melbourne",
+    "works_count": 4546,
+    "cited_by_count": 103886
+  }
+]

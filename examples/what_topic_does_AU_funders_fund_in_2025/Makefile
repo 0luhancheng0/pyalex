@@ -1,5 +1,5 @@
 funders.json:
-	pyalex funders --country AU --sample 5 --json $@
+	pyalex funders --country AU --limit 5 --json $@
 
 funded_works.json: funders.json
 	cat funders.json | jq 'map(.id) | unique | join(",")' | xargs pyalex works --json $@ --year 2025 --all --funder-ids

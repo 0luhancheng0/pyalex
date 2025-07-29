@@ -583,10 +583,6 @@ def works(
         help="Group results by field (e.g. 'oa_status', 'publication_year', "
              "'type', 'is_retracted', 'cited_by_count')"
     )] = None,
-    include_abstract: Annotated[bool, typer.Option(
-        "--abstract",
-        help="Include full abstracts in output (when available)"
-    )] = True,
     all_results: Annotated[bool, typer.Option(
         "--all",
         help="Retrieve all results (default: first page only)"
@@ -886,10 +882,9 @@ def works(
             typer.echo("No results returned from API", err=True)
             return
         
-        # Convert abstracts for all works in results if requested
-        if results and include_abstract:
+        # Always convert abstracts for all works in results
+        if results:
             results = [_add_abstract_to_work(work) for work in results]
-            
         _output_results(results, json_path)
             
     except Exception as e:
@@ -1967,10 +1962,6 @@ def keywords(
 
 @app.command()
 def from_ids(
-    include_abstract: Annotated[bool, typer.Option(
-        "--abstract",
-        help="Include full abstracts in output for works (when available)"
-    )] = False,
     json_path: Annotated[Optional[str], typer.Option(
         "--json",
         help="Save results to JSON file at specified path"
@@ -1999,7 +1990,6 @@ def from_ids(
     Examples:
       echo '["W1234", "A5678", "I9012"]' | pyalex from-ids --json results.json
       echo -e "A1234567890\\nW9876543210" | pyalex from-ids
-      echo '["W1234"]' | pyalex from-ids --abstract
       echo '["1", "10", "1234"]' | pyalex from-ids  # Domain, Field, Subfield
     """
     try:
@@ -2129,7 +2119,7 @@ def from_ids(
                     # Handle results
                     if batch_results:
                         # Convert abstracts for works if requested
-                        if include_abstract and class_name == 'Works':
+                        if class_name == 'Works':
                             batch_results = [
                                 _add_abstract_to_work(work) for work in batch_results
                             ]
