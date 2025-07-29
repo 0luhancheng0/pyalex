@@ -10,7 +10,6 @@ from requests import HTTPError
 
 import pyalex
 from pyalex import Authors
-from pyalex import Concepts
 from pyalex import Domains
 from pyalex import Fields
 from pyalex import Funders
@@ -62,9 +61,9 @@ def test_meta_entities(entity):
     assert r.meta.get("count", False)
 
 
-@pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning")
-def test_meta_entities_deprecated():
-    r = Concepts().get()
+def test_topics_entity():
+    """Test Topics entity functionality (replacement for deprecated Concepts)"""
+    r = Topics().get()
     assert r.meta.get("count", False)
 
 

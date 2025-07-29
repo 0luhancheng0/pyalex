@@ -2,11 +2,11 @@
 """
 PyAlex CLI - Command line interface for the OpenAlex database
 """
+import copy
 import datetime
 import json
 import os
 import sys
-import traceback
 from typing import Optional
 
 import typer
@@ -28,15 +28,12 @@ from pyalex import config
 from pyalex import invert_abstract
 from pyalex.api import OpenAlexResponseList
 from pyalex.api import Work
-from pyalex.api import set_auto_approve
-from pyalex.api import set_silent_mode
 
 
 # Global verbose state
-_verbose_mode = False
-_auto_approve = False
+_debug_mode = False
 
-MAX_WIDTH = 100
+MAX_WIDTH = 300
 
 app = typer.Typer(
     name="pyalex",
@@ -49,13 +46,9 @@ app = typer.Typer(
 
 @app.callback()
 def main(
-    verbose: Annotated[bool, typer.Option(
-        "--verbose", "-v",
-        help="Enable verbose output including API URLs for debugging"
-    )] = False,
-    auto_approve: Annotated[bool, typer.Option(
-        "--yes", "-y",
-        help="Automatically approve large queries without prompting"
+    debug: Annotated[bool, typer.Option(
+        "--debug", "-d",
+        help="Enable debug output including API URLs and internal details"
     )] = False,
 ):
     """
@@ -63,35 +56,31 @@ def main(
     
     OpenAlex doesn't require authentication for most requests.
     """
-    global _verbose_mode, _auto_approve
-    _verbose_mode = verbose
-    _auto_approve = auto_approve
+    global _debug_mode
+    _debug_mode = debug
     
-    # Set the auto-approve flag in the API
-    set_auto_approve(auto_approve)
-    
-    if verbose:
-        typer.echo(f"Email: {config.email}")
-        typer.echo(f"User Agent: {config.user_agent}")
-        typer.echo("Verbose mode enabled - API URLs will be displayed")
+    if debug:
+        from pyalex.logger import setup_cli_logging
+        logger = setup_cli_logging(debug=True)
+        logger.debug(f"Email: {config.email}")
+        logger.debug(f"User Agent: {config.user_agent}")
+        logger.debug(
+            "Debug mode enabled - API URLs and internal details will be displayed"
+        )
 
 
 def _print_debug_url(query):
     """Print the constructed URL for debugging when verbose mode is enabled."""
-    if _verbose_mode:
-        typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
+    if _debug_mode:
+        from pyalex.logger import log_api_request
+        log_api_request(query.url)
 
 
 def _print_debug_results(results):
     """Print debug information about results when verbose mode is enabled."""
-    if _verbose_mode and results is not None:
-        typer.echo(f"[DEBUG] Results type: {type(results)}", err=True)
-        if hasattr(results, '__len__'):
-            typer.echo(f"[DEBUG] Results length: {len(results)}", err=True)
-        if hasattr(results, 'meta') and results.meta:
-            count = results.meta.get('count')
-            if count is not None:
-                typer.echo(f"[DEBUG] Total count from meta: {count}", err=True)
+    if _debug_mode and results is not None:
+        from pyalex.logger import log_api_response
+        log_api_response(results)
 
 
 def _add_abstract_to_work(work_dict):
@@ -103,1491 +92,39 @@ def _add_abstract_to_work(work_dict):
     return work_dict
 
 
-@app.command()
-def works(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for works"
-    )] = None,
-    author_id: Annotated[Optional[str], typer.Option(
-        "--author-id",
-        help="Filter by author OpenAlex ID"
-    )] = None,
-    institution_id: Annotated[Optional[str], typer.Option(
-        "--institution-id", 
-        help="Filter by institution OpenAlex ID"
-    )] = None,
-    publication_year: Annotated[Optional[str], typer.Option(
-        "--year",
-        help="Filter by publication year (e.g. '2020' or range '2019:2021')"
-    )] = None,
-    publication_date: Annotated[Optional[str], typer.Option(
-        "--date",
-        help="Filter by publication date (e.g. '2020-01-01' or "
-             "range '2019-01-01:2020-12-31')"
-    )] = None,
-    work_type: Annotated[Optional[str], typer.Option(
-        "--type",
-        help="Filter by work type (e.g. 'article', 'book', 'dataset')"
-    )] = None,
-    topic_id: Annotated[Optional[str], typer.Option(
-        "--topic-id",
-        help="Filter by primary topic OpenAlex ID"
-    )] = None,
-    subfield_id: Annotated[Optional[str], typer.Option(
-        "--subfield-id",
-        help="Filter by primary topic subfield OpenAlex ID"
-    )] = None,
-    funder_ids: Annotated[Optional[str], typer.Option(
-        "--funder-ids",
-        help="Filter by funder OpenAlex ID(s). Use comma-separated values for "
-             "OR logic (e.g., --funder-ids 'F123,F456,F789')"
-    )] = None,
-    award_ids: Annotated[Optional[str], typer.Option(
-        "--award-ids",
-        help="Filter by grant award ID(s). Use comma-separated values for "
-             "OR logic (e.g., --award-ids 'AWARD123,AWARD456')"
-    )] = None,
-    group_by: Annotated[Optional[str], typer.Option(
-        "--group-by",
-        help="Group results by field (e.g. 'oa_status', 'publication_year', "
-             "'type', 'is_retracted', 'cited_by_count')"
-    )] = None,
-    include_abstract: Annotated[bool, typer.Option(
-        "--abstract",
-        help="Include full abstracts in output (when available)"
-    )] = True,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, title, table, summary"
-    )] = "table",
-    work_id: Annotated[Optional[str], typer.Argument(
-        help="Specific work ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve works from OpenAlex.
-    
-    Examples:
-      pyalex works --search "machine learning"
-      pyalex works --author-id "A1234567890" --limit 5
-      pyalex works --year "2019:2020" --limit 10
-      pyalex works --date "2020-01-01:2020-12-31" --limit 10
-      pyalex works --date "2020-06-15" --limit 5
-      pyalex works --type "article" --search "COVID-19"
-      pyalex works --topic-id "T10002" --limit 5
-      pyalex works --subfield-id "SF12345" --limit 5
-      pyalex works --funder-ids "F4320332161" --limit 5
-      pyalex works --funder-ids "F123,F456,F789" --limit 5
-      pyalex works --award-ids "AWARD123,AWARD456" --limit 5
-      pyalex works --search "AI" --abstract --format summary
-      pyalex works --group-by "oa_status" --format table
-      pyalex works --group-by "publication_year" --search "COVID-19"
-      pyalex works W1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if work_id:
-            # Get specific work
-            work = Works()[work_id]
-            if _verbose_mode:
-                typer.echo(f"[DEBUG] API URL: {Works().url}/{work_id}", err=True)
-            # Convert abstract for single work if requested
-            if include_abstract:
-                work = _add_abstract_to_work(work)
-            _output_results(work, output_format, single=True)
-        else:
-            # Search works
-            query = Works()
-            
-            if search:
-                query = query.search(search)
-            if author_id:
-                query = query.filter(author={"id": author_id})
-            if institution_id:
-                query = query.filter(
-                    authorships={"institutions": {"id": institution_id}}
-                )
-            if publication_year:
-                # Handle publication year ranges (e.g., "2019:2020") or single years
-                if ":" in publication_year:
-                    try:
-                        start_year, end_year = publication_year.split(":")
-                        start_year = int(start_year.strip())
-                        end_year = int(end_year.strip())
-                        
-                        # For inclusive range, use >= start_year and <= end_year
-                        # Since PyAlex only supports > and <, we'll use 
-                        # (start_year - 1) and (end_year + 1)
-                        query = query.filter_gt(publication_year=start_year - 1)
-                        query = query.filter_lt(publication_year=end_year + 1)
-                    except ValueError:
-                        typer.echo(
-                            "Error: Invalid year range format. Use 'start:end' "
-                            "(e.g., '2019:2020')", 
-                            err=True
-                        )
-                        raise typer.Exit(1) from None
-                else:
-                    try:
-                        year = int(publication_year.strip())
-                        query = query.filter(publication_year=year)
-                    except ValueError:
-                        typer.echo(
-                            "Error: Invalid year format. Use a single year or range "
-                            "(e.g., '2020' or '2019:2020')", 
-                            err=True
-                        )
-                        raise typer.Exit(1) from None
-            
-            if publication_date:
-                # Handle publication date ranges (e.g., "2019-01-01:2020-12-31") 
-                # or single dates
-                if ":" in publication_date:
-                    try:
-                        start_date, end_date = publication_date.split(":")
-                        start_date = start_date.strip()
-                        end_date = end_date.strip()
-                        
-                        # Validate date format (basic check for YYYY-MM-DD)
-                        datetime.datetime.strptime(start_date, "%Y-%m-%d")
-                        datetime.datetime.strptime(end_date, "%Y-%m-%d")
-                        
-                        # For inclusive range, we need >= start_date and <= end_date
-                        # We'll use from_publication_date and to_publication_date
-                        query = query.filter(from_publication_date=start_date)
-                        query = query.filter(to_publication_date=end_date)
-                    except ValueError as ve:
-                        typer.echo(
-                            "Error: Invalid date range format. Use "
-                            "'YYYY-MM-DD:YYYY-MM-DD' (e.g., '2019-01-01:2020-12-31')", 
-                            err=True
-                        )
-                        raise typer.Exit(1) from ve
-                else:
-                    try:
-                        # Validate single date format
-                        datetime.datetime.strptime(publication_date.strip(), "%Y-%m-%d")
-                        query = query.filter(publication_date=publication_date.strip())
-                    except ValueError:
-                        typer.echo(
-                            "Error: Invalid date format. Use YYYY-MM-DD format "
-                            "(e.g., '2020-01-01') or range '2019-01-01:2020-12-31'", 
-                            err=True
-                        )
-                        raise typer.Exit(1) from None
-            
-            if work_type:
-                query = query.filter(type=work_type)
-            
-            if topic_id:
-                query = query.filter(primary_topic={"id": topic_id})
-            
-            if subfield_id:
-                query = query.filter(primary_topic={"subfield": {"id": subfield_id}})
-            
-            if funder_ids:
-                # Parse comma-separated funder IDs
-                funder_list = [
-                    fid.strip() for fid in funder_ids.split(',') if fid.strip()
-                ]
-                # Clean up funder IDs (remove URL prefix if present)
-                cleaned_funder_list = []
-                for fid in funder_list:
-                    clean_id = fid.replace('https://openalex.org/', '').strip()
-                    clean_id = clean_id.strip('/')
-                    if clean_id:
-                        cleaned_funder_list.append(clean_id)
-                
-                if len(cleaned_funder_list) == 1:
-                    # Single funder ID
-                    query = query.filter(grants={"funder": cleaned_funder_list[0]})
-                elif len(cleaned_funder_list) <= 50:
-                    # Multiple funder IDs (<=50) - use OR logic by joining with |
-                    funder_or_filter = "|".join(cleaned_funder_list)
-                    query = query.filter(grants={"funder": funder_or_filter})
-                else:
-                    # More than 50 funder IDs - need to split into multiple queries
-                    # This will be handled after the main query setup by executing 
-                    # multiple queries and combining results
-                    query._large_funder_list = cleaned_funder_list
-            
-            if award_ids:
-                # Parse comma-separated award IDs
-                award_list = [
-                    aid.strip() for aid in award_ids.split(',') if aid.strip()
-                ]
-                # Clean up award IDs (remove URL prefix if present)
-                cleaned_award_list = []
-                for aid in award_list:
-                    clean_id = aid.replace('https://openalex.org/', '').strip()
-                    clean_id = clean_id.strip('/')
-                    if clean_id:
-                        cleaned_award_list.append(clean_id)
-                
-                if len(cleaned_award_list) == 1:
-                    # Single award ID
-                    query = query.filter(grants={"award_id": cleaned_award_list[0]})
-                else:
-                    # Multiple award IDs - use OR logic by joining with |
-                    award_or_filter = "|".join(cleaned_award_list)
-                    query = query.filter(grants={"award_id": award_or_filter})
-
-            # Handle group_by parameter
-            if group_by:
-                query = query.group_by(group_by)
-                
-                # Print debug URL before making the request
-                _print_debug_url(query)
-                
-                try:
-                    # For group-by operations, retrieve all groups by default
-                    results = query.get(limit=100000)  # High limit to get all groups
-                    _print_debug_results(results)
-                except Exception as api_error:
-                    typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
-                    raise
-                
-                # Output grouped results
-                _output_grouped_results(results, output_format)
-                return
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            
-            try:
-                # Check if we need to handle large funder list (>50 funder IDs)
-                if hasattr(query, '_large_funder_list'):
-                    large_funder_list = query._large_funder_list
-                    # Remove the temporary attribute
-                    delattr(query, '_large_funder_list')
-                    
-                    if output_format != "json":
-                        typer.echo(
-                            f"Processing {len(large_funder_list)} funder IDs "
-                            "in batches of 50...", 
-                            err=True
-                        )
-                    
-                    all_results = []
-                    seen_work_ids = set()  # To avoid duplicates
-                    batch_size = 50
-                    
-                    for i in range(0, len(large_funder_list), batch_size):
-                        batch_funders = large_funder_list[i:i + batch_size]
-                        
-                        if _verbose_mode:
-                            typer.echo(
-                                f"[DEBUG] Processing funder batch "
-                                f"{i//batch_size + 1}: {len(batch_funders)} funders", 
-                                err=True
-                            )
-                        
-                        # Create a new query for this batch by copying original
-                        batch_query = Works()
-                        
-                        # Re-apply all the same filters from the original query
-                        if hasattr(query, 'params') and query.params:
-                            # Copy all parameters except the funder filter
-                            import copy
-                            batch_query.params = copy.deepcopy(query.params)
-                            # Remove any existing funder filter
-                            if ('filter' in batch_query.params and 
-                                'grants' in batch_query.params['filter']):
-                                if 'funder' in batch_query.params['filter']['grants']:
-                                    del batch_query.params['filter']['grants']['funder']
-                        
-                        # Add the batch funder filter
-                        funder_or_filter = "|".join(batch_funders)
-                        batch_query = batch_query.filter(
-                            grants={"funder": funder_or_filter}
-                        )
-                        
-                        if _verbose_mode:
-                            typer.echo(
-                                f"[DEBUG] Batch API URL: {batch_query.url}", 
-                                err=True
-                            )
-                        
-                        # Execute the batch query
-                        batch_results = batch_query.get(limit=limit)
-                        
-                        if batch_results:
-                            # Filter out duplicates based on work ID
-                            for work in batch_results:
-                                work_id = work.get('id')
-                                if work_id and work_id not in seen_work_ids:
-                                    seen_work_ids.add(work_id)
-                                    all_results.append(work)
-                        
-                        if _verbose_mode:
-                            batch_count = len(batch_results) if batch_results else 0
-                            typer.echo(
-                                f"[DEBUG] Batch {i//batch_size + 1} returned "
-                                f"{batch_count} results", 
-                                err=True
-                            )
-                    
-                    # Create a result object similar to what query.get() returns
-                    results = OpenAlexResponseList(
-                        all_results, {"count": len(all_results)}, Work
-                    )
-                    
-                    if output_format != "json":
-                        typer.echo(
-                            f"Combined {len(all_results)} unique results from "
-                            f"{len(large_funder_list)} funder IDs", 
-                            err=True
-                        )
-                    
-                else:
-                    # Normal single query execution
-                    results = query.get(limit=limit)
-                
-                _print_debug_results(results)
-            except Exception as api_error:
-                typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
-                raise
-            
-            # Check if results is None or empty
-            if results is None:
-                typer.echo("No results returned from API", err=True)
-                return
-            
-            # Convert abstracts for all works in results if requested
-            if results and include_abstract:
-                results = [_add_abstract_to_work(work) for work in results]
-                
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        if _verbose_mode:
-            import traceback
-            typer.echo("[DEBUG] Full traceback:", err=True)
-            traceback.print_exc()
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def from_ids(
-    include_abstract: Annotated[bool, typer.Option(
-        "--abstract",
-        help="Include full abstracts in output for works (when available)"
-    )] = False,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name/title, table, summary"
-    )] = "table",
-):
-    """
-    Retrieve multiple entities by their OpenAlex IDs from stdin.
-    
-    This command automatically detects the entity type from the ID prefix and retrieves
-    the appropriate entities. It can handle mixed entity types in the same input.
-    
-    Supported ID prefixes:
-    - W: Works
-    - A: Authors  
-    - I: Institutions
-    - S: Sources (journals/venues)
-    - T: Topics
-    - P: Publishers
-    - F: Funders
-    - D: Domains
-    - SF: Subfields
-    
-    Examples:
-      echo '["W1234", "A5678", "I9012"]' | pyalex from-ids --format json
-      echo -e "A1234567890\\nW9876543210" | pyalex from-ids --format table
-      echo '["W1234"]' | pyalex from-ids --abstract --format summary
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        # Read from stdin
-        stdin_content = sys.stdin.read().strip()
-        
-        if not stdin_content:
-            typer.echo("Error: No input provided via stdin", err=True)
-            raise typer.Exit(1)
-        
-        # Try to parse as JSON array first
-        entity_ids = []
-        try:
-            parsed = json.loads(stdin_content)
-            if isinstance(parsed, list):
-                entity_ids = parsed
-            else:
-                typer.echo(
-                    "Error: JSON input must be an array of entity IDs",
-                    err=True
-                )
-                raise typer.Exit(1)
-        except json.JSONDecodeError:
-            # If not valid JSON, treat as newline-separated IDs
-            entity_ids = [
-                line.strip() 
-                for line in stdin_content.split('\n') 
-                if line.strip()
-            ]
-        
-        if not entity_ids:
-            typer.echo("Error: No entity IDs found in input", err=True)
-            raise typer.Exit(1)
-        
-        # Clean up all entity IDs (remove URL prefix if present)
-        cleaned_entity_ids = []
-        for entity_id in entity_ids:
-            if isinstance(entity_id, str):
-                # Remove URL prefix if present
-                clean_id = entity_id.replace('https://openalex.org/', '').strip()
-                # Also handle cases where there might be extra slashes or whitespace
-                clean_id = clean_id.strip('/')
-                # Remove quotes that might be added by jq or other tools
-                clean_id = clean_id.strip('"\'')
-                if clean_id:  # Only add non-empty IDs
-                    cleaned_entity_ids.append(clean_id)
-        
-        if not cleaned_entity_ids:
-            typer.echo(
-                "Error: No valid entity IDs found after cleaning input",
-                err=True
-            )
-            raise typer.Exit(1)
-        
-        if _verbose_mode:
-            typer.echo(
-                f"[DEBUG] Processing {len(cleaned_entity_ids)} entity IDs",
-                err=True
-            )
-            typer.echo(f"[DEBUG] First few IDs: {cleaned_entity_ids[:3]}", err=True)
-        
-        # Group IDs by entity type
-        entity_groups = {}
-        for entity_id in cleaned_entity_ids:
-            entity_class, entity_name, entity_plural = _detect_entity_type(entity_id)
-            
-            if entity_class not in entity_groups:
-                entity_groups[entity_class] = {
-                    'ids': [],
-                    'name': entity_name,
-                    'plural': entity_plural
-                }
-            entity_groups[entity_class]['ids'].append(entity_id)
-        
-        if _verbose_mode:
-            for _entity_class, group in entity_groups.items():
-                typer.echo(
-                    f"[DEBUG] Found {len(group['ids'])} {group['plural']}: "
-                    f"{group['ids'][:3]}{'...' if len(group['ids']) > 3 else ''}",
-                    err=True
-                )
-        
-        # Retrieve entities for each type
-        all_entities = []
-        for entity_class, group in entity_groups.items():
-            entity_name = group['name']
-            entity_plural = group['plural']
-            entity_ids_for_type = group['ids']
-            
-            # Determine special processing based on entity type
-            special_processing = None
-            if entity_class == Works and include_abstract:
-                special_processing = _add_abstract_to_work
-            
-            # Retrieve entities in batches of up to 50 (OpenAlex limit for OR filters)
-            batch_size = 50
-            
-            for i in range(0, len(entity_ids_for_type), batch_size):
-                batch_ids = entity_ids_for_type[i:i + batch_size]
-                
-                if _verbose_mode:
-                    typer.echo(
-                        f"[DEBUG] Fetching {entity_plural} batch "
-                        f"{i//batch_size + 1}: {len(batch_ids)} entities", 
-                        err=True
-                    )
-                
-                try:
-                    # Create OR filter for batch of entity IDs
-                    # Format: "A123|A456|A789"
-                    id_filter = "|".join(batch_ids)
-                    
-                    # Query entities using OR filter
-                    # Keywords use 'id' field instead of 'openalex_id'
-                    if entity_class == Keywords:
-                        query = entity_class().filter(id=id_filter)
-                    else:
-                        query = entity_class().filter(openalex_id=id_filter)
-                    
-                    if _verbose_mode:
-                        typer.echo(f"[DEBUG] API URL: {query.url}", err=True)
-                    
-                    # Get all results for this batch (no limit since we want all 
-                    # requested entities)
-                    batch_results = query.get()
-                    
-                    if batch_results:
-                        # Apply special processing if provided
-                        if special_processing:
-                            batch_results = [
-                                special_processing(entity) for entity in batch_results
-                            ]
-                        
-                        all_entities.extend(batch_results)
-                        
-                        if _verbose_mode:
-                            typer.echo(
-                                f"[DEBUG] Successfully retrieved {len(batch_results)} "
-                                f"{entity_plural} from batch", 
-                                err=True
-                            )
-                    else:
-                        if _verbose_mode:
-                            typer.echo(
-                                f"[DEBUG] No {entity_plural} returned for batch", 
-                                err=True
-                            )
-                    
-                except Exception as e:
-                    if _verbose_mode:
-                        typer.echo(
-                            f"[DEBUG] Failed to fetch batch: {e}", 
-                            err=True
-                        )
-                        # Fall back to individual requests for this batch
-                        typer.echo(
-                            "[DEBUG] Falling back to individual requests for batch", 
-                            err=True
-                        )
-                        
-                        for clean_id in batch_ids:
-                            try:
-                                entity = entity_class()[clean_id]
-                                if special_processing:
-                                    entity = special_processing(entity)
-                                all_entities.append(entity)
-                            except Exception as individual_error:
-                                typer.echo(
-                                    f"Warning: Could not retrieve {entity_name} "
-                                    f"{clean_id}: {individual_error}", 
-                                    err=True
-                                )
-                                continue
-                    else:
-                        typer.echo(
-                            f"Warning: Could not retrieve batch of {len(batch_ids)} "
-                            f"{entity_plural}: {e}", 
-                            err=True
-                        )
-                    continue
-        
-        if not all_entities:
-            typer.echo("Error: No entities could be retrieved", err=True)
-            raise typer.Exit(1)
-        
-        if _verbose_mode:
-            typer.echo(
-                f"[DEBUG] Successfully retrieved {len(all_entities)} total entities",
-                err=True
-            )
-        
-        _output_results(all_entities, output_format)
-        
-    except Exception as e:
-        if _verbose_mode:
-            typer.echo("[DEBUG] Full traceback:", err=True)
-            traceback.print_exc()
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-def _detect_entity_type(entity_id):
-    """
-    Detect the entity type from an OpenAlex ID prefix.
-    
-    Returns:
-        tuple: (entity_class, entity_name, entity_plural)
-        
-    Raises:
-        ValueError: If entity ID format is not recognized
-    """
-    # Mapping of ID prefixes to entity classes and names
-    prefix_mapping = {
-        'W': (Works, "work", "works"),
-        'A': (Authors, "author", "authors"),
-        'I': (Institutions, "institution", "institutions"),
-        'S': (Sources, "source", "sources"),
-        'T': (Topics, "topic", "topics"),
-        'P': (Publishers, "publisher", "publishers"),
-        'F': (Funders, "funder", "funders"),
-        'D': (Domains, "domain", "domains"),
-        'SF': (Subfields, "subfield", "subfields"),
-    }
-    
-    # Check for subfield first (SF prefix)
-    if entity_id.startswith('SF') and len(entity_id) > 2 and entity_id[2:].isdigit():
-        return prefix_mapping['SF']
-    
-    # Check single letter prefixes - only if ID looks like standard OpenAlex format
-    # Standard format: letter followed by numbers (e.g., W123456789, A5083138872)
-    if len(entity_id) > 1 and entity_id[0].upper() in prefix_mapping:
-        # Verify it follows the pattern: letter + digits
-        if entity_id[1:].isdigit():
-            prefix = entity_id[0].upper()
-            return prefix_mapping[prefix]
-    
-    # Raise error for unrecognized formats
-    raise ValueError(f"Unrecognized entity ID format: {entity_id}. "
-                    f"Supported prefixes: {', '.join(prefix_mapping.keys())}")
-
-
-
-@app.command()
-def authors(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for authors"
-    )] = None,
-    institution_id: Annotated[Optional[str], typer.Option(
-        "--institution-id",
-        help="Filter by institution OpenAlex ID"
-    )] = None,
-    group_by: Annotated[Optional[str], typer.Option(
-        "--group-by",
-        help="Group results by field (e.g. 'cited_by_count', 'has_orcid', "
-             "'works_count')"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    author_id: Annotated[Optional[str], typer.Argument(
-        help="Specific author ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve authors from OpenAlex.
-    
-    Examples:
-      pyalex authors --search "John Smith"
-      pyalex authors --institution-id "I1234567890" --limit 5
-      pyalex authors --group-by "cited_by_count" --format summary
-      pyalex authors --group-by "has_orcid" --format table
-      pyalex authors A1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if author_id:
-            # Get specific author
-            author = Authors()[author_id]
-            if _verbose_mode:
-                typer.echo(f"[DEBUG] API URL: {Authors().url}/{author_id}", err=True)
-            _output_results(author, output_format, single=True)
-        else:
-            # Search authors
-            query = Authors()
-            
-            if search:
-                query = query.search(search)
-            if institution_id:
-                query = query.filter(last_known_institutions={"id": institution_id})
-            
-            # Handle group_by parameter
-            if group_by:
-                query = query.group_by(group_by)
-                
-                # Print debug URL before making the request
-                _print_debug_url(query)
-                
-                try:
-                    # For group-by operations, retrieve all groups by default
-                    results = query.get(limit=100000)  # High limit to get all groups
-                    if _verbose_mode:
-                        typer.echo(f"[DEBUG] Results type: {type(results)}", err=True)
-                        if hasattr(results, '__len__'):
-                            typer.echo(
-                                f"[DEBUG] Results length: {len(results)}", 
-                                err=True
-                            )
-                except Exception as api_error:
-                    typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
-                    raise
-                
-                # Output grouped results
-                _output_grouped_results(results, output_format)
-                return
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def topics(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for topics"
-    )] = None,
-    domain_id: Annotated[Optional[str], typer.Option(
-        "--domain-id",
-        help="Filter by domain OpenAlex ID"
-    )] = None,
-    field_id: Annotated[Optional[str], typer.Option(
-        "--field-id",
-        help="Filter by field OpenAlex ID" 
-    )] = None,
-    subfield_id: Annotated[Optional[str], typer.Option(
-        "--subfield-id",
-        help="Filter by subfield OpenAlex ID"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    topic_id: Annotated[Optional[str], typer.Argument(
-        help="Specific topic ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve topics from OpenAlex.
-    
-    Examples:
-      pyalex topics --search "artificial intelligence"
-      pyalex topics --domain-id "D1234567890" --limit 5
-      pyalex topics --field-id "F1234567890" --limit 5
-      pyalex topics --subfield-id "SF1234567890" --limit 5
-      pyalex topics T1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if topic_id:
-            # Get specific topic
-            topic = Topics()[topic_id]
-            if _verbose_mode:
-                typer.echo(f"[DEBUG] API URL: {Topics().url}/{topic_id}", err=True)
-            _output_results(topic, output_format, single=True)
-        else:
-            # Search topics
-            query = Topics()
-            
-            if search:
-                query = query.search(search)
-            if domain_id:
-                query = query.filter(domain={"id": domain_id})
-            if field_id:
-                query = query.filter(field={"id": field_id})
-            if subfield_id:
-                query = query.filter(subfield={"id": subfield_id})
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def sources(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for sources"
-    )] = None,
-    group_by: Annotated[Optional[str], typer.Option(
-        "--group-by",
-        help="Group results by field (e.g. 'type', 'is_oa', 'country_code', "
-             "'works_count', 'cited_by_count')"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    source_id: Annotated[Optional[str], typer.Argument(
-        help="Specific source ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve sources (journals/venues) from OpenAlex.
-    
-    Examples:
-      pyalex sources --search "Nature"
-      pyalex sources --limit 5
-      pyalex sources --group-by "type" --format table
-      pyalex sources --group-by "is_oa" --search "machine learning"
-      pyalex sources S1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if source_id:
-            # Get specific source
-            source = Sources()[source_id]
-            if _verbose_mode:
-                typer.echo(f"[DEBUG] API URL: {Sources().url}/{source_id}", err=True)
-            _output_results(source, output_format, single=True)
-        else:
-            # Search sources
-            query = Sources()
-            
-            if search:
-                query = query.search(search)
-            
-            # Handle group_by parameter
-            if group_by:
-                query = query.group_by(group_by)
-                
-                # Print debug URL before making the request
-                _print_debug_url(query)
-                
-                # For group-by operations, retrieve all groups by default
-                if limit == 1000000:  # Default limit, get all groups
-                    results = query.get()
-                else:
-                    results = query.get(limit=limit)
-                
-                _print_debug_results(results)
-                # Output grouped results
-                _output_grouped_results(results, output_format)
-                return
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def institutions(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for institutions"
-    )] = None,
-    country_code: Annotated[Optional[str], typer.Option(
-        "--country",
-        help="Filter by country code (e.g. US, UK, CA)"
-    )] = None,
-    group_by: Annotated[Optional[str], typer.Option(
-        "--group-by",
-        help="Group results by field (e.g. 'country_code', 'continent', "
-             "'type', 'cited_by_count', 'works_count')"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    institution_id: Annotated[Optional[str], typer.Argument(
-        help="Specific institution ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve institutions from OpenAlex.
-    
-    Examples:
-      pyalex institutions --search "Harvard"
-      pyalex institutions --country US --limit 5
-      pyalex institutions --group-by "country_code"
-      pyalex institutions --group-by "type" --format summary
-      pyalex institutions I1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if institution_id:
-            # Get specific institution
-            institution = Institutions()[institution_id]
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] API URL: {Institutions().url}/{institution_id}", 
-                    err=True
-                )
-            _output_results(institution, output_format, single=True)
-        else:
-            # Search institutions
-            query = Institutions()
-            
-            if search:
-                query = query.search(search)
-            if country_code:
-                query = query.filter(country_code=country_code)
-            
-            # Handle group_by parameter
-            if group_by:
-                query = query.group_by(group_by)
-                
-                # Print debug URL before making the request
-                _print_debug_url(query)
-                
-                try:
-                    # For group-by operations, retrieve all groups by default
-                    results = query.get(limit=100000)  # High limit to get all groups
-                    _print_debug_results(results)
-                except Exception as api_error:
-                    typer.echo(f"[DEBUG] API call failed: {api_error}", err=True)
-                    raise
-                
-                # Output grouped results
-                _output_grouped_results(results, output_format)
-                return
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def publishers(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for publishers"
-    )] = None,
-    group_by: Annotated[Optional[str], typer.Option(
-        "--group-by",
-        help="Group results by field (e.g. 'country_codes', 'hierarchy_level', "
-             "'works_count', 'cited_by_count')"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    publisher_id: Annotated[Optional[str], typer.Argument(
-        help="Specific publisher ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve publishers from OpenAlex.
-    
-    Examples:
-      pyalex publishers --search "Elsevier"
-      pyalex publishers --limit 5
-      pyalex publishers --group-by "country_codes" --format table
-      pyalex publishers --group-by "hierarchy_level" --search "nature"
-      pyalex publishers P1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if publisher_id:
-            # Get specific publisher
-            publisher = Publishers()[publisher_id]
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] API URL: {Publishers().url}/{publisher_id}", 
-                    err=True
-                )
-            _output_results(publisher, output_format, single=True)
-        else:
-            # Search publishers
-            query = Publishers()
-            
-            if search:
-                query = query.search(search)
-            
-            # Handle group_by parameter
-            if group_by:
-                query = query.group_by(group_by)
-                
-                # Print debug URL before making the request
-                _print_debug_url(query)
-                
-                # For group-by operations, retrieve all groups by default
-                if limit == 1000000:  # Default limit, get all groups
-                    results = query.get()
-                else:
-                    results = query.get(limit=limit)
-                
-                _print_debug_results(results)
-                # Output grouped results
-                _output_grouped_results(results, output_format)
-                return
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def funders(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for funders"
-    )] = None,
-    country_code: Annotated[Optional[str], typer.Option(
-        "--country",
-        help="Filter by country code (e.g. US, UK, CA)"
-    )] = None,
-    group_by: Annotated[Optional[str], typer.Option(
-        "--group-by",
-        help="Group results by field (e.g. 'country_code', 'grants_count', "
-             "'works_count', 'cited_by_count')"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    funder_id: Annotated[Optional[str], typer.Argument(
-        help="Specific funder ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve funders from OpenAlex.
-    
-    Examples:
-      pyalex funders --search "NSF"
-      pyalex funders --country US --limit 5
-      pyalex funders --limit 5
-      pyalex funders --group-by "country_code" --format table
-      pyalex funders --group-by "grants_count" --search "national"
-      pyalex funders F1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if funder_id:
-            # Get specific funder
-            funder = Funders()[funder_id]
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] API URL: {Funders().url}/{funder_id}", 
-                    err=True
-                )
-            _output_results(funder, output_format, single=True)
-        else:
-            # Search funders
-            query = Funders()
-            
-            if search:
-                query = query.search(search)
-            if country_code:
-                query = query.filter(country_code=country_code)
-            
-            # Handle group_by parameter
-            if group_by:
-                query = query.group_by(group_by)
-                
-                # Print debug URL before making the request
-                _print_debug_url(query)
-                
-                # For group-by operations, retrieve all groups by default
-                if limit == 1000000:  # Default limit, get all groups
-                    results = query.get()
-                else:
-                    results = query.get(limit=limit)
-                
-                _print_debug_results(results)
-                # Output grouped results
-                _output_grouped_results(results, output_format)
-                return
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def domains(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for domains"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    domain_id: Annotated[Optional[str], typer.Argument(
-        help="Specific domain ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve domains from OpenAlex.
-    
-    Examples:
-      pyalex domains --search "Physical Sciences"
-      pyalex domains --limit 5
-      pyalex domains D1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if domain_id:
-            # Get specific domain
-            domain = Domains()[domain_id]
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] API URL: {Domains().url}/{domain_id}", 
-                    err=True
-                )
-            _output_results(domain, output_format, single=True)
-        else:
-            # Search domains
-            query = Domains()
-            
-            if search:
-                query = query.search(search)
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def fields(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for fields"
-    )] = None,
-    domain_id: Annotated[Optional[str], typer.Option(
-        "--domain-id",
-        help="Filter by domain OpenAlex ID"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    field_id: Annotated[Optional[str], typer.Argument(
-        help="Specific field ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve fields from OpenAlex.
-    
-    Examples:
-      pyalex fields --search "Computer Science"
-      pyalex fields --domain-id "D1234567890" --limit 5
-      pyalex fields F1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if field_id:
-            # Get specific field
-            field = Fields()[field_id]
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] API URL: {Fields().url}/{field_id}", 
-                    err=True
-                )
-            _output_results(field, output_format, single=True)
-        else:
-            # Search fields
-            query = Fields()
-            
-            if search:
-                query = query.search(search)
-            if domain_id:
-                query = query.filter(domain={"id": domain_id})
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def subfields(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for subfields"
-    )] = None,
-    field_id: Annotated[Optional[str], typer.Option(
-        "--field-id",
-        help="Filter by field OpenAlex ID"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    subfield_id: Annotated[Optional[str], typer.Argument(
-        help="Specific subfield ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve subfields from OpenAlex.
-    
-    Examples:
-      pyalex subfields --search "Machine Learning"
-      pyalex subfields --field-id "F1234567890" --limit 5
-      pyalex subfields SF1234567890
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if subfield_id:
-            # Get specific subfield
-            subfield = Subfields()[subfield_id]
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] API URL: {Subfields().url}/{subfield_id}", 
-                    err=True
-                )
-            _output_results(subfield, output_format, single=True)
-        else:
-            # Search subfields
-            query = Subfields()
-            
-            if search:
-                query = query.search(search)
-            if field_id:
-                query = query.filter(field={"id": field_id})
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def keywords(
-    search: Annotated[Optional[str], typer.Option(
-        "--search", "-s",
-        help="Search term for keywords"
-    )] = None,
-    limit: Annotated[int, typer.Option(
-        "--limit", "-l",
-        help="Maximum number of results to return"
-    )] = 1000000,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
-    keyword_id: Annotated[Optional[str], typer.Argument(
-        help="Specific keyword ID to retrieve"
-    )] = None,
-):
-    """
-    Search and retrieve keywords from OpenAlex.
-    
-    Examples:
-      pyalex keywords --search "artificial intelligence"
-      pyalex keywords --limit 5
-      pyalex keywords cardiac-imaging
-    """
-    try:
-        # Set silent mode for JSON output to suppress informational messages
-        set_silent_mode(output_format == "json")
-        
-        # Auto-approve large queries for JSON output to prevent interactive prompts
-        if output_format == "json":
-            set_auto_approve(True)
-        
-        if keyword_id:
-            # Get specific keyword
-            keyword = Keywords()[keyword_id]
-            if _verbose_mode:
-                typer.echo(
-                    f"[DEBUG] API URL: {Keywords().url}/{keyword_id}", 
-                    err=True
-                )
-            _output_results(keyword, output_format, single=True)
-        else:
-            # Search keywords
-            query = Keywords()
-            
-            if search:
-                query = query.search(search)
-            
-            # Print debug URL before making the request
-            _print_debug_url(query)
-            results = query.get(limit=limit)
-            _print_debug_results(results)
-            _output_results(results, output_format)
-            
-    except Exception as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-
-
-def _output_results(results, output_format: str, single: bool = False):
-    """Output results in the specified format."""
+def _output_results(results, json_path: Optional[str] = None, single: bool = False):
+    """Output results in table format to stdout or JSON format to file."""
     # Handle None or empty results
     if results is None:
-        typer.echo("No results found.")
+        if json_path:
+            with open(json_path, 'w') as f:
+                json.dump([], f, indent=2)
+        else:
+            typer.echo("No results found.")
         return
     
     if not single and (not results or len(results) == 0):
-        typer.echo("No results found.")
+        if json_path:
+            with open(json_path, 'w') as f:
+                json.dump([], f, indent=2)
+        else:
+            typer.echo("No results found.")
         return
     
-    if output_format == "json":
+    if json_path:
+        # Save JSON to file
         if single:
-            typer.echo(json.dumps(dict(results), indent=2))
+            data = dict(results)
         else:
-            typer.echo(json.dumps([dict(r) for r in results], indent=2))
-    elif output_format in ["title", "name"]:
-        if single:
-            result = results
-            if 'display_name' in result:
-                typer.echo(result['display_name'])
-            elif 'title' in result:
-                typer.echo(result['title'])
-            else:
-                typer.echo(result.get('id', 'Unknown'))
-        else:
-            for result in results:
-                if 'display_name' in result:
-                    typer.echo(result['display_name'])
-                elif 'title' in result:
-                    typer.echo(result['title'])
-                else:
-                    typer.echo(result.get('id', 'Unknown'))
-    elif output_format == "table":
-        _output_table(results, single)
-    elif output_format == "summary":
-        if single:
-            typer.echo(f"\n[1] {_format_summary(results)}")
-        else:
-            for i, result in enumerate(results, 1):
-                typer.echo(f"\n[{i}] {_format_summary(result)}")
+            data = [dict(r) for r in results]
+        
+        with open(json_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        typer.echo(f"Results saved to {json_path}")
     else:
-        typer.echo(f"Unknown output format: {output_format}", err=True)
-        raise typer.Exit(1) from None
+        # Display table format to stdout
+        _output_table(results, single)
 
 
 def _output_table(results, single: bool = False):
@@ -1738,24 +275,34 @@ def _output_table(results, single: bool = False):
     typer.echo(table)
 
 
-def _output_grouped_results(results, output_format: str):
-    """Output grouped results in the specified format."""
+def _output_grouped_results(results, json_path: Optional[str] = None):
+    """Output grouped results in table format to stdout or JSON format to file."""
     if results is None:
-        typer.echo("No grouped results found.")
+        if json_path:
+            with open(json_path, 'w') as f:
+                json.dump([], f, indent=2)
+        else:
+            typer.echo("No grouped results found.")
         return
     
     # When group-by is used, the results list itself contains the grouped data
     grouped_data = results
     
     if not grouped_data:
-        typer.echo("No grouped results found.")
+        if json_path:
+            with open(json_path, 'w') as f:
+                json.dump([], f, indent=2)
+        else:
+            typer.echo("No grouped results found.")
         return
     
-    if output_format == "json":
-        # Output the raw grouped data as JSON
-        typer.echo(json.dumps([dict(item) for item in grouped_data], indent=2))
-    elif output_format == "table":
-        # Create a table for grouped results
+    if json_path:
+        # Save JSON to file
+        with open(json_path, 'w') as f:
+            json.dump([dict(item) for item in grouped_data], f, indent=2)
+        typer.echo(f"Grouped results saved to {json_path}")
+    else:
+        # Display table format to stdout
         table = PrettyTable()
         table.field_names = ["Key", "Display Name", "Count"]
         table.max_width = MAX_WIDTH
@@ -1769,81 +316,1292 @@ def _output_grouped_results(results, output_format: str):
             table.add_row([key, display_name, f"{count:,}"])
         
         typer.echo(table)
-    elif output_format == "summary":
-        # Output summary format
-        total_count = sum(group.get('count', 0) for group in grouped_data)
-        typer.echo(f"Total groups: {len(grouped_data)}")
-        typer.echo(f"Total items: {total_count:,}")
-        typer.echo()
-        
-        for i, group in enumerate(grouped_data, 1):
-            key = group.get('key', 'Unknown')
-            display_name = group.get('key_display_name', key)
-            count = group.get('count', 0)
-            percentage = (count / total_count * 100) if total_count > 0 else 0
-            
-            typer.echo(f"[{i}] {display_name}: {count:,} ({percentage:.1f}%)")
-    elif output_format in ["title", "name"]:
-        # Just output the group names
-        for group in grouped_data:
-            display_name = group.get('key_display_name') or group.get('key', 'Unknown')
-            typer.echo(display_name)
-    else:
-        typer.echo(f"Unknown output format: {output_format}", err=True)
-        raise typer.Exit(1) from None
 
 
-def _format_summary(item):
-    """Format a single item as a summary."""
-    summary_parts = []
+@app.command()
+def works(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for works"
+    )] = None,
+    author_id: Annotated[Optional[str], typer.Option(
+        "--author-id",
+        help="Filter by author OpenAlex ID"
+    )] = None,
+    institution_id: Annotated[Optional[str], typer.Option(
+        "--institution-id", 
+        help="Filter by institution OpenAlex ID"
+    )] = None,
+    publication_year: Annotated[Optional[str], typer.Option(
+        "--year",
+        help="Filter by publication year (e.g. '2020' or range '2019:2021')"
+    )] = None,
+    publication_date: Annotated[Optional[str], typer.Option(
+        "--date",
+        help="Filter by publication date (e.g. '2020-01-01' or "
+             "range '2019-01-01:2020-12-31')"
+    )] = None,
+    work_type: Annotated[Optional[str], typer.Option(
+        "--type",
+        help="Filter by work type (e.g. 'article', 'book', 'dataset')"
+    )] = None,
+    topic_id: Annotated[Optional[str], typer.Option(
+        "--topic-id",
+        help="Filter by primary topic OpenAlex ID"
+    )] = None,
+    subfield_id: Annotated[Optional[str], typer.Option(
+        "--subfield-id",
+        help="Filter by primary topic subfield OpenAlex ID"
+    )] = None,
+    funder_ids: Annotated[Optional[str], typer.Option(
+        "--funder-ids",
+        help="Filter by funder OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --funder-ids 'F123,F456,F789')"
+    )] = None,
+    award_ids: Annotated[Optional[str], typer.Option(
+        "--award-ids",
+        help="Filter by grant award ID(s). Use comma-separated values for "
+             "OR logic (e.g., --award-ids 'AWARD123,AWARD456')"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'oa_status', 'publication_year', "
+             "'type', 'is_retracted', 'cited_by_count')"
+    )] = None,
+    include_abstract: Annotated[bool, typer.Option(
+        "--abstract",
+        help="Include full abstracts in output (when available)"
+    )] = True,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve works from OpenAlex.
     
-    # Display name or title
-    name = item.get('display_name') or item.get('title', 'Unknown')
-    summary_parts.append(f"Name: {name}")
-    
-    # ID
-    if 'id' in item:
-        summary_parts.append(f"ID: {item['id']}")
-    
-    # Type-specific information
-    if 'publication_year' in item:  # Work
-        summary_parts.append(f"Year: {item.get('publication_year', 'Unknown')}")
-        if 'primary_location' in item and item['primary_location']:
-            source = item['primary_location'].get('source', {})
-            if source and source.get('display_name'):
-                summary_parts.append(f"Journal: {source['display_name']}")
-        if 'cited_by_count' in item:
-            summary_parts.append(f"Citations: {item['cited_by_count']}")
+    Examples:
+      pyalex works --search "machine learning"
+      pyalex works --author-id "A1234567890" --all
+      pyalex works --year "2019:2020" --json results.json
+      pyalex works --date "2020-01-01:2020-12-31" --all
+      pyalex works --date "2020-06-15"
+      pyalex works --type "article" --search "COVID-19"
+      pyalex works --topic-id "T10002"
+      pyalex works --subfield-id "SF12345"
+      pyalex works --funder-ids "F4320332161"
+      pyalex works --funder-ids "F123,F456,F789" --all
+      pyalex works --award-ids "AWARD123,AWARD456"
+      pyalex works --search "AI" --abstract --json ai_works.json
+      pyalex works --group-by "oa_status"
+      pyalex works --group-by "publication_year" --search "COVID-19"
+    """
+    try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
         
-        # Add abstract if available
-        if 'abstract' in item and item['abstract']:
-            abstract = item['abstract']
-            abstract_preview = (abstract[:200] + "..." 
-                              if len(abstract) > 200 else abstract)
-            summary_parts.append(f"Abstract: {abstract_preview}")
-    
-    elif 'works_count' in item:  # Author or Topic
-        summary_parts.append(f"Works: {item['works_count']}")
-        if 'cited_by_count' in item:
-            summary_parts.append(f"Citations: {item['cited_by_count']}")
+        # Search works
+        query = Works()
         
-        # Handle new field (list) and old field (single object) for compatibility
-        if 'last_known_institutions' in item and item['last_known_institutions']:
-            # New field: last_known_institutions is a list, take the first one
-            institutions = item['last_known_institutions']
-            if institutions and len(institutions) > 0:
-                inst = institutions[0]
-                summary_parts.append(
-                    f"Institution: {inst.get('display_name', 'Unknown')}"
-                )
-        elif 'last_known_institution' in item and item['last_known_institution']:
-            # Fallback for old field for backward compatibility
-            inst = item['last_known_institution']
-            summary_parts.append(
-                f"Institution: {inst.get('display_name', 'Unknown')}"
+        if search:
+            query = query.search(search)
+        if author_id:
+            query = query.filter(author={"id": author_id})
+        if institution_id:
+            query = query.filter(
+                authorships={"institutions": {"id": institution_id}}
             )
+        
+        if publication_year:
+                # Handle publication year ranges (e.g., "2019:2020") or single years
+                if ":" in publication_year:
+                    try:
+                        start_year, end_year = publication_year.split(":")
+                        start_year = int(start_year.strip())
+                        end_year = int(end_year.strip())
+                        
+                        # For inclusive range, use >= start_year and <= end_year
+                        # Since PyAlex only supports > and <, we'll use 
+                        # (start_year - 1) and (end_year + 1)
+                        query = query.filter_gt(publication_year=start_year - 1)
+                        query = query.filter_lt(publication_year=end_year + 1)
+                    except ValueError:
+                        typer.echo(
+                            "Error: Invalid year range format. Use 'start:end' "
+                            "(e.g., '2019:2020')", 
+                            err=True
+                        )
+                        raise typer.Exit(1) from None
+                else:
+                    try:
+                        year = int(publication_year.strip())
+                        query = query.filter(publication_year=year)
+                    except ValueError:
+                        typer.echo(
+                            "Error: Invalid year format. Use a single year or range "
+                            "(e.g., '2020' or '2019:2020')", 
+                            err=True
+                        )
+                        raise typer.Exit(1) from None
+        
+        if publication_date:
+            # Handle publication date ranges (e.g., "2019-01-01:2020-12-31") 
+            # or single dates
+            if ":" in publication_date:
+                try:
+                    start_date, end_date = publication_date.split(":")
+                    start_date = start_date.strip()
+                    end_date = end_date.strip()
+                    
+                    # Validate date format (basic check for YYYY-MM-DD)
+                    datetime.datetime.strptime(start_date, "%Y-%m-%d")
+                    datetime.datetime.strptime(end_date, "%Y-%m-%d")
+                    
+                    # For inclusive range, we need >= start_date and <= end_date
+                    # We'll use from_publication_date and to_publication_date
+                    query = query.filter(from_publication_date=start_date)
+                    query = query.filter(to_publication_date=end_date)
+                except ValueError as ve:
+                    typer.echo(
+                        "Error: Invalid date range format. Use "
+                        "'YYYY-MM-DD:YYYY-MM-DD' (e.g., '2019-01-01:2020-12-31')", 
+                        err=True
+                    )
+                    raise typer.Exit(1) from ve
+            else:
+                try:
+                    # Validate single date format
+                    datetime.datetime.strptime(publication_date.strip(), "%Y-%m-%d")
+                    query = query.filter(publication_date=publication_date.strip())
+                except ValueError:
+                    typer.echo(
+                        "Error: Invalid date format. Use YYYY-MM-DD format "
+                        "(e.g., '2020-01-01') or range '2019-01-01:2020-12-31'", 
+                        err=True
+                    )
+                    raise typer.Exit(1) from None
+        
+        if work_type:
+            query = query.filter(type=work_type)
+        
+        if topic_id:
+            query = query.filter(primary_topic={"id": topic_id})
+        
+        if subfield_id:
+            query = query.filter(primary_topic={"subfield": {"id": subfield_id}})
+        
+        if funder_ids:
+            # Parse comma-separated funder IDs
+            funder_list = [
+                fid.strip() for fid in funder_ids.split(',') if fid.strip()
+            ]
+            # Clean up funder IDs (remove URL prefix if present)
+            cleaned_funder_list = []
+            for fid in funder_list:
+                clean_id = fid.replace('https://openalex.org/', '').strip()
+                clean_id = clean_id.strip('/')
+                if clean_id:
+                    cleaned_funder_list.append(clean_id)
+            
+            if len(cleaned_funder_list) == 1:
+                # Single funder ID
+                query = query.filter(grants={"funder": cleaned_funder_list[0]})
+            elif len(cleaned_funder_list) <= 50:
+                # Multiple funder IDs (<=50) - use OR logic by joining with |
+                funder_or_filter = "|".join(cleaned_funder_list)
+                query = query.filter(grants={"funder": funder_or_filter})
+            else:
+                # More than 50 funder IDs - need to split into multiple queries
+                # This will be handled after the main query setup by executing 
+                # multiple queries and combining results
+                query._large_funder_list = cleaned_funder_list
+        
+        if award_ids:
+            # Parse comma-separated award IDs
+            award_list = [
+                aid.strip() for aid in award_ids.split(',') if aid.strip()
+            ]
+            # Clean up award IDs (remove URL prefix if present)
+            cleaned_award_list = []
+            for aid in award_list:
+                clean_id = aid.replace('https://openalex.org/', '').strip()
+                clean_id = clean_id.strip('/')
+                if clean_id:
+                    cleaned_award_list.append(clean_id)
+            
+            if len(cleaned_award_list) == 1:
+                # Single award ID
+                query = query.filter(grants={"award_id": cleaned_award_list[0]})
+            else:
+                # Multiple award IDs - use OR logic by joining with |
+                award_or_filter = "|".join(cleaned_award_list)
+                query = query.filter(grants={"award_id": award_or_filter})
+
+        # Handle group_by parameter
+        if group_by:
+            query = query.group_by(group_by)
+            
+            # Print debug URL before making the request
+            _print_debug_url(query)
+            
+            try:
+                # For group-by operations, retrieve all groups by default
+                results = query.get(limit=100000)  # High limit to get all groups
+                _print_debug_results(results)
+            except Exception as api_error:
+                if _debug_mode:
+                    from pyalex.logger import get_logger
+                    logger = get_logger()
+                    logger.debug(f"API call failed: {api_error}")
+                raise
+            
+            # Output grouped results
+            _output_grouped_results(results, json_path)
+            return
+        
+        # Print debug URL before making the request
+        _print_debug_url(query)
+        
+        try:
+            # Check if we need to handle large funder list (>50 funder IDs)
+            if hasattr(query, '_large_funder_list'):
+                large_funder_list = query._large_funder_list
+                # Remove the temporary attribute
+                delattr(query, '_large_funder_list')
+                
+                if not json_path:
+                    typer.echo(
+                        f"Processing {len(large_funder_list)} funder IDs "
+                        "in batches of 50...", 
+                        err=True
+                    )
+                
+                all_results = []
+                seen_work_ids = set()  # To avoid duplicates
+                batch_size = 50
+                
+                for i in range(0, len(large_funder_list), batch_size):
+                    batch_funders = large_funder_list[i:i + batch_size]
+                    
+                    if _debug_mode:
+                        from pyalex.logger import get_logger
+                        logger = get_logger()
+                        logger.debug(
+                            f"Processing funder batch "
+                            f"{i//batch_size + 1}: {len(batch_funders)} funders"
+                        )
+                    
+                    # Create a new query for this batch by copying original
+                    batch_query = Works()
+                    
+                    # Re-apply all the same filters from the original query
+                    if hasattr(query, 'params') and query.params:
+                        # Copy all parameters except the funder filter
+                        batch_query.params = copy.deepcopy(query.params)
+                        # Remove any existing funder filter
+                        if ('filter' in batch_query.params and 
+                            'grants' in batch_query.params['filter']):
+                            if 'funder' in batch_query.params['filter']['grants']:
+                                del batch_query.params['filter']['grants']['funder']
+                    
+                    # Add the batch funder filter
+                    funder_or_filter = "|".join(batch_funders)
+                    batch_query = batch_query.filter(
+                        grants={"funder": funder_or_filter}
+                    )
+                    
+                    if _debug_mode:
+                        typer.echo(
+                            f"[DEBUG] Batch API URL: {batch_query.url}", 
+                            err=True
+                        )
+                    
+                    # Execute the batch query
+                    if all_results:
+                        limit_to_use = None  # Get all results
+                    elif limit is not None:
+                        limit_to_use = limit  # Use specified limit
+                    else:
+                        limit_to_use = 25  # Default first page
+                    batch_results = batch_query.get(limit=limit_to_use)
+                    
+                    if batch_results:
+                        # Filter out duplicates based on work ID
+                        for work in batch_results:
+                            work_id_str = work.get('id')
+                            if work_id_str and work_id_str not in seen_work_ids:
+                                seen_work_ids.add(work_id_str)
+                                all_results.append(work)
+                    
+                    if _debug_mode:
+                        batch_count = len(batch_results) if batch_results else 0
+                        typer.echo(
+                            f"[DEBUG] Batch {i//batch_size + 1} returned "
+                            f"{batch_count} results", 
+                            err=True
+                        )
+                
+                # Create a result object similar to what query.get() returns
+                results = OpenAlexResponseList(
+                    all_results, {"count": len(all_results)}, Work
+                )
+                
+                if not json_path:
+                    typer.echo(
+                        f"Combined {len(all_results)} unique results from "
+                        f"{len(large_funder_list)} funder IDs", 
+                        err=True
+                    )
+                
+            else:
+                # Normal single query execution
+                if all_results:
+                    limit_to_use = None  # Get all results
+                elif limit is not None:
+                    limit_to_use = limit  # Use specified limit
+                else:
+                    limit_to_use = 25  # Default first page
+                results = query.get(limit=limit_to_use)
+            
+            _print_debug_results(results)
+        except Exception as api_error:
+            if _debug_mode:
+                from pyalex.logger import get_logger
+                logger = get_logger()
+                logger.debug(f"API call failed: {api_error}")
+            raise
+        
+        # Check if results is None or empty
+        if results is None:
+            typer.echo("No results returned from API", err=True)
+            return
+        
+        # Convert abstracts for all works in results if requested
+        if results and include_abstract:
+            results = [_add_abstract_to_work(work) for work in results]
+            
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def authors(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for authors"
+    )] = None,
+    institution_id: Annotated[Optional[str], typer.Option(
+        "--institution-id",
+        help="Filter by institution OpenAlex ID"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'cited_by_count', 'has_orcid', "
+             "'works_count')"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve authors from OpenAlex.
     
-    return " | ".join(summary_parts)
+    Examples:
+      pyalex authors --search "John Smith"
+      pyalex authors --institution-id "I1234567890" --all
+      pyalex authors --institution-id "I1234567890" --limit 50
+      pyalex authors --group-by "cited_by_count" --json results.json
+      pyalex authors --group-by "has_orcid"
+    """
+    try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
+        # Search authors
+        query = Authors()
+        
+        if search:
+            query = query.search(search)
+        if institution_id:
+            query = query.filter(last_known_institutions={"id": institution_id})
+        
+        # Handle group_by parameter
+        if group_by:
+            query = query.group_by(group_by)
+            _print_debug_url(query)
+            
+            # For group-by operations, retrieve all groups by default
+            results = query.get(limit=100000)  # High limit to get all groups
+            _print_debug_results(results)
+            
+            # Output grouped results
+            _output_grouped_results(results, json_path)
+            return
+        
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def topics(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for topics"
+    )] = None,
+    domain_id: Annotated[Optional[str], typer.Option(
+        "--domain-id",
+        help="Filter by domain OpenAlex ID"
+    )] = None,
+    field_id: Annotated[Optional[str], typer.Option(
+        "--field-id",
+        help="Filter by field OpenAlex ID" 
+    )] = None,
+    subfield_id: Annotated[Optional[str], typer.Option(
+        "--subfield-id",
+        help="Filter by subfield OpenAlex ID"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve topics from OpenAlex.
+    
+    Examples:
+      pyalex topics --search "artificial intelligence"
+      pyalex topics --domain-id "D1234567890" --all
+      pyalex topics --domain-id "D1234567890" --limit 50
+      pyalex topics --field-id "F1234567890" --json topics.json
+      pyalex topics --subfield-id "SF1234567890"
+    """
+    try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
+        # Search topics
+        query = Topics()
+        
+        if search:
+            query = query.search(search)
+        if domain_id:
+            query = query.filter(domain={"id": domain_id})
+        if field_id:
+            query = query.filter(field={"id": field_id})
+        if subfield_id:
+            query = query.filter(subfield={"id": subfield_id})
+        
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def sources(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for sources (journals/venues)"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'type', 'is_oa', 'publisher')"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve sources (journals/venues) from OpenAlex.
+    
+    Examples:
+      pyalex sources --search "Nature"
+      pyalex sources --all
+      pyalex sources --limit 100
+      pyalex sources --group-by "type"
+      pyalex sources --group-by "is_oa" --search "machine learning" --json sources.json
+    """
+    try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
+        # Search sources
+        query = Sources()
+        
+        if search:
+            query = query.search(search)
+        
+        # Handle group_by parameter
+        if group_by:
+            query = query.group_by(group_by)
+            _print_debug_url(query)
+            
+            # For group-by operations, retrieve all groups by default
+            results = query.get(limit=100000)
+            _print_debug_results(results)
+            
+            # Output grouped results
+            _output_grouped_results(results, json_path)
+            return
+        
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def institutions(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for institutions"
+    )] = None,
+    country_code: Annotated[Optional[str], typer.Option(
+        "--country",
+        help="Filter by country code (e.g. US, UK, CA)"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'country_code', 'continent', "
+             "'type', 'cited_by_count', 'works_count')"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve institutions from OpenAlex.
+    
+    Examples:
+      pyalex institutions --search "Harvard"
+      pyalex institutions --country US --all
+      pyalex institutions --country US --limit 100
+      pyalex institutions --group-by "country_code" --json institutions.json
+      pyalex institutions --group-by "type"
+    """
+    try:
+        # Check for mutually exclusive options
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+        
+        # Search institutions
+        query = Institutions()
+        
+        if search:
+            query = query.search(search)
+        if country_code:
+            query = query.filter(country_code=country_code)
+        
+        # Handle group_by parameter
+        if group_by:
+            query = query.group_by(group_by)
+            _print_debug_url(query)
+            
+            # For group-by operations, retrieve all groups by default
+            results = query.get(limit=100000)
+            _print_debug_results(results)
+            
+            # Output grouped results
+            _output_grouped_results(results, json_path)
+            return
+        
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def publishers(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for publishers"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'country_code', 'hierarchy_level')"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve publishers from OpenAlex.
+    
+    Examples:
+      pyalex publishers --search "Elsevier"
+      pyalex publishers --all
+      pyalex publishers --group-by "country_code" --json publishers.json
+    """
+    try:
+        # Search publishers
+        query = Publishers()
+        
+        if search:
+            query = query.search(search)
+            
+        # Handle group_by parameter
+        if group_by:
+            query = query.group_by(group_by)
+            _print_debug_url(query)
+            
+            # For group-by operations, retrieve all groups by default
+            results = query.get(limit=100000)
+            _print_debug_results(results)
+            
+            # Output grouped results
+            _output_grouped_results(results, json_path)
+            return
+        
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def funders(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for funders"
+    )] = None,
+    country_code: Annotated[Optional[str], typer.Option(
+        "--country",
+        help="Filter by country code (e.g. US, UK, CA)"
+    )] = None,
+    group_by: Annotated[Optional[str], typer.Option(
+        "--group-by",
+        help="Group results by field (e.g. 'country_code', 'works_count')"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve funders from OpenAlex.
+    
+    Examples:
+      pyalex funders --search "NSF"
+      pyalex funders --country US --all
+      pyalex funders --group-by "country_code" --json funders.json
+    """
+    try:
+        # Search funders
+        query = Funders()
+        
+        if search:
+            query = query.search(search)
+        if country_code:
+            query = query.filter(country_code=country_code)
+        
+        # Handle group_by parameter
+        if group_by:
+            query = query.group_by(group_by)
+            _print_debug_url(query)
+            
+            # For group-by operations, retrieve all groups by default
+            results = query.get(limit=100000)
+            _print_debug_results(results)
+            
+            # Output grouped results
+            _output_grouped_results(results, json_path)
+            return
+        
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def domains(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for domains"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve domains from OpenAlex.
+    
+    Examples:
+      pyalex domains --search "Physical Sciences"
+      pyalex domains --all --json domains.json
+    """
+    try:
+        # Search domains
+        query = Domains()
+        
+        if search:
+            query = query.search(search)
+            
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def fields(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for fields"
+    )] = None,
+    domain_id: Annotated[Optional[str], typer.Option(
+        "--domain-id",
+        help="Filter by domain OpenAlex ID"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve fields from OpenAlex.
+    
+    Examples:
+      pyalex fields --search "Computer Science"
+      pyalex fields --domain-id "D1234567890" --all
+      pyalex fields --json fields.json
+    """
+    try:
+        # Search fields
+        query = Fields()
+        
+        if search:
+            query = query.search(search)
+        if domain_id:
+            query = query.filter(domain={"id": domain_id})
+            
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def subfields(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for subfields"
+    )] = None,
+    field_id: Annotated[Optional[str], typer.Option(
+        "--field-id",
+        help="Filter by field OpenAlex ID"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve subfields from OpenAlex.
+    
+    Examples:
+      pyalex subfields --search "Machine Learning"
+      pyalex subfields --field-id "F1234567890" --all
+      pyalex subfields --json subfields.json
+    """
+    try:
+        # Search subfields
+        query = Subfields()
+        
+        if search:
+            query = query.search(search)
+        if field_id:
+            query = query.filter(field={"id": field_id})
+            
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def keywords(
+    search: Annotated[Optional[str], typer.Option(
+        "--search", "-s",
+        help="Search term for keywords"
+    )] = None,
+    all_results: Annotated[bool, typer.Option(
+        "--all",
+        help="Retrieve all results (default: first page only)"
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit", "-l",
+        help="Maximum number of results to return (mutually exclusive with --all)"
+    )] = None,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Search and retrieve keywords from OpenAlex.
+    
+    Examples:
+      pyalex keywords --search "artificial intelligence"
+      pyalex keywords --all --json keywords.json
+    """
+    try:
+        # Search keywords
+        query = Keywords()
+        
+        if search:
+            query = query.search(search)
+            
+        _print_debug_url(query)
+        if all_results:
+            limit_to_use = None  # Get all results
+        elif limit is not None:
+            limit_to_use = limit  # Use specified limit
+        else:
+            limit_to_use = 25  # Default first page
+        results = query.get(limit=limit_to_use)
+        _print_debug_results(results)
+        _output_results(results, json_path)
+            
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def from_ids(
+    include_abstract: Annotated[bool, typer.Option(
+        "--abstract",
+        help="Include full abstracts in output for works (when available)"
+    )] = False,
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
+):
+    """
+    Retrieve multiple entities by their OpenAlex IDs from stdin.
+    
+    This command automatically detects the entity type from the ID format and retrieves
+    the appropriate entities. It can handle mixed entity types in the same input.
+    Up to 100 IDs of the same type can be retrieved in a single query using OR logic.
+    
+    Supported ID formats:
+    - W: Works
+    - A: Authors  
+    - I: Institutions
+    - S: Sources (journals/venues)
+    - T: Topics
+    - P: Publishers
+    - F: Funders
+    - K: Keywords
+    - 1-digit: Domains (e.g., "1", "2")
+    - 2-digit: Fields (e.g., "10", "23") 
+    - 4-digit: Subfields (e.g., "1234", "5678")
+    
+    Examples:
+      echo '["W1234", "A5678", "I9012"]' | pyalex from-ids --json results.json
+      echo -e "A1234567890\\nW9876543210" | pyalex from-ids
+      echo '["W1234"]' | pyalex from-ids --abstract
+      echo '["1", "10", "1234"]' | pyalex from-ids  # Domain, Field, Subfield
+    """
+    try:
+        # Read from stdin
+        stdin_content = sys.stdin.read().strip()
+        
+        if not stdin_content:
+            typer.echo("Error: No input provided via stdin", err=True)
+            raise typer.Exit(1)
+        
+        # Try to parse as JSON array first
+        entity_ids = []
+        try:
+            parsed = json.loads(stdin_content)
+            if isinstance(parsed, list):
+                entity_ids = parsed
+            else:
+                typer.echo(
+                    "Error: JSON input must be an array of entity IDs",
+                    err=True
+                )
+                raise typer.Exit(1)
+        except json.JSONDecodeError:
+            # If not valid JSON, treat as newline-separated IDs
+            entity_ids = [
+                line.strip() 
+                for line in stdin_content.split('\n') 
+                if line.strip()
+            ]
+        
+        if not entity_ids:
+            typer.echo("Error: No entity IDs found in input", err=True)
+            raise typer.Exit(1)
+        
+        # Group IDs by entity type for batch processing
+        entity_groups = {}
+        
+        def _detect_entity_type(entity_id):
+            """Detect the entity type from the OpenAlex ID prefix."""
+            # Clean up the ID (remove URL prefix if present)
+            clean_id = entity_id.replace('https://openalex.org/', '').strip()
+            clean_id = clean_id.strip('/')
+            
+            # Check for digit-only patterns first (domains, fields, subfields)
+            if clean_id.isdigit():
+                digit_count = len(clean_id)
+                if digit_count == 1:
+                    return Domains  # Single digit = domain
+                elif digit_count == 2:
+                    return Fields   # Two digits = field
+                elif digit_count == 4:
+                    return Subfields  # Four digits = subfield
+            
+            # Check for letter prefix patterns
+            prefix_mapping = {
+                'W': Works,
+                'A': Authors,
+                'I': Institutions,
+                'S': Sources,
+                'T': Topics,
+                'P': Publishers,
+                'F': Funders,
+                'K': Keywords,  # Keywords sometimes use K prefix
+            }
+            
+            # Check for single-letter prefixes
+            if len(clean_id) > 1 and clean_id[0].upper() in prefix_mapping:
+                # Verify it follows the pattern: letter + digits
+                if clean_id[1:].isdigit():
+                    prefix = clean_id[0].upper()
+                    return prefix_mapping[prefix]
+            
+            # Raise error for unrecognized formats
+            supported_formats = (list(prefix_mapping.keys()) + 
+                                ['1-digit (Domains)', '2-digit (Fields)', 
+                                 '4-digit (Subfields)'])
+            raise ValueError(f"Unrecognized entity ID format: {entity_id}. "
+                            f"Supported formats: {', '.join(supported_formats)}")
+        
+        # Group entity IDs by type
+        for entity_id in entity_ids:
+            try:
+                entity_class = _detect_entity_type(entity_id)
+                class_name = entity_class.__name__
+                
+                if class_name not in entity_groups:
+                    entity_groups[class_name] = {'class': entity_class, 'ids': []}
+                
+                entity_groups[class_name]['ids'].append(entity_id)
+                
+            except ValueError as e:
+                typer.echo(f"Warning: {e}", err=True)
+                continue
+        
+        if not entity_groups:
+            typer.echo("Error: No valid entity IDs found", err=True)
+            raise typer.Exit(1)
+        
+        # Retrieve entities by type
+        all_results = []
+        
+        for class_name, group_info in entity_groups.items():
+            entity_class = group_info['class']
+            ids = group_info['ids']
+            
+            if _debug_mode:
+                typer.echo(
+                    f"[DEBUG] Retrieving {len(ids)} {class_name.lower()}(s)", 
+                    err=True
+                )
+            
+            try:
+                # Process IDs in batches of up to 100 for OR operator efficiency
+                batch_size = 100
+                for i in range(0, len(ids), batch_size):
+                    batch_ids = ids[i:i + batch_size]
+                    
+                    if len(batch_ids) == 1:
+                        # Single ID - use direct retrieval
+                        batch_results = entity_class()[batch_ids[0]]
+                        if not isinstance(batch_results, list):
+                            batch_results = [batch_results]
+                    else:
+                        # Multiple IDs - use OR operator for batch retrieval
+                        id_filter = "|".join(batch_ids)
+                        batch_results = entity_class().filter(id=id_filter).get()
+                    
+                    # Handle results
+                    if batch_results:
+                        # Convert abstracts for works if requested
+                        if include_abstract and class_name == 'Works':
+                            batch_results = [
+                                _add_abstract_to_work(work) for work in batch_results
+                            ]
+                        
+                        all_results.extend(batch_results)
+                    
+                    if _debug_mode and len(ids) > batch_size:
+                        typer.echo(
+                            f"[DEBUG] Processed batch {i//batch_size + 1} "
+                            f"({len(batch_ids)} IDs)", 
+                            err=True
+                        )
+                
+            except Exception as e:
+                typer.echo(
+                    f"Error retrieving {class_name.lower()}(s): {e}", 
+                    err=True
+                )
+                continue
+        
+        if not all_results:
+            typer.echo("No results retrieved", err=True)
+            return
+        
+        # Output results
+        _output_results(all_results, json_path)
+        
+    except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
 
 
 @app.command()
@@ -1851,10 +1609,10 @@ def show(
     file_path: Annotated[Optional[str], typer.Argument(
         help="Path to the JSON file to display (if not provided, reads from stdin)"
     )] = None,
-    output_format: Annotated[str, typer.Option(
-        "--format", "-f",
-        help="Output format: json, name, table, summary"
-    )] = "table",
+    json_path: Annotated[Optional[str], typer.Option(
+        "--json",
+        help="Save results to JSON file at specified path"
+    )] = None,
 ):
     """
     Display a JSON file containing OpenAlex data in table format.
@@ -1865,10 +1623,11 @@ def show(
     
     Examples:
       pyalex show reviews.json
-      pyalex show reviews.json --format summary
-      pyalex show cited_by_reviews.json --format table
-      cat reviews.json | pyalex show --format summary
-      echo '{"display_name": "Test Work", "id": "W123"}' | pyalex show
+      pyalex show reviews.json --json reformatted.json  
+      pyalex show cited_by_reviews.json
+      cat reviews.json | pyalex show
+      echo '{"display_name": "Test Work", "id": "W123"}' | pyalex show \\
+        --json output.json
     """
     try:
         # Read from file or stdin
@@ -1890,8 +1649,6 @@ def show(
                 raise typer.Exit(1) from e
         else:
             # Read from stdin
-            import sys
-            
             try:
                 stdin_content = sys.stdin.read().strip()
                 
@@ -1899,51 +1656,28 @@ def show(
                     typer.echo("Error: No input provided via stdin", err=True)
                     raise typer.Exit(1)
                 
-                # Parse JSON from stdin
                 data = json.loads(stdin_content)
                 
             except json.JSONDecodeError as e:
-                typer.echo(f"Error: Invalid JSON from stdin: {e}", err=True)
-                raise typer.Exit(1) from e
-            except Exception as e:
-                typer.echo(f"Error reading from stdin: {e}", err=True)
+                typer.echo(f"Error: Invalid JSON input: {e}", err=True)
                 raise typer.Exit(1) from e
         
-        # Handle different data structures
+        # Determine if data is a single entity or a list
         if isinstance(data, dict):
             # Single entity
-            if _verbose_mode:
-                source = f"file: {file_path}" if file_path else "stdin"
-                typer.echo(
-                    f"[DEBUG] Displaying single entity from {source}", 
-                    err=True
-                )
-            _output_results(data, output_format, single=True)
+            _output_results(data, json_path, single=True)
         elif isinstance(data, list):
             # List of entities
-            if _verbose_mode:
-                source = f"file: {file_path}" if file_path else "stdin"
-                typer.echo(
-                    f"[DEBUG] Displaying {len(data)} entities from {source}", 
-                    err=True
-                )
-            if not data:
-                typer.echo("No data found in the input.")
-                return
-            _output_results(data, output_format, single=False)
+            _output_results(data, json_path)
         else:
-            source = f"file '{file_path}'" if file_path else "stdin"
-            typer.echo(
-                f"Error: Unexpected data format from {source}. "
-                f"Expected JSON object or array.", 
-                err=True
-            )
-            raise typer.Exit(1) from None
+            typer.echo("Error: Input must be a JSON object or array", err=True)
+            raise typer.Exit(1)
             
-    except typer.Exit:
-        # Re-raise typer.Exit to maintain proper exit codes
-        raise
     except Exception as e:
+        if _debug_mode:
+            from pyalex.logger import get_logger
+            logger = get_logger()
+            logger.debug("Full traceback:", exc_info=True)
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from e
 

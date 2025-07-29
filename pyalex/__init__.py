@@ -5,36 +5,43 @@ except ImportError:
     __version__ = "0.0.0"
     __version_tuple__ = (0, 0, 0)
 
-from pyalex.api import Author
-from pyalex.api import Authors
-from pyalex.api import Concept
-from pyalex.api import Concepts
-from pyalex.api import Domain
-from pyalex.api import Domains
-from pyalex.api import Field
-from pyalex.api import Fields
-from pyalex.api import Funder
-from pyalex.api import Funders
-from pyalex.api import Institution
-from pyalex.api import Institutions
-from pyalex.api import Journals
-from pyalex.api import Keyword
-from pyalex.api import Keywords
-from pyalex.api import OpenAlexResponseList
-from pyalex.api import People
-from pyalex.api import Publisher
-from pyalex.api import Publishers
-from pyalex.api import Source
-from pyalex.api import Sources
-from pyalex.api import Subfield
-from pyalex.api import Subfields
-from pyalex.api import Topic
-from pyalex.api import Topics
-from pyalex.api import Work
-from pyalex.api import Works
-from pyalex.api import autocomplete
-from pyalex.api import config
-from pyalex.api import invert_abstract
+# Import from the new refactored structure
+from pyalex.core.config import config
+from pyalex.core.response import OpenAlexResponseList
+from pyalex.core.utils import invert_abstract
+from pyalex.entities import Author
+from pyalex.entities import Authors
+from pyalex.entities import autocomplete
+from pyalex.entities import Domain
+from pyalex.entities import Domains
+from pyalex.entities import Field
+from pyalex.entities import Fields
+from pyalex.entities import Funder
+from pyalex.entities import Funders
+from pyalex.entities import Institution
+from pyalex.entities import Institutions
+from pyalex.entities import Journals
+from pyalex.entities import Keyword
+from pyalex.entities import Keywords
+from pyalex.entities import People
+from pyalex.entities import Publisher
+from pyalex.entities import Publishers
+from pyalex.entities import Source
+from pyalex.entities import Sources
+from pyalex.entities import Subfield
+from pyalex.entities import Subfields
+from pyalex.entities import Topic
+from pyalex.entities import Topics
+from pyalex.entities import Work
+from pyalex.entities import Works
+
+# New utility functions  
+from pyalex.utils import from_id
+from pyalex.utils import get_entity_type
+
+# Import logging configuration
+from pyalex.logger import get_logger
+from pyalex.logger import setup_logger
 
 __all__ = [
     "Works",
@@ -51,8 +58,6 @@ __all__ = [
     "Publisher",
     "Institutions",
     "Institution",
-    "Concepts",
-    "Concept",
     "Domains",
     "Domain",
     "Fields",
@@ -67,4 +72,8 @@ __all__ = [
     "config",
     "invert_abstract",
     "OpenAlexResponseList",
+    "setup_logger",
+    "get_logger",
+    "from_id",
+    "get_entity_type",
 ]

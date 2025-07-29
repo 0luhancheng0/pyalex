@@ -120,8 +120,10 @@ OpenAlex uses standard [ISO_3166-1_alpha-2](https://en.wikipedia.org/wiki/ISO_31
 
 ### Get single entity
 
-Get a single Work, Author, Source, Institution, Concept, Topic, Publisher or Funder from OpenAlex by the
+Get a single Work, Author, Source, Institution, Topic, Publisher or Funder from OpenAlex by the
 OpenAlex ID, or by DOI or ROR.
+
+**Note:** Concept entities have been deprecated by OpenAlex in favor of Topics.
 
 ```python
 Works()["W2741809807"]
@@ -142,7 +144,9 @@ Works()["W2741809807"]["open_access"]
 {'is_oa': True, 'oa_status': 'gold', 'oa_url': 'https://doi.org/10.7717/peerj.4375'}
 ```
 
-The previous works also for Authors, Sources, Institutions, Concepts and Topics
+The previous works also for Authors, Sources, Institutions, and Topics
+
+**Note:** Concepts have been deprecated in favor of Topics.
 
 ```python
 Authors()["A5027479191"]
@@ -151,7 +155,9 @@ Authors()["https://orcid.org/0000-0002-4297-0502"]  # same
 
 #### Get random
 
-Get a [random Work, Author, Source, Institution, Concept, Topic, Publisher or Funder](https://docs.openalex.org/how-to-use-the-api/get-single-entities/random-result).
+Get a [random Work, Author, Source, Institution, Topic, Publisher or Funder](https://docs.openalex.org/how-to-use-the-api/get-single-entities/random-result).
+
+**Note:** Concept.random() is deprecated; use Topics.random() instead.
 
 ```python
 Works().random()
