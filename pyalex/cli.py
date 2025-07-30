@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-PyAlex CLI - Command line interface for the OpenAlex database
-"""
 import copy
 import datetime
 import json
@@ -27,6 +24,243 @@ from pyalex import Works
 from pyalex import config
 from pyalex import invert_abstract
 from pyalex.core.config import MAX_PER_PAGE
+
+
+# Configuration for handling large ID lists and batch filters
+class BatchFilterConfig:
+    """Configuration for handling large ID lists that need to be batched."""
+    
+    def __init__(self, filter_path, id_field="id", or_separator="|"):
+        """
+        Initialize batch filter configuration.
+        
+        Args:
+            filter_path: Dot-separated path to the filter field (e.g., "grants.funder")
+            id_field: Field name for the ID within the filter (default: "id")
+            or_separator: Separator for OR logic in batch queries (default: "|")
+        """
+        self.filter_path = filter_path
+        self.id_field = id_field
+        self.or_separator = or_separator
+    
+    def apply_single_filter(self, query, id_value):
+        """Apply filter for a single ID."""
+        filter_dict = self._build_filter_dict(id_value)
+        return query.filter(**filter_dict)
+    
+    def apply_batch_filter(self, query, id_list):
+        """Apply filter for a batch of IDs using OR logic."""
+        or_filter_value = self.or_separator.join(id_list)
+        filter_dict = self._build_filter_dict(or_filter_value)
+        return query.filter(**filter_dict)
+    
+    def _build_filter_dict(self, value):
+        """Build nested filter dictionary from dot-separated path."""
+        # Split path into parts (e.g., "grants.funder" -> ["grants", "funder"])
+        path_parts = self.filter_path.split('.')
+        
+        # Build nested dict: {"grants": {"funder": value}} for path "grants.funder"
+        result = {self.id_field: value}
+        for part in reversed(path_parts):
+            result = {part: result}
+        
+        return result
+    
+    def remove_from_params(self, params):
+        """Remove this filter from query parameters to avoid conflicts."""
+        if not params or 'filter' not in params:
+            return
+        
+        current = params['filter']
+        path_parts = self.filter_path.split('.')
+        
+        # Navigate to the parent of the target field
+        for part in path_parts[:-1]:
+            if part not in current:
+                return
+            current = current[part]
+        
+        # Remove the final field if it exists
+        final_field = path_parts[-1]
+        if final_field in current and self.id_field in current[final_field]:
+            del current[final_field][self.id_field]
+
+
+# Pre-configured batch filters for common use cases
+BATCH_FILTER_CONFIGS = {
+    # Works filters - using correct OpenAlex field names
+    'works_funder': BatchFilterConfig("grants", "funder"),  # grants.funder (not grants.funder.id)
+    'works_award': BatchFilterConfig("grants", "award_id"),  # grants.award_id
+    'works_author': BatchFilterConfig("authorships.author", "id"),  # authorships.author.id
+    'works_institution': BatchFilterConfig("authorships.institutions", "id"),  # authorships.institutions.id
+    'works_source': BatchFilterConfig("primary_location.source", "id"),  # primary_location.source.id
+    'works_topic': BatchFilterConfig("primary_topic", "id"),  # primary_topic.id
+    'works_topics': BatchFilterConfig("topics", "id"),  # topics.id (all topics, not just primary)
+    'works_cited_by': BatchFilterConfig("", "cited_by"),  # flat field: cited_by
+    'works_cites': BatchFilterConfig("", "cites"),  # flat field: cites
+    
+    # Authors filters  
+    'authors_institution': BatchFilterConfig("last_known_institutions", "id"),  # last_known_institutions.id
+    
+    # For future extensions
+    'works_referenced_works': BatchFilterConfig("", "referenced_works"),  # For future use
+    'authors_works': BatchFilterConfig("", "works"),  # For future use
+    'institutions_works': BatchFilterConfig("", "works"),  # For future use
+    'sources_works': BatchFilterConfig("", "works"),  # For future use
+}
+
+
+def _handle_large_id_list(
+    query, 
+    id_list, 
+    filter_config_key, 
+    entity_class,
+    entity_name,
+    all_results=False,
+    limit=None,
+    json_path=None
+):
+    """
+    Generic handler for large ID lists that need to be processed in batches.
+    
+    Args:
+        query: The base query object
+        id_list: List of cleaned IDs
+        filter_config_key: Key for the batch filter configuration
+        entity_class: The entity class to create new queries
+        entity_name: Human-readable entity name for progress reporting
+        all_results: Whether to get all results
+        limit: Result limit
+        json_path: JSON output path
+    
+    Returns:
+        Combined results from all batches
+    """
+    if filter_config_key not in BATCH_FILTER_CONFIGS:
+        raise ValueError(f"Unknown filter config: {filter_config_key}")
+    
+    filter_config = BATCH_FILTER_CONFIGS[filter_config_key]
+    
+    def create_batch_query(batch_ids):
+        """Create a query for a batch of IDs."""
+        # Create a new query instance
+        batch_query = entity_class()
+        
+        # Copy all parameters from the original query except the target filter
+        if hasattr(query, 'params') and query.params:
+            batch_query.params = copy.deepcopy(query.params)
+            filter_config.remove_from_params(batch_query.params)
+        
+        # Apply the batch filter
+        return filter_config.apply_batch_filter(batch_query, batch_ids)
+    
+    # Use the existing batching utility
+    return _execute_batched_queries(
+        id_list,
+        create_batch_query,
+        entity_name,
+        all_results,
+        limit,
+        json_path
+    )
+
+
+def _apply_id_list_filter(query, id_list, filter_config_key, entity_class):
+    """
+    Apply filter for an ID list, handling both small and large lists.
+    
+    Args:
+        query: The query object to modify
+        id_list: List of IDs (already cleaned)
+        filter_config_key: Key for the batch filter configuration
+        entity_class: The entity class (for large list handling)
+    
+    Returns:
+        Modified query object, or original query with a special attribute for 
+        large lists
+    """
+    if filter_config_key not in BATCH_FILTER_CONFIGS:
+        raise ValueError(f"Unknown filter config: {filter_config_key}")
+    
+    filter_config = BATCH_FILTER_CONFIGS[filter_config_key]
+    
+    if len(id_list) == 1:
+        # Single ID
+        return filter_config.apply_single_filter(query, id_list[0])
+    elif len(id_list) <= _batch_size:
+        # Small list - use OR logic in single query
+        return filter_config.apply_batch_filter(query, id_list)
+    else:
+        # Large list - mark for batch processing
+        setattr(query, f'_large_{filter_config_key}_list', id_list)
+        return query
+
+
+def register_batch_filter(filter_key, filter_path, id_field="id"):
+    """
+    Register a new batch filter configuration for easy extensibility.
+    
+    Args:
+        filter_key: Key to use for the filter (e.g., 'works_source')
+        filter_path: Dot-separated path to the filter field 
+                    (e.g., 'primary_location.source')
+        id_field: Field name for the ID within the filter (default: "id")
+    
+    Example:
+        register_batch_filter('works_source', 'primary_location.source')
+        register_batch_filter('works_cited_by', 'referenced_works')
+    """
+    BATCH_FILTER_CONFIGS[filter_key] = BatchFilterConfig(filter_path, id_field)
+
+
+def add_id_list_option_to_command(
+    query, option_value, filter_config_key, entity_class
+):
+    """
+    Helper function to easily add ID list handling to any command.
+    
+    Args:
+        query: The query object
+        option_value: The comma-separated string of IDs from the CLI option
+        filter_config_key: The filter configuration key
+        entity_class: The entity class for large list handling
+    
+    Returns:
+        Modified query object
+    
+    Example usage in a command:
+        # For works command with author IDs:
+        if author_ids:
+            query = add_id_list_option_to_command(
+                query, author_ids, 'works_author', Works
+            )
+        
+        # For works command with cited_by IDs (future):
+        if cited_by_ids:
+            query = add_id_list_option_to_command(
+                query, cited_by_ids, 'works_cited_by', Works
+            )
+        
+        # For institutions command with works IDs (future):
+        if works_ids:
+            query = add_id_list_option_to_command(
+                query, works_ids, 'institutions_works', Institutions
+            )
+    """
+    if not option_value:
+        return query
+    
+    # Parse comma-separated IDs
+    id_list = [
+        aid.strip() for aid in option_value.split(',') if aid.strip()
+    ]
+    # Clean up IDs (remove URL prefix if present)
+    cleaned_id_list = _clean_ids(id_list)
+    
+    # Apply the filter
+    return _apply_id_list_filter(
+        query, cleaned_id_list, filter_config_key, entity_class
+    )
 
 
 # Global verbose state
@@ -1016,46 +1250,16 @@ def works(
             query = query.filter(primary_topic={"subfield": {"id": subfield_id}})
         
         if funder_ids:
-            # Parse comma-separated funder IDs
-            funder_list = [
-                fid.strip() for fid in funder_ids.split(',') if fid.strip()
-            ]
-            # Clean up funder IDs (remove URL prefix if present)
-            cleaned_funder_list = _clean_ids(funder_list)
-            
-            if len(cleaned_funder_list) == 1:
-                # Single funder ID
-                query = query.filter(grants={"funder": cleaned_funder_list[0]})
-            elif len(cleaned_funder_list) <= _batch_size:
-                # Multiple funder IDs (<=batch_size) - use OR logic by joining with |
-                funder_or_filter = "|".join(cleaned_funder_list)
-                query = query.filter(grants={"funder": funder_or_filter})
-            else:
-                # More than batch_size funder IDs - need to split into multiple queries
-                # This will be handled after the main query setup by executing 
-                # multiple queries and combining results
-                query._large_funder_list = cleaned_funder_list
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, funder_ids, 'works_funder', Works
+            )
         
         if award_ids:
-            # Parse comma-separated award IDs
-            award_list = [
-                aid.strip() for aid in award_ids.split(',') if aid.strip()
-            ]
-            # Clean up award IDs (remove URL prefix if present)
-            cleaned_award_list = []
-            for aid in award_list:
-                clean_id = aid.replace('https://openalex.org/', '').strip()
-                clean_id = clean_id.strip('/')
-                if clean_id:
-                    cleaned_award_list.append(clean_id)
-            
-            if len(cleaned_award_list) == 1:
-                # Single award ID
-                query = query.filter(grants={"award_id": cleaned_award_list[0]})
-            else:
-                # Multiple award IDs - use OR logic by joining with |
-                award_or_filter = "|".join(cleaned_award_list)
-                query = query.filter(grants={"award_id": award_or_filter})
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, award_ids, 'works_award', Works
+            )
 
         # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
@@ -1088,40 +1292,30 @@ def works(
         _print_debug_url(query)
         
         try:
-            # Check if we need to handle large funder list (>batch_size funder IDs)
-            if hasattr(query, '_large_funder_list'):
-                large_funder_list = query._large_funder_list
-                # Remove the temporary attribute
-                delattr(query, '_large_funder_list')
+            # Check if we need to handle any large ID lists
+            large_id_attrs = [attr for attr in dir(query) if attr.startswith('_large_')]
+            
+            if large_id_attrs:
+                # Handle large ID list using the generalized system
+                attr_name = large_id_attrs[0]  # Take the first one found
+                large_id_list = getattr(query, attr_name)
+                delattr(query, attr_name)
                 
-                def create_batch_query(batch_ids):
-                    # Create a new query for this batch by copying original
-                    batch_query = Works()
-                    
-                    # Re-apply all the same filters from the original query
-                    if hasattr(query, 'params') and query.params:
-                        # Copy all parameters except the funder filter
-                        batch_query.params = copy.deepcopy(query.params)
-                        # Remove any existing funder filter
-                        if ('filter' in batch_query.params and 
-                            'grants' in batch_query.params['filter']):
-                            if 'funder' in batch_query.params['filter']['grants']:
-                                del batch_query.params['filter']['grants']['funder']
-                    
-                    # Add the batch funder filter
-                    funder_or_filter = "|".join(batch_ids)
-                    return batch_query.filter(grants={"funder": funder_or_filter})
+                # Extract the filter config key from the attribute name
+                # e.g., '_large_works_funder_list' -> 'works_funder'
+                filter_config_key = (attr_name.replace('_large_', '')
+                                   .replace('_list', ''))
                 
-                # Use the general batching utility
-                results = _execute_batched_queries(
-                    large_funder_list, 
-                    create_batch_query,
-                    "funder IDs",
+                results = _handle_large_id_list(
+                    query,
+                    large_id_list,
+                    filter_config_key,
+                    Works,
+                    filter_config_key.split('_')[1] + " IDs",  # e.g., "funder IDs"
                     all_results,
                     limit,
                     json_path
                 )
-                
             else:
                 # Normal single query execution
                 if _dry_run_mode:
@@ -1238,29 +1432,10 @@ def authors(
         if search:
             query = query.search(search)
         if institution_id:
-            # Parse comma-separated institution IDs
-            institution_list = [
-                iid.strip() for iid in institution_id.split(',') if iid.strip()
-            ]
-            # Clean up institution IDs (remove URL prefix if present)
-            cleaned_institution_list = _clean_ids(institution_list)
-            
-            if len(cleaned_institution_list) == 1:
-                # Single institution ID
-                query = query.filter(
-                    last_known_institutions={"id": cleaned_institution_list[0]}
-                )
-            elif len(cleaned_institution_list) <= _batch_size:
-                # Multiple institution IDs (<=batch_size) - use OR logic
-                institution_or_filter = "|".join(cleaned_institution_list)
-                query = query.filter(
-                    last_known_institutions={"id": institution_or_filter}
-                )
-            else:
-                # More than batch_size institution IDs - split into multiple queries
-                # This will be handled after the main query setup by executing 
-                # multiple queries and combining results
-                query._large_institution_list = cleaned_institution_list
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, institution_id, 'authors_institution', Authors
+            )
         
         # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
@@ -1283,39 +1458,25 @@ def authors(
         _print_debug_url(query)
         
         try:
-            # Check if we need to handle large institution list (>batch_size IDs)
-            if hasattr(query, '_large_institution_list'):
-                large_institution_list = query._large_institution_list
-                # Remove the temporary attribute
-                delattr(query, '_large_institution_list')
+            # Check if we need to handle any large ID lists
+            large_id_attrs = [attr for attr in dir(query) if attr.startswith('_large_')]
+            
+            if large_id_attrs:
+                # Handle large ID list using the generalized system
+                attr_name = large_id_attrs[0]  # Take the first one found
+                large_id_list = getattr(query, attr_name)
+                delattr(query, attr_name)
                 
-                def create_batch_query(batch_ids):
-                    # Create a new query for this batch by copying original
-                    batch_query = Authors()
-                    
-                    # Re-apply all the same filters from the original query
-                    if hasattr(query, 'params') and query.params:
-                        # Copy all parameters except the institution filter
-                        batch_query.params = copy.deepcopy(query.params)
-                        # Remove any existing institution filter
-                        if ('filter' in batch_query.params and 
-                            'last_known_institutions' in batch_query.params['filter']):
-                            filter_params = batch_query.params['filter']
-                            inst_filter = filter_params['last_known_institutions']
-                            if 'id' in inst_filter:
-                                del inst_filter['id']
-                    
-                    # Add the batch institution filter
-                    institution_or_filter = "|".join(batch_ids)
-                    return batch_query.filter(
-                        last_known_institutions={"id": institution_or_filter}
-                    )
+                # Extract the filter config key from the attribute name
+                filter_config_key = (attr_name.replace('_large_', '')
+                                   .replace('_list', ''))
                 
-                # Use the general batching utility
-                results = _execute_batched_queries(
-                    large_institution_list, 
-                    create_batch_query,
-                    "institution IDs",
+                results = _handle_large_id_list(
+                    query,
+                    large_id_list,
+                    filter_config_key,
+                    Authors,
+                    filter_config_key.split('_')[1] + " IDs",
                     all_results,
                     limit,
                     json_path
