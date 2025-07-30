@@ -4,7 +4,6 @@ import logging
 
 from pyalex.client.session import get_requests_session
 from pyalex.core.config import CURSOR_START_VALUE
-from pyalex.core.config import DEFAULT_MAX_RESULTS
 from pyalex.core.config import MAX_PER_PAGE
 from pyalex.core.config import MIN_PER_PAGE
 from pyalex.core.config import PAGE_START_VALUE
@@ -50,7 +49,8 @@ class Paginator:
         self.method = method
         self.endpoint_class = endpoint_class
         self.value = value
-        self.per_page = per_page
+        # Always use MAX_PER_PAGE (200) when per_page is not explicitly provided
+        self.per_page = per_page if per_page is not None else MAX_PER_PAGE
         self.n_max = n_max
         self.n = 0
         self._first_page = True  # Track if this is the first page

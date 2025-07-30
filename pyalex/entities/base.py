@@ -7,8 +7,6 @@ from urllib.parse import urlunparse
 
 from pyalex.client.auth import OpenAlexAuth
 from pyalex.client.session import get_requests_session
-from pyalex.core.config import DEFAULT_MAX_RESULTS
-from pyalex.core.config import LARGE_QUERY_THRESHOLD
 from pyalex.core.config import MAX_PER_PAGE
 from pyalex.core.config import MAX_RECORD_IDS
 from pyalex.core.config import MIN_PER_PAGE
@@ -24,7 +22,6 @@ from pyalex.core.query import wrap_values_nested_dict
 from pyalex.core.response import OpenAlexResponseList
 from pyalex.core.response import QueryError
 from pyalex.core.utils import quote_oa_value
-from pyalex.models.base import OpenAlexEntity
 
 try:
     from pyalex.logger import get_logger
@@ -229,7 +226,12 @@ class BaseOpenAlex:
                 else:
                     return final_result
 
-        # Original logic for per_page validation and execution
+        # Always use MAX_PER_PAGE (200) when per_page is not explicitly provided
+        # This ensures we always get the maximum efficiency from the OpenAlex API
+        if per_page is None:
+            per_page = MAX_PER_PAGE
+        
+        # Validate per_page parameter
         if per_page is not None and (
             not isinstance(per_page, int) 
             or (per_page < MIN_PER_PAGE or per_page > MAX_PER_PAGE)
@@ -242,33 +244,6 @@ class BaseOpenAlex:
             self._add_params("cursor", cursor)
 
         resp_list = self._get_from_url(self.url)
-
-        # Print count information for direct queries (not paginated) and check approval
-        if hasattr(resp_list, 'meta') and resp_list.meta and 'count' in resp_list.meta:
-            total_count = resp_list.meta['count']
-            logger.info(f"Total results found: {total_count:,}")
-            
-            # Require user approval for large queries
-            # Only prompt if we're actually retrieving more than the threshold
-            actual_retrieval = min(total_count, per_page or MAX_PER_PAGE)
-            if actual_retrieval > LARGE_QUERY_THRESHOLD:
-                try:
-                    response = input(
-                        f"This query will retrieve {actual_retrieval:,} results. "
-                        "Do you want to continue? (y/N): "
-                    ).strip().lower()
-                    if response not in ['y', 'yes']:
-                        logger.info("Query cancelled by user.")
-                        # Return empty result
-                        return OpenAlexResponseList(
-                            [], {"count": 0}, self.resource_class
-                        )
-                except (EOFError, KeyboardInterrupt):
-                    logger.info("\nQuery cancelled by user.")
-                    # Return empty result
-                    return OpenAlexResponseList(
-                        [], {"count": 0}, self.resource_class
-                    )
 
         if return_meta:
             warnings.warn(
@@ -286,7 +261,7 @@ class BaseOpenAlex:
         page=1, 
         per_page=None, 
         cursor="*", 
-        n_max=DEFAULT_MAX_RESULTS
+        n_max=10000
     ):
         """Paginate results from the API.
 
@@ -297,7 +272,7 @@ class BaseOpenAlex:
         page : int, optional
             Page number for pagination.
         per_page : int, optional
-            Number of results per page.
+            Number of results per page. Defaults to 200 if not specified.
         cursor : str, optional
             Cursor for pagination.
         n_max : int, optional

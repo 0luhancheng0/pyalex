@@ -26,8 +26,6 @@ from pyalex import Topics
 from pyalex import Works
 from pyalex import config
 from pyalex import invert_abstract
-from pyalex.api import OpenAlexResponseList
-from pyalex.api import Work
 
 
 # Global verbose state
@@ -165,6 +163,104 @@ def _validate_and_apply_common_options(
     return query
 
 
+def _execute_query_with_options(query, all_results, limit, entity_name):
+    """
+    Execute a query based on the specified options.
+    
+    Args:
+        query: OpenAlex query object
+        all_results: Whether to get all results (with progress bar)
+        limit: Result limit
+        entity_name: Entity type name for progress bar
+    
+    Returns:
+        Query results
+    """
+    if all_results:
+        return _paginate_with_progress(query, entity_name)
+    elif limit is not None:
+        return query.get(limit=limit)
+    else:
+        return query.get()  # Default first page
+
+
+def _paginate_with_progress(query, entity_type_name="results"):
+    """
+    Paginate through all results with a progress bar.
+    
+    Args:
+        query: OpenAlex query object
+        entity_type_name: String name for the entity type for the progress bar
+    
+    Returns:
+        OpenAlexResponseList of all results
+    """
+    from tqdm import tqdm
+    
+    # Use the paginate method directly to get all results
+    # Start with cursor pagination to get the total count
+    paginator = query.paginate(method="cursor", cursor="*", per_page=200)
+    
+    all_results = []
+    total_count = None
+    progress_bar = None
+    
+    try:
+        for i, batch in enumerate(paginator):
+            if not batch:
+                break
+                
+            # Set up progress bar after first batch when we know the total
+            if (i == 0 and hasattr(batch, 'meta') and 
+                batch.meta and 'count' in batch.meta):
+                total_count = batch.meta['count']
+                progress_desc = f"Fetching {entity_type_name}"
+                progress_bar = tqdm(
+                    total=total_count,
+                    desc=progress_desc,
+                    unit=" results",
+                    initial=0
+                )
+            
+            all_results.extend(batch)
+            
+            if progress_bar:
+                progress_bar.update(len(batch))
+                
+            # Stop if we've collected enough results
+            if total_count and len(all_results) >= total_count:
+                break
+                
+    finally:
+        if progress_bar:
+            progress_bar.close()
+    
+    # Create a result object similar to what query.get() returns
+    if all_results:
+        from pyalex.core.response import OpenAlexResponseList
+        # Use the same resource classes as the first batch
+        first_batch = next(iter([batch for batch in [all_results[:1]] if batch]), None)
+        if first_batch and hasattr(first_batch[0], '__class__'):
+            # Try to get resource class from the results structure
+            resource_class = getattr(paginator.endpoint_class, 'resource_class', None)
+            resource_entity_class = getattr(
+                paginator.endpoint_class, 'resource_entity_class', None
+            )
+        else:
+            resource_class = None
+            resource_entity_class = None
+            
+        return OpenAlexResponseList(
+            all_results, 
+            {"count": len(all_results)}, 
+            resource_class,
+            resource_entity_class
+        )
+    else:
+        from pyalex.core.response import OpenAlexResponseList
+        return OpenAlexResponseList([], {"count": 0})
+
+
 def _execute_batched_queries(
     id_list, 
     create_query_func,
@@ -227,13 +323,9 @@ def _execute_batched_queries(
         
         # Execute the batch query
         if all_results:
-            # Get all results for this batch using pagination
-            batch_results = []
-            paginator = batch_query.paginate(
-                method="cursor", n_max=100000
-            )  # Large enough to get all
-            for page in paginator:
-                batch_results.extend(page)
+            # Get all results for this batch using pagination with progress bar
+            batch_name = f"{entity_name} (batch {i//_batch_size + 1})"
+            batch_results = _paginate_with_progress(batch_query, batch_name)
         elif limit is not None:
             batch_results = batch_query.get(limit=limit)
         else:
@@ -265,7 +357,7 @@ def _execute_batched_queries(
             from pyalex.models.author import Author
             result_class = Author
         elif 'title' in first_result and 'publication_year' in first_result:
-            from pyalex.models.work import Work 
+            from pyalex.models.work import Work
             result_class = Work
         elif 'display_name' in first_result and 'works_count' in first_result:
             from pyalex.models.institution import Institution
@@ -846,24 +938,8 @@ def works(
                     return
                 
                 if all_results:
-                    # Get all results using pagination
-                    results = []
-                    paginator = query.paginate(
-                        method="cursor", n_max=100000
-                    )  # Large enough to get all
-                    for batch in paginator:
-                        results.extend(batch)
-                    
-                    # Create a result object similar to what query.get() returns
-                    if results:
-                        total_count = len(results)
-                        results = OpenAlexResponseList(
-                            results, {"count": total_count}, Work
-                        )
-                    else:
-                        results = OpenAlexResponseList(
-                            [], {"count": 0}, Work
-                        )
+                    # Get all results using pagination with progress bar
+                    results = _paginate_with_progress(query, "works")
                 elif limit is not None:
                     results = query.get(limit=limit)
                 else:
@@ -1261,13 +1337,7 @@ def sources(
             return
         
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        results = _execute_query_with_options(query, all_results, limit, "sources")
         _print_debug_results(results)
         _output_results(results, json_path)
             
