@@ -1,1 +1,0 @@
- DO NOT use `python -c` for testing as copilot does not seems to capture its output which results in hanging forever, if you need to test some python code, write a script inside `tests/` and run it from cli. Make sure to clean it up after you have finished your test. 

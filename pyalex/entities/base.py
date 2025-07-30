@@ -147,31 +147,14 @@ class BaseOpenAlex:
 
         if self.params and "group-by" in self.params:
             return OpenAlexResponseList(
-                res_json["group_by"], res_json["meta"], self.resource_class, 
-                self.resource_entity_class
+                res_json["group_by"], res_json["meta"], self.resource_class
             )
         elif "results" in res_json:
             return OpenAlexResponseList(
-                res_json["results"], res_json["meta"], self.resource_class,
-                self.resource_entity_class
+                res_json["results"], res_json["meta"], self.resource_class
             )
         elif "id" in res_json:
-            # Validate single entity if entity class is available
-            if hasattr(self, 'resource_entity_class') and self.resource_entity_class:
-                try:
-                    validated_entity = self.resource_entity_class(**res_json)
-                    # Convert back to dict for backward compatibility using model_dump
-                    # Use mode='json' to handle datetime serialization 
-                    validated_dict = validated_entity.model_dump(mode='json')
-                    return self.resource_class(validated_dict)
-                except Exception as e:
-                    logger.warning(
-                        f"Validation failed for {self.__class__.__name__}: {e}"
-                    )
-                    # Fall back to unvalidated dict
-                    return self.resource_class(res_json)
-            else:
-                return self.resource_class(res_json)
+            return self.resource_class(res_json)
         else:
             raise ValueError("Unknown response format")
 
@@ -255,6 +238,129 @@ class BaseOpenAlex:
         else:
             return resp_list
 
+    def should_use_async(self, limit=None):
+        """Determine if async should be used based on conditions."""
+        if limit is None:
+            return False
+        
+        # Use async if limit is reasonable and not a raw URL query
+        return (
+            limit <= 10000 and 
+            not isinstance(self.params, str)
+        )
+
+    async def get_async(
+        self, return_meta=False, page=None, per_page=None, cursor=None, limit=None
+    ):
+        """Async version of get method with smart pagination strategy.
+        
+        Uses basic paging with async requests when:
+        1. Total count ≤ 10,000, OR
+        2. User-specified limit ≤ 10,000
+        Otherwise uses sync cursor paging.
+        """
+        # For single entity retrieval or small limits, use sync method
+        if isinstance(self.params, str) or (limit and limit <= MAX_PER_PAGE):
+            return self.get(
+                return_meta=return_meta, page=page, per_page=per_page, 
+                cursor=cursor, limit=limit
+            )
+        
+        # Get count first to decide on pagination strategy
+        count_result = self.get(per_page=1)
+        total_count = count_result.meta.get('count', 0)
+        
+        # Determine effective limit for async decision
+        effective_limit = limit if limit is not None else total_count
+        
+        # Use async if either total count ≤ 10,000 OR user limit ≤ 10,000
+        if total_count <= 10000 or effective_limit <= 10000:
+            return await self._get_async_basic_paging(
+                total_count, per_page, limit, return_meta
+            )
+        else:
+            # Use sync cursor paging for larger datasets
+            logger.info(
+                f"Large dataset ({total_count:,} results, limit: {limit}). "
+                "Using sync cursor paging."
+            )
+            return self.get(
+                return_meta=return_meta, page=page, per_page=per_page, 
+                cursor=cursor, limit=limit
+            )
+
+    async def _get_async_basic_paging(
+        self, total_count, per_page=None, limit=None, return_meta=False
+    ):
+        """Async basic paging implementation with rich progress bar."""
+        from pyalex.client.async_session import async_batch_requests_with_progress
+        
+        # Use MAX_PER_PAGE for efficiency
+        effective_per_page = per_page or MAX_PER_PAGE
+        effective_limit = min(limit or total_count, total_count)
+        
+        # Calculate number of pages needed
+        num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
+        
+        # Create URLs for all pages
+        urls = []
+        for page_num in range(1, num_pages + 1):
+            # Create a copy of self with page parameters
+            params_copy = (
+                self.params.copy() if isinstance(self.params, dict) 
+                else self.params
+            )
+            page_query = self.__class__(params_copy)
+            page_query._add_params("per-page", effective_per_page)
+            page_query._add_params("page", page_num)
+            urls.append(page_query.url)
+        
+        logger.info(f"Fetching {num_pages} pages asynchronously...")
+        
+        # Execute async requests with progress tracking
+        try:
+            responses = await async_batch_requests_with_progress(
+                urls, 
+                max_concurrent=10,
+                description=f"Fetching {self.__class__.__name__.lower()}"
+            )
+        except ImportError:
+            # Fall back to sync if aiohttp not available
+            logger.warning("aiohttp not available, falling back to sync pagination")
+            return self.get(return_meta=return_meta, limit=limit)
+        
+        # Combine results
+        all_results = []
+        final_meta = {}
+        
+        for response_data in responses:
+            if 'results' in response_data:
+                all_results.extend(response_data['results'])
+                if not final_meta and 'meta' in response_data:
+                    final_meta = response_data['meta'].copy()
+        
+        # Trim to exact limit if specified
+        if limit and len(all_results) > limit:
+            all_results = all_results[:limit]
+        
+        # Update meta count
+        final_meta['count'] = len(all_results)
+        
+        # Create response object
+        final_result = OpenAlexResponseList(
+            all_results, final_meta, self.resource_class
+        )
+        
+        if return_meta:
+            warnings.warn(
+                "return_meta is deprecated, call .meta on the result",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return final_result, final_result.meta
+        else:
+            return final_result
+
     def paginate(
         self, 
         method="cursor", 
@@ -276,7 +382,9 @@ class BaseOpenAlex:
         cursor : str, optional
             Cursor for pagination.
         n_max : int, optional
-            Maximum number of results.
+            Maximum number of results. For 'page' method only - represents
+            the maximum that basic paging can retrieve. For 'cursor' method,
+            this parameter is ignored as cursor paging has no inherent limit.
 
         Returns
         -------
@@ -287,13 +395,17 @@ class BaseOpenAlex:
             if isinstance(self.params, dict) and self.params.get("sample"):
                 raise ValueError("method should be 'page' when using sample")
             value = cursor
+            # For cursor pagination, ignore n_max as it has no inherent limit
+            effective_n_max = None
         elif method == "page":
             value = page
+            # For page pagination, use n_max to limit results
+            effective_n_max = n_max
         else:
             raise ValueError("Method should be 'cursor' or 'page'")
 
         return Paginator(
-            self, method=method, value=value, per_page=per_page, n_max=n_max
+            self, method=method, value=value, per_page=per_page, n_max=effective_n_max
         )
 
     def random(self):

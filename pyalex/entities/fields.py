@@ -1,7 +1,6 @@
 """Field entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.field import FieldEntity
 
 
 class Field(dict):
@@ -13,7 +12,6 @@ class Fields(BaseOpenAlex):
     """Class representing a collection of field entities in OpenAlex."""
 
     resource_class = Field
-    resource_entity_class = FieldEntity
 
     def filter_by_domain(self, domain_id=None, **kwargs):
         """Filter by domain.

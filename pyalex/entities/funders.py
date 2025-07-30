@@ -1,7 +1,6 @@
 """Funder entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.funder import FunderEntity
 
 
 class Funder(dict):
@@ -13,7 +12,6 @@ class Funders(BaseOpenAlex):
     """Class representing a collection of funder entities in OpenAlex."""
 
     resource_class = Funder
-    resource_entity_class = FunderEntity
 
     def filter_by_country(self, country_code=None, **kwargs):
         """Filter by country.

@@ -1,7 +1,6 @@
 """Publisher entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.publisher import PublisherEntity
 
 
 class Publisher(dict):
@@ -13,7 +12,6 @@ class Publishers(BaseOpenAlex):
     """Class representing a collection of publisher entities in OpenAlex."""
 
     resource_class = Publisher
-    resource_entity_class = PublisherEntity
 
     def filter_by_country(self, country_code=None, **kwargs):
         """Filter by country.

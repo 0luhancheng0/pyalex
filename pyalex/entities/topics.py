@@ -1,7 +1,6 @@
 """Topic entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.topic import TopicEntity
 
 
 class Topic(dict):
@@ -13,7 +12,6 @@ class Topics(BaseOpenAlex):
     """Class representing a collection of topic entities in OpenAlex."""
 
     resource_class = Topic
-    resource_entity_class = TopicEntity
 
     def filter_by_field(self, field_id=None, **kwargs):
         """Filter by field.

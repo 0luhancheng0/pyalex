@@ -1,7 +1,6 @@
 """Institution entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.institution import InstitutionEntity
 
 
 class Institution(dict):
@@ -13,7 +12,6 @@ class Institutions(BaseOpenAlex):
     """Class representing a collection of institution entities in OpenAlex."""
 
     resource_class = Institution
-    resource_entity_class = InstitutionEntity
 
     def filter_by_country(self, country_code=None, **kwargs):
         """Filter by country.

@@ -1,7 +1,6 @@
 """Source entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.source import SourceEntity
 
 
 class Source(dict):
@@ -13,7 +12,6 @@ class Sources(BaseOpenAlex):
     """Class representing a collection of source entities in OpenAlex."""
 
     resource_class = Source
-    resource_entity_class = SourceEntity
 
     def filter_by_type(self, source_type, **kwargs):
         """Filter by source type.

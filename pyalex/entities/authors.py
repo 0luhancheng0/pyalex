@@ -1,7 +1,6 @@
 """Author entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.author import AuthorEntity
 
 
 class Author(dict):
@@ -13,7 +12,6 @@ class Authors(BaseOpenAlex):
     """Class representing a collection of author entities in OpenAlex."""
 
     resource_class = Author
-    resource_entity_class = AuthorEntity
 
     def filter_by_affiliation(self, institution_id=None, **kwargs):
         """Filter by author affiliation.

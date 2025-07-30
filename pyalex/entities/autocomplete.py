@@ -15,7 +15,6 @@ class AutocompleteCollection(BaseOpenAlex):
     """Class to autocomplete without being based on the type of entity."""
 
     resource_class = Autocomplete
-    resource_entity_class = None  # Autocomplete doesn't use Pydantic validation
 
     def __getitem__(self, key):
         return self._get_from_url(

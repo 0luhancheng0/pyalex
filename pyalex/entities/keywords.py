@@ -1,7 +1,6 @@
 """Keyword entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.keyword import KeywordEntity
 
 
 class Keyword(dict):
@@ -13,7 +12,6 @@ class Keywords(BaseOpenAlex):
     """Class representing a collection of keyword entities in OpenAlex."""
 
     resource_class = Keyword
-    resource_entity_class = KeywordEntity
 
     def filter_by_works_count(self, min_count=None, max_count=None, **kwargs):
         """Filter by number of works.

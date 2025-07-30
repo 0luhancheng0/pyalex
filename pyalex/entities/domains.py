@@ -1,7 +1,6 @@
 """Domain entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.domain import DomainEntity
 
 
 class Domain(dict):
@@ -13,7 +12,6 @@ class Domains(BaseOpenAlex):
     """Class representing a collection of domain entities in OpenAlex."""
 
     resource_class = Domain
-    resource_entity_class = DomainEntity
 
     def filter_by_works_count(self, min_count=None, max_count=None, **kwargs):
         """Filter by number of works.

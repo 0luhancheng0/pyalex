@@ -1,7 +1,6 @@
 """Subfield entities for OpenAlex API."""
 
 from pyalex.entities.base import BaseOpenAlex
-from pyalex.models.subfield import SubfieldEntity
 
 
 class Subfield(dict):
@@ -13,7 +12,6 @@ class Subfields(BaseOpenAlex):
     """Class representing a collection of subfield entities in OpenAlex."""
 
     resource_class = Subfield
-    resource_entity_class = SubfieldEntity
 
     def filter_by_field(self, field_id=None, **kwargs):
         """Filter by field.

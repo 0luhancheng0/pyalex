@@ -117,6 +117,100 @@ def _clean_ids(id_list, url_prefix='https://openalex.org/'):
     return cleaned_ids
 
 
+async def _async_retrieve_entities(entity_class, ids, class_name):
+    """Async function to retrieve entities by IDs using batch requests."""
+    try:
+        from pyalex.client.async_session import async_batch_requests
+    except ImportError:
+        # Fall back to sync processing if aiohttp not available
+        return _sync_retrieve_entities(entity_class, ids, class_name)
+    
+    # Create batches of IDs for concurrent processing
+    urls = []
+    batch_info = []
+    
+    for i in range(0, len(ids), _batch_size):
+        batch_ids = ids[i:i + _batch_size]
+        batch_info.append(batch_ids)
+        
+        if len(batch_ids) == 1:
+            # Single ID - use direct retrieval URL
+            single_url = (
+                f"https://api.openalex.org/"
+                f"{entity_class.__name__.lower()}/{batch_ids[0]}"
+            )
+            urls.append(single_url)
+        else:
+            # Multiple IDs - use OR operator for batch retrieval
+            id_filter = "|".join(batch_ids)
+            query = entity_class().filter(openalex_id=id_filter)
+            urls.append(query.url)
+    
+    # Execute async requests
+    responses = await async_batch_requests(urls, max_concurrent=5)
+    
+    # Process responses
+    all_results = []
+    for i, response_data in enumerate(responses):
+        batch_ids = batch_info[i]
+        
+        if len(batch_ids) == 1:
+            # Single entity response
+            if 'id' in response_data:
+                result = entity_class.resource_class(response_data)
+                all_results.append(result)
+        else:
+            # Multiple entities response
+            if 'results' in response_data:
+                for item in response_data['results']:
+                    result = entity_class.resource_class(item)
+                    all_results.append(result)
+    
+    # Convert abstracts for works if requested
+    if class_name == 'Works':
+        all_results = [_add_abstract_to_work(work) for work in all_results]
+    
+    return all_results
+
+
+def _sync_retrieve_entities(entity_class, ids, class_name):
+    """Sync fallback for entity retrieval."""
+    all_results = []
+    
+    # Process IDs in batches using configurable batch size
+    for i in range(0, len(ids), _batch_size):
+        batch_ids = ids[i:i + _batch_size]
+        
+        if len(batch_ids) == 1:
+            # Single ID - use direct retrieval
+            batch_results = entity_class()[batch_ids[0]]
+            if not isinstance(batch_results, list):
+                batch_results = [batch_results]
+        else:
+            # Multiple IDs - use OR operator for batch retrieval
+            id_filter = "|".join(batch_ids)
+            batch_results = entity_class().filter(openalex_id=id_filter).get()
+        
+        # Handle results
+        if batch_results:
+            # Convert abstracts for works if requested
+            if class_name == 'Works':
+                batch_results = [
+                    _add_abstract_to_work(work) for work in batch_results
+                ]
+            
+            all_results.extend(batch_results)
+        
+        if _debug_mode and len(ids) > _batch_size:
+            typer.echo(
+                f"[DEBUG] Processed batch {i//_batch_size + 1} "
+                f"({len(batch_ids)} IDs)", 
+                err=True
+            )
+    
+    return all_results
+
+
 def _validate_and_apply_common_options(
     query, all_results, limit, sample, seed, sort_by
 ):
@@ -187,6 +281,7 @@ def _execute_query_with_options(query, all_results, limit, entity_name):
 def _paginate_with_progress(query, entity_type_name="results"):
     """
     Paginate through all results with a progress bar.
+    Uses async pagination for datasets <= 10,000 results, sync for larger.
     
     Args:
         query: OpenAlex query object
@@ -195,7 +290,74 @@ def _paginate_with_progress(query, entity_type_name="results"):
     Returns:
         OpenAlexResponseList of all results
     """
-    from tqdm import tqdm
+    import asyncio
+    
+    # Check if async is available and get total count
+    try:
+        count_result = query.get(per_page=1)
+        total_count = count_result.meta.get('count', 0)
+        
+        # Use async for smaller datasets
+        if total_count <= 10000:
+            try:
+                return asyncio.run(
+                    _async_paginate_with_progress(query, entity_type_name, total_count)
+                )
+            except ImportError:
+                # Fall back to sync if aiohttp not available
+                pass
+    except Exception:
+        # If count fails, fall back to sync pagination
+        pass
+    
+    # Sync pagination fallback
+    return _sync_paginate_with_progress(query, entity_type_name)
+
+
+async def _async_paginate_with_progress(query, entity_type_name, total_count):
+    """Async pagination with progress bar."""
+    try:
+        result = await query.get_async(limit=total_count)
+        return result
+    except AttributeError:
+        # Fall back to sync if get_async not available
+        return _sync_paginate_with_progress(query, entity_type_name)
+
+
+def _execute_query_smart(query, all_results=False, limit=None):
+    """Execute query using the best method (async or sync) based on conditions."""
+    if all_results:
+        # Get all results using pagination with progress bar
+        return _paginate_with_progress(query, "query")
+    elif limit is not None:
+        # Check if we should use async for this limit
+        if query.should_use_async(limit):
+            # Use async execution
+            import asyncio
+            try:
+                async def _run_query():
+                    return await query.get_async(limit=limit)
+                return asyncio.run(_run_query())
+            except ImportError:
+                # aiohttp not available, fall back to sync
+                return query.get(limit=limit)
+        else:
+            return query.get(limit=limit)
+    else:
+        return query.get()  # Default first page
+
+
+def _sync_paginate_with_progress(query, entity_type_name):
+    """Sync pagination with progress bar (original implementation)."""
+    try:
+        from rich.progress import (
+            Progress, SpinnerColumn, TextColumn, BarColumn, 
+            MofNCompleteColumn, TimeElapsedColumn
+        )
+        use_rich = True
+    except ImportError:
+        from tqdm import tqdm
+        use_rich = False
     
     # Use the paginate method directly to get all results
     # Start with cursor pagination to get the total count
@@ -204,8 +366,20 @@ def _paginate_with_progress(query, entity_type_name="results"):
     all_results = []
     total_count = None
     progress_bar = None
+    progress = None
+    task_id = None
     
     try:
+        if use_rich:
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+            )
+            progress.start()
+        
         for i, batch in enumerate(paginator):
             if not batch:
                 break
@@ -215,16 +389,22 @@ def _paginate_with_progress(query, entity_type_name="results"):
                 batch.meta and 'count' in batch.meta):
                 total_count = batch.meta['count']
                 progress_desc = f"Fetching {entity_type_name}"
-                progress_bar = tqdm(
-                    total=total_count,
-                    desc=progress_desc,
-                    unit=" results",
-                    initial=0
-                )
+                
+                if use_rich:
+                    task_id = progress.add_task(progress_desc, total=total_count)
+                else:
+                    progress_bar = tqdm(
+                        total=total_count,
+                        desc=progress_desc,
+                        unit=" results",
+                        initial=0
+                    )
             
             all_results.extend(batch)
             
-            if progress_bar:
+            if use_rich and task_id is not None:
+                progress.update(task_id, advance=len(batch))
+            elif progress_bar:
                 progress_bar.update(len(batch))
                 
             # Stop if we've collected enough results
@@ -232,7 +412,9 @@ def _paginate_with_progress(query, entity_type_name="results"):
                 break
                 
     finally:
-        if progress_bar:
+        if use_rich and progress:
+            progress.stop()
+        elif progress_bar:
             progress_bar.close()
     
     # Create a result object similar to what query.get() returns
@@ -350,32 +532,14 @@ def _execute_batched_queries(
     # Create a result object similar to what query.get() returns
     # Import the appropriate response class based on the first result
     if combined_results:
-        first_result = combined_results[0]
-        
-        # Detect entity type and use appropriate model class
-        if 'display_name' in first_result and 'works_count' in first_result:
-            from pyalex.models.author import Author
-            result_class = Author
-        elif 'title' in first_result and 'publication_year' in first_result:
-            from pyalex.models.work import Work
-            result_class = Work
-        elif 'display_name' in first_result and 'works_count' in first_result:
-            from pyalex.models.institution import Institution
-            result_class = Institution
-        else:
-            # Default fallback
-            from pyalex.models.base import BaseModel
-            result_class = BaseModel
-            
         from pyalex.core.response import OpenAlexResponseList
         results = OpenAlexResponseList(
-            combined_results, {"count": len(combined_results)}, result_class
+            combined_results, {"count": len(combined_results)}, dict
         )
     else:
         from pyalex.core.response import OpenAlexResponseList
-        from pyalex.models.base import BaseModel
         results = OpenAlexResponseList(
-            [], {"count": 0}, BaseModel
+            [], {"count": 0}, dict
         )
     
     if not json_path:
@@ -941,7 +1105,10 @@ def works(
                     # Get all results using pagination with progress bar
                     results = _paginate_with_progress(query, "works")
                 elif limit is not None:
-                    results = query.get(limit=limit)
+                    # Use smart execution (async or sync based on conditions)
+                    results = _execute_query_smart(
+                        query, all_results=False, limit=limit
+                    )
                 else:
                     results = query.get()  # Default first page
             
@@ -2158,7 +2325,7 @@ def from_ids(
             typer.echo("Error: No valid entity IDs found", err=True)
             raise typer.Exit(1)
         
-        # Retrieve entities by type
+        # Retrieve entities by type using async processing
         all_results = []
         
         for class_name, group_info in entity_groups.items():
@@ -2172,36 +2339,14 @@ def from_ids(
                 )
             
             try:
-                # Process IDs in batches using configurable batch size
-                for i in range(0, len(ids), _batch_size):
-                    batch_ids = ids[i:i + _batch_size]
-                    
-                    if len(batch_ids) == 1:
-                        # Single ID - use direct retrieval
-                        batch_results = entity_class()[batch_ids[0]]
-                        if not isinstance(batch_results, list):
-                            batch_results = [batch_results]
-                    else:
-                        # Multiple IDs - use OR operator for batch retrieval
-                        id_filter = "|".join(batch_ids)
-                        batch_results = entity_class().filter(id=id_filter).get()
-                    
-                    # Handle results
-                    if batch_results:
-                        # Convert abstracts for works if requested
-                        if class_name == 'Works':
-                            batch_results = [
-                                _add_abstract_to_work(work) for work in batch_results
-                            ]
-                        
-                        all_results.extend(batch_results)
-                    
-                    if _debug_mode and len(ids) > _batch_size:
-                        typer.echo(
-                            f"[DEBUG] Processed batch {i//_batch_size + 1} "
-                            f"({len(batch_ids)} IDs)", 
-                            err=True
-                        )
+                # Use async processing for batch retrieval
+                import asyncio
+                batch_results = asyncio.run(
+                    _async_retrieve_entities(entity_class, ids, class_name)
+                )
+                
+                if batch_results:
+                    all_results.extend(batch_results)
                 
             except Exception as e:
                 typer.echo(
