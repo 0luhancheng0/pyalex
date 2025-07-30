@@ -1,17 +1,17 @@
 funders.json:
-	pyalex funders --country AU --limit 5 --json $@
+	pyalex funders --country AU --limit 5 --json funders.json
 
-funded_works.json: funders.json
-	cat funders.json | jq 'map(.id) | unique | join(",")' | xargs pyalex works --json $@ --year 2025 --all --funder-ids
+%_works.json: funders.json
+	cat funders.json | jq 'map(.id) | unique | join(",")' | xargs pyalex works --json $@ --year $* --all --funder-ids
 
-funded_topics.json: funded_works.json
-	cat funded_works.json | jq '.[].primary_topic.display_name' > $@
+topics.json: works.json
+	cat works.json | jq '.[].primary_topic.display_name' > topics.json
 
-wordcloud.png: funded_topics.json
-	wordcloud_cli --text funded_topics.json --imagefile $@
+wordcloud.png: topics.json
+	wordcloud_cli --text topics.json --imagefile wordcloud.png --width 800 --height 400 --background white --max_words 100
 
-all: funders.json funded_works.json funded_topics.json wordcloud.png
+all: funders.json works.json topics.json wordcloud.png
 clean:
-	rm -f funders.json funded_works.json funded_topics.json wordcloud.png
+	rm -f funders.json works.json topics.json wordcloud.png
 
 .PHONY: all clean

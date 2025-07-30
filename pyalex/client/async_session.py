@@ -7,6 +7,8 @@ try:
 except ImportError:
     aiohttp = None
 
+from pyalex.core.config import config
+
 
 async def get_async_session():
     """Create an aiohttp session for async requests.
@@ -33,8 +35,14 @@ async def get_async_session():
     if config.user_agent:
         headers["User-Agent"] = config.user_agent
     
-    timeout = aiohttp.ClientTimeout(total=30, connect=10)
-    connector = aiohttp.TCPConnector(limit=20, limit_per_host=10)
+    timeout = aiohttp.ClientTimeout(
+        total=config.total_timeout, 
+        connect=config.connect_timeout
+    )
+    connector = aiohttp.TCPConnector(
+        limit=config.connection_limit, 
+        limit_per_host=config.connection_limit_per_host
+    )
     
     return aiohttp.ClientSession(
         timeout=timeout,
@@ -91,7 +99,9 @@ async def async_get_with_retry(session, url, max_retries=3, backoff_factor=1.0):
     raise Exception(f"Failed to fetch {url} after {max_retries} retries")
 
 
-async def async_batch_requests(urls, max_concurrent=10):
+async def async_batch_requests(urls, max_concurrent=None):
+    if max_concurrent is None:
+        max_concurrent = config.max_concurrent
     """Execute multiple async requests with concurrency control.
 
     Parameters
@@ -127,8 +137,10 @@ async def async_batch_requests(urls, max_concurrent=10):
 
 
 async def async_batch_requests_with_progress(
-    urls, max_concurrent=10, description="Fetching data"
+    urls, max_concurrent=None, description="Fetching data"
 ):
+    if max_concurrent is None:
+        max_concurrent = config.max_concurrent
     """Execute multiple async requests with concurrency control and rich progress bar.
 
     Parameters

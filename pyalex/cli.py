@@ -26,14 +26,15 @@ from pyalex import Topics
 from pyalex import Works
 from pyalex import config
 from pyalex import invert_abstract
+from pyalex.core.config import MAX_PER_PAGE
 
 
 # Global verbose state
 _debug_mode = False
 _dry_run_mode = False
-_batch_size = 100
+_batch_size = config.cli_batch_size
 
-MAX_WIDTH = 300
+MAX_WIDTH = config.cli_max_width
 
 app = typer.Typer(
     name="pyalex",
@@ -56,8 +57,9 @@ def main(
     )] = False,
     batch_size: Annotated[int, typer.Option(
         "--batch-size",
-        help="Batch size for requests with multiple IDs (default: 50)"
-    )] = 50,
+        help=f"Batch size for requests with multiple IDs "
+             f"(default: {config.cli_batch_size})"
+    )] = config.cli_batch_size,
 ):
     """
     PyAlex CLI - Access the OpenAlex database from the command line.
@@ -104,6 +106,16 @@ def _print_dry_run_query(query_description, url=None, estimated_queries=None):
             typer.echo(f"  URL: {url}")
         if estimated_queries and estimated_queries > 1:
             typer.echo(f"  Estimated queries: {estimated_queries}")
+
+
+def _handle_cli_exception(e: Exception) -> None:
+    """Handle CLI exceptions with optional debug logging."""
+    if _debug_mode:
+        from pyalex.logger import get_logger
+        logger = get_logger()
+        logger.debug("Full traceback:", exc_info=True)
+    typer.echo(f"Error: {e}", err=True)
+    raise typer.Exit(1) from e
 
 
 def _clean_ids(id_list, url_prefix='https://openalex.org/'):
@@ -368,7 +380,11 @@ def _sync_paginate_with_progress(query, entity_type_name):
     
     # Use the paginate method directly to get all results
     # Start with cursor pagination to get the total count
-    paginator = query.paginate(method="cursor", cursor="*", per_page=200)
+    paginator = query.paginate(
+        method="cursor", 
+        cursor="*", 
+        per_page=MAX_PER_PAGE
+    )
     
     all_results = []
     total_count = None
@@ -598,8 +614,7 @@ def _output_results(results, json_path: Optional[str] = None, single: bool = Fal
         
         with open(json_path, 'w') as f:
             json.dump(data, f, indent=2)
-        
-        typer.echo(f"Results saved to {json_path}")
+
     else:
         # Display table format to stdout
         _output_table(results, single)
@@ -730,7 +745,9 @@ def _output_table(results, single: bool = False):
         table.align = "l"
         
         for result in results:
-            name = (result.get('display_name') or 'Unknown')[:50]
+            name = (result.get('display_name') or 'Unknown')[
+                :config.cli_name_truncate_length
+            ]
             works = result.get('works_count', 0)
             citations = result.get('cited_by_count', 0)
             openalex_id = result.get('id', '').split('/')[-1]
@@ -1144,12 +1161,8 @@ def works(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
+
 
 
 @app.command()
@@ -1335,12 +1348,7 @@ def authors(
             raise
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
 
 
 @app.command()
@@ -1441,12 +1449,8 @@ def topics(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
+
 
 
 @app.command()
@@ -1540,12 +1544,7 @@ def sources(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
 
 
 @app.command()
@@ -1652,12 +1651,8 @@ def institutions(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
+
 
 
 @app.command()
@@ -1755,12 +1750,7 @@ def publishers(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
 
 
 @app.command()
@@ -1858,12 +1848,8 @@ def funders(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
+
 
 
 @app.command()
@@ -1937,34 +1923,7 @@ def domains(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-        
-        if search:
-            query = query.search(search)
-            
-        _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
-        _print_debug_results(results)
-        _output_results(results, json_path)
-            
-    except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
 
 
 @app.command()
@@ -2045,12 +2004,8 @@ def fields(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
+
 
 
 @app.command()
@@ -2131,12 +2086,8 @@ def subfields(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
+
 
 
 @app.command()
@@ -2216,34 +2167,9 @@ def keywords(
         _output_results(results, json_path)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
-        
-        if search:
-            query = query.search(search)
+        _handle_cli_exception(e)
+
             
-        _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
-        _print_debug_results(results)
-        _output_results(results, json_path)
-            
-    except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
 
 
 @app.command()
@@ -2398,11 +2324,7 @@ def from_ids(
                     all_results.extend(batch_results)
                 
             except Exception as e:
-                typer.echo(
-                    f"Error retrieving {class_name.lower()}(s): {e}", 
-                    err=True
-                )
-                continue
+                _handle_cli_exception(e)
         
         if not all_results:
             typer.echo("No results retrieved", err=True)
@@ -2412,12 +2334,7 @@ def from_ids(
         _output_results(all_results, json_path)
         
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
 
 
 @app.command()
@@ -2490,12 +2407,7 @@ def show(
             raise typer.Exit(1)
             
     except Exception as e:
-        if _debug_mode:
-            from pyalex.logger import get_logger
-            logger = get_logger()
-            logger.debug("Full traceback:", exc_info=True)
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from e
+        _handle_cli_exception(e)
 
 
 if __name__ == "__main__":

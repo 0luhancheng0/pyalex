@@ -22,6 +22,20 @@ DEFAULT_MAX_RESULTS = 10000
 CURSOR_START_VALUE = "*"
 PAGE_START_VALUE = 1
 
+# CLI Defaults
+DEFAULT_CLI_BATCH_SIZE = 50
+CLI_MAX_WIDTH = 300
+
+# HTTP Client Defaults
+DEFAULT_TOTAL_TIMEOUT = 30
+DEFAULT_CONNECT_TIMEOUT = 10
+DEFAULT_CONNECTION_LIMIT = 20
+DEFAULT_CONNECTION_LIMIT_PER_HOST = 10
+DEFAULT_MAX_CONCURRENT = 10
+
+# CLI Display Defaults
+CLI_NAME_TRUNCATE_LENGTH = 50
+
 
 class AlexConfig(dict):
     """Configuration class for OpenAlex API.
@@ -59,4 +73,14 @@ config = AlexConfig(
     max_retries=DEFAULT_MAX_RETRIES,
     retry_backoff_factor=DEFAULT_RETRY_BACKOFF_FACTOR,
     retry_http_codes=DEFAULT_RETRY_HTTP_CODES,
+    # CLI specific configurations
+    cli_batch_size=DEFAULT_CLI_BATCH_SIZE,
+    cli_max_width=CLI_MAX_WIDTH,
+    cli_name_truncate_length=CLI_NAME_TRUNCATE_LENGTH,
+    # HTTP client configurations
+    total_timeout=DEFAULT_TOTAL_TIMEOUT,
+    connect_timeout=DEFAULT_CONNECT_TIMEOUT,
+    connection_limit=DEFAULT_CONNECTION_LIMIT,
+    connection_limit_per_host=DEFAULT_CONNECTION_LIMIT_PER_HOST,
+    max_concurrent=DEFAULT_MAX_CONCURRENT,
 )

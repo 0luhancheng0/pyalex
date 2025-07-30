@@ -2,31 +2,573 @@
   {
     "id": "https://openalex.org/F4320334704",
     "display_name": "Australian Research Council",
+    "alternate_titles": [
+      "The Australian Research Council",
+      "ARC"
+    ],
+    "country_code": "AU",
+    "description": "the Australian Government's main research funding body for tertiary institutions",
+    "homepage_url": "http://www.arc.gov.au",
+    "image_url": null,
+    "image_thumbnail_url": null,
+    "grants_count": 23945,
     "works_count": 96875,
-    "cited_by_count": 3633995
+    "cited_by_count": 3633995,
+    "summary_stats": {
+      "2yr_mean_citedness": 6.780476274892159,
+      "h_index": 483,
+      "i10_index": 61123
+    },
+    "ids": {
+      "openalex": "https://openalex.org/F4320334704",
+      "ror": "https://ror.org/05mmh0f86",
+      "wikidata": "https://www.wikidata.org/entity/Q4824612",
+      "crossref": "501100000923",
+      "doi": "https://doi.org/10.13039/501100000923"
+    },
+    "counts_by_year": [
+      {
+        "year": 2025,
+        "works_count": 4125,
+        "cited_by_count": 302339
+      },
+      {
+        "year": 2024,
+        "works_count": 8415,
+        "cited_by_count": 593753
+      },
+      {
+        "year": 2023,
+        "works_count": 8310,
+        "cited_by_count": 573371
+      },
+      {
+        "year": 2022,
+        "works_count": 8616,
+        "cited_by_count": 526774
+      },
+      {
+        "year": 2021,
+        "works_count": 10105,
+        "cited_by_count": 484136
+      },
+      {
+        "year": 2020,
+        "works_count": 10070,
+        "cited_by_count": 377701
+      },
+      {
+        "year": 2019,
+        "works_count": 9381,
+        "cited_by_count": 274409
+      },
+      {
+        "year": 2018,
+        "works_count": 9049,
+        "cited_by_count": 193294
+      },
+      {
+        "year": 2017,
+        "works_count": 8702,
+        "cited_by_count": 126088
+      },
+      {
+        "year": 2016,
+        "works_count": 8064,
+        "cited_by_count": 76576
+      },
+      {
+        "year": 2015,
+        "works_count": 5469,
+        "cited_by_count": 39503
+      },
+      {
+        "year": 2014,
+        "works_count": 3055,
+        "cited_by_count": 19866
+      },
+      {
+        "year": 2013,
+        "works_count": 995,
+        "cited_by_count": 13298
+      },
+      {
+        "year": 2012,
+        "works_count": 677,
+        "cited_by_count": 8912
+      }
+    ],
+    "roles": [
+      {
+        "role": "funder",
+        "id": "https://openalex.org/F4320334704",
+        "works_count": 96875
+      },
+      {
+        "role": "institution",
+        "id": "https://openalex.org/I1337719021",
+        "works_count": 10304
+      }
+    ],
+    "updated_date": "2025-07-28T19:23:36.383589",
+    "created_date": "2023-02-13"
   },
   {
     "id": "https://openalex.org/F4320334705",
     "display_name": "National Health and Medical Research Council",
+    "alternate_titles": [
+      "NHMRC"
+    ],
+    "country_code": "AU",
+    "description": "Australian government agency",
+    "homepage_url": "https://www.nhmrc.gov.au",
+    "image_url": null,
+    "image_thumbnail_url": null,
+    "grants_count": 19820,
     "works_count": 46081,
-    "cited_by_count": 1540444
+    "cited_by_count": 1540444,
+    "summary_stats": {
+      "2yr_mean_citedness": 5.734076621990274,
+      "h_index": 348,
+      "i10_index": 27709
+    },
+    "ids": {
+      "openalex": "https://openalex.org/F4320334705",
+      "ror": "https://ror.org/011kf5r70",
+      "wikidata": "https://www.wikidata.org/entity/Q6973022",
+      "crossref": "501100000925",
+      "doi": "https://doi.org/10.13039/501100000925"
+    },
+    "counts_by_year": [
+      {
+        "year": 2025,
+        "works_count": 2180,
+        "cited_by_count": 137066
+      },
+      {
+        "year": 2024,
+        "works_count": 4187,
+        "cited_by_count": 256978
+      },
+      {
+        "year": 2023,
+        "works_count": 4065,
+        "cited_by_count": 243048
+      },
+      {
+        "year": 2022,
+        "works_count": 4367,
+        "cited_by_count": 224335
+      },
+      {
+        "year": 2021,
+        "works_count": 5347,
+        "cited_by_count": 206636
+      },
+      {
+        "year": 2020,
+        "works_count": 5279,
+        "cited_by_count": 156642
+      },
+      {
+        "year": 2019,
+        "works_count": 4764,
+        "cited_by_count": 99650
+      },
+      {
+        "year": 2018,
+        "works_count": 4276,
+        "cited_by_count": 67498
+      },
+      {
+        "year": 2017,
+        "works_count": 3500,
+        "cited_by_count": 44823
+      },
+      {
+        "year": 2016,
+        "works_count": 2762,
+        "cited_by_count": 28223
+      },
+      {
+        "year": 2015,
+        "works_count": 1813,
+        "cited_by_count": 17424
+      },
+      {
+        "year": 2014,
+        "works_count": 1126,
+        "cited_by_count": 11488
+      },
+      {
+        "year": 2013,
+        "works_count": 401,
+        "cited_by_count": 9106
+      },
+      {
+        "year": 2012,
+        "works_count": 315,
+        "cited_by_count": 7042
+      }
+    ],
+    "roles": [
+      {
+        "role": "funder",
+        "id": "https://openalex.org/F4320334705",
+        "works_count": 46081
+      },
+      {
+        "role": "institution",
+        "id": "https://openalex.org/I42131985",
+        "works_count": 8380
+      }
+    ],
+    "updated_date": "2025-07-29T01:44:07.229280",
+    "created_date": "2023-02-13"
   },
   {
     "id": "https://openalex.org/F4320315885",
     "display_name": "Australian Government",
+    "alternate_titles": [
+      "Federal Government",
+      "Commonwealth Government of Australia",
+      "Commonwealth Government",
+      "Government of Australia"
+    ],
+    "country_code": "AU",
+    "description": "federal government of Australia",
+    "homepage_url": "http://www.australia.gov.au",
+    "image_url": "https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/Coat of Arms of Australia.svg",
+    "image_thumbnail_url": "https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/Coat of Arms of Australia.svg&width=300",
+    "grants_count": 753,
     "works_count": 6052,
-    "cited_by_count": 123562
+    "cited_by_count": 123562,
+    "summary_stats": {
+      "2yr_mean_citedness": 5.298614958448754,
+      "h_index": 124,
+      "i10_index": 2743
+    },
+    "ids": {
+      "openalex": "https://openalex.org/F4320315885",
+      "ror": "https://ror.org/0314h5y94",
+      "wikidata": "https://www.wikidata.org/wiki/Q2991162",
+      "crossref": "100015539",
+      "doi": "https://doi.org/10.13039/100015539"
+    },
+    "counts_by_year": [
+      {
+        "year": 2025,
+        "works_count": 493,
+        "cited_by_count": 15356
+      },
+      {
+        "year": 2024,
+        "works_count": 1022,
+        "cited_by_count": 26633
+      },
+      {
+        "year": 2023,
+        "works_count": 970,
+        "cited_by_count": 22062
+      },
+      {
+        "year": 2022,
+        "works_count": 835,
+        "cited_by_count": 17317
+      },
+      {
+        "year": 2021,
+        "works_count": 804,
+        "cited_by_count": 12805
+      },
+      {
+        "year": 2020,
+        "works_count": 563,
+        "cited_by_count": 9500
+      },
+      {
+        "year": 2019,
+        "works_count": 277,
+        "cited_by_count": 6707
+      },
+      {
+        "year": 2018,
+        "works_count": 281,
+        "cited_by_count": 5114
+      },
+      {
+        "year": 2017,
+        "works_count": 259,
+        "cited_by_count": 3981
+      },
+      {
+        "year": 2016,
+        "works_count": 222,
+        "cited_by_count": 2531
+      },
+      {
+        "year": 2015,
+        "works_count": 202,
+        "cited_by_count": 892
+      },
+      {
+        "year": 2014,
+        "works_count": 58,
+        "cited_by_count": 322
+      },
+      {
+        "year": 2013,
+        "works_count": 30,
+        "cited_by_count": 151
+      },
+      {
+        "year": 2012,
+        "works_count": 14,
+        "cited_by_count": 73
+      }
+    ],
+    "roles": [
+      {
+        "role": "funder",
+        "id": "https://openalex.org/F4320315885",
+        "works_count": 6052
+      }
+    ],
+    "updated_date": "2025-07-29T03:00:35.259200",
+    "created_date": "2023-02-13"
   },
   {
     "id": "https://openalex.org/F4320320984",
     "display_name": "University of Queensland",
+    "alternate_titles": [
+      "UQ",
+      "The University of Queensland"
+    ],
+    "country_code": "AU",
+    "description": "university in Australia",
+    "homepage_url": "https://www.uq.edu.au",
+    "image_url": "https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/UQ-SteeleBldg800.jpg",
+    "image_thumbnail_url": "https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/UQ-SteeleBldg800.jpg&width=300",
+    "grants_count": 600,
     "works_count": 4860,
-    "cited_by_count": 138612
+    "cited_by_count": 138612,
+    "summary_stats": {
+      "2yr_mean_citedness": 5.396242527754056,
+      "h_index": 140,
+      "i10_index": 2789
+    },
+    "ids": {
+      "openalex": "https://openalex.org/F4320320984",
+      "ror": "https://ror.org/00rqy9422",
+      "wikidata": "https://www.wikidata.org/entity/Q866012",
+      "crossref": "501100001794",
+      "doi": "https://doi.org/10.13039/501100001794"
+    },
+    "counts_by_year": [
+      {
+        "year": 2025,
+        "works_count": 294,
+        "cited_by_count": 14548
+      },
+      {
+        "year": 2024,
+        "works_count": 550,
+        "cited_by_count": 26494
+      },
+      {
+        "year": 2023,
+        "works_count": 581,
+        "cited_by_count": 23250
+      },
+      {
+        "year": 2022,
+        "works_count": 590,
+        "cited_by_count": 20533
+      },
+      {
+        "year": 2021,
+        "works_count": 508,
+        "cited_by_count": 17055
+      },
+      {
+        "year": 2020,
+        "works_count": 482,
+        "cited_by_count": 12796
+      },
+      {
+        "year": 2019,
+        "works_count": 424,
+        "cited_by_count": 8731
+      },
+      {
+        "year": 2018,
+        "works_count": 394,
+        "cited_by_count": 5727
+      },
+      {
+        "year": 2017,
+        "works_count": 320,
+        "cited_by_count": 3630
+      },
+      {
+        "year": 2016,
+        "works_count": 283,
+        "cited_by_count": 2073
+      },
+      {
+        "year": 2015,
+        "works_count": 193,
+        "cited_by_count": 1188
+      },
+      {
+        "year": 2014,
+        "works_count": 99,
+        "cited_by_count": 733
+      },
+      {
+        "year": 2013,
+        "works_count": 48,
+        "cited_by_count": 454
+      },
+      {
+        "year": 2012,
+        "works_count": 25,
+        "cited_by_count": 325
+      }
+    ],
+    "roles": [
+      {
+        "role": "institution",
+        "id": "https://openalex.org/I165143802",
+        "works_count": 238282
+      },
+      {
+        "role": "funder",
+        "id": "https://openalex.org/F4320320984",
+        "works_count": 4860
+      }
+    ],
+    "updated_date": "2025-07-29T02:52:59.469745",
+    "created_date": "2023-02-13"
   },
   {
     "id": "https://openalex.org/F4320320974",
     "display_name": "University of Melbourne",
+    "alternate_titles": [
+      "Melbourne University",
+      "UNIMELB",
+      "The University of Melbourne"
+    ],
+    "country_code": "AU",
+    "description": "Australian public university located in Melbourne, Victoria, Australia",
+    "homepage_url": "https://www.unimelb.edu.au",
+    "image_url": "https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/Trinity college university of melbourne.jpg",
+    "image_thumbnail_url": "https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/Trinity college university of melbourne.jpg&width=300",
+    "grants_count": 544,
     "works_count": 4546,
-    "cited_by_count": 103886
+    "cited_by_count": 103886,
+    "summary_stats": {
+      "2yr_mean_citedness": 5.312964492155244,
+      "h_index": 124,
+      "i10_index": 2150
+    },
+    "ids": {
+      "openalex": "https://openalex.org/F4320320974",
+      "ror": "https://ror.org/01ej9dk98",
+      "wikidata": "https://www.wikidata.org/entity/Q319078",
+      "crossref": "501100001782",
+      "doi": "https://doi.org/10.13039/501100001782"
+    },
+    "counts_by_year": [
+      {
+        "year": 2025,
+        "works_count": 444,
+        "cited_by_count": 11812
+      },
+      {
+        "year": 2024,
+        "works_count": 676,
+        "cited_by_count": 20578
+      },
+      {
+        "year": 2023,
+        "works_count": 619,
+        "cited_by_count": 17435
+      },
+      {
+        "year": 2022,
+        "works_count": 592,
+        "cited_by_count": 14593
+      },
+      {
+        "year": 2021,
+        "works_count": 434,
+        "cited_by_count": 12608
+      },
+      {
+        "year": 2020,
+        "works_count": 416,
+        "cited_by_count": 9330
+      },
+      {
+        "year": 2019,
+        "works_count": 393,
+        "cited_by_count": 6032
+      },
+      {
+        "year": 2018,
+        "works_count": 273,
+        "cited_by_count": 3826
+      },
+      {
+        "year": 2017,
+        "works_count": 221,
+        "cited_by_count": 2514
+      },
+      {
+        "year": 2016,
+        "works_count": 182,
+        "cited_by_count": 1596
+      },
+      {
+        "year": 2015,
+        "works_count": 124,
+        "cited_by_count": 846
+      },
+      {
+        "year": 2014,
+        "works_count": 61,
+        "cited_by_count": 525
+      },
+      {
+        "year": 2013,
+        "works_count": 30,
+        "cited_by_count": 397
+      },
+      {
+        "year": 2012,
+        "works_count": 16,
+        "cited_by_count": 335
+      }
+    ],
+    "roles": [
+      {
+        "role": "publisher",
+        "id": "https://openalex.org/P4310318045",
+        "works_count": 2522
+      },
+      {
+        "role": "funder",
+        "id": "https://openalex.org/F4320320974",
+        "works_count": 4546
+      },
+      {
+        "role": "institution",
+        "id": "https://openalex.org/I165779595",
+        "works_count": 288355
+      }
+    ],
+    "updated_date": "2025-07-28T21:20:49.937068",
+    "created_date": "2023-02-13"
   }
 ]

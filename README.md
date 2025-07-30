@@ -2,16 +2,42 @@
   <img alt="PyAlex - a Python wrapper for OpenAlex" src="https://github.com/J535D165/pyalex/raw/main/pyalex_repocard.svg">
 </p>
 
-# PyAlex
+# PyAlex Enhanced
 
 ![PyPI](https://img.shields.io/pypi/v/pyalex) [![DOI](https://zenodo.org/badge/557541347.svg)](https://zenodo.org/badge/latestdoi/557541347)
 
+PyAlex is a Python library for [OpenAlex](https://openalex.org/) with **enhanced functionality and a powerful command-line interface**. OpenAlex is an index of hundreds of millions of interconnected scholarly papers, authors, institutions, and more. OpenAlex offers a robust, open, and free [REST API](https://docs.openalex.org/) to extract, aggregate, or search scholarly data.
 
-PyAlex is a Python library for [OpenAlex](https://openalex.org/). OpenAlex is
-an index of hundreds of millions of interconnected scholarly papers, authors,
-institutions, and more. OpenAlex offers a robust, open, and free [REST API](https://docs.openalex.org/) to extract, aggregate, or search scholarly data.
-PyAlex is a lightweight and thin Python interface to this API. PyAlex tries to
-stay as close as possible to the design of the original service.
+This enhanced version of PyAlex maintains full compatibility with the original library while adding significant new features, particularly a comprehensive CLI tool for direct command-line access to OpenAlex data.
+
+## 🆕 What's New in This Enhanced Version
+
+This enhanced version builds upon the excellent [original PyAlex library](https://github.com/J535D165/pyalex) with the following major additions:
+
+### **🚀 Powerful Command Line Interface**
+- Complete CLI tool for accessing OpenAlex from the command line
+- Support for all entity types (works, authors, institutions, topics, etc.)
+- Multiple output formats (table, JSON, summary, title-only)
+- Advanced filtering and search capabilities
+- Batch operations with configurable batch sizes
+- Async processing for improved performance
+- Rich progress bars and debug output
+
+### **🔧 Enhanced Configuration Management**
+- Centralized configuration through `AlexConfig` class
+- Configurable timeouts, connection limits, and batch sizes
+- Better error handling and retry mechanisms
+
+### **📊 Improved Data Processing**
+- Async pagination support with progress tracking
+- Better memory management for large datasets
+- Enhanced error reporting and debugging tools
+
+### **🧹 Code Quality Improvements**
+- Refactored codebase with better organization
+- Reduced magic numbers through configuration
+- Improved exception handling patterns
+- Better test organization
 
 The following features of OpenAlex are currently supported by PyAlex:
 
@@ -45,42 +71,135 @@ pip install pyalex
 
 ## Command Line Interface
 
-PyAlex now includes a command line interface (CLI) for quick queries to OpenAlex. After installation, you can use the `pyalex` command:
+**🎯 The CLI is the major new feature of this enhanced PyAlex version!**
+
+PyAlex now includes a comprehensive command line interface (CLI) that provides direct access to OpenAlex data without writing Python code. The CLI supports all OpenAlex entities and offers powerful filtering, searching, and output options.
+
+### Quick Start
+
+After installation, use the `pyalex` command directly:
 
 ```bash
 # Search for works (table format by default)
 pyalex works --search "machine learning" --limit 5
 
-# Search for authors  
+# Search for authors with institutional affiliation
 pyalex authors --search "Andrew Ng" --limit 3
+pyalex authors --institution-id "I1234567890" --limit 50
 
-# Search for topics
-pyalex topics --search "artificial intelligence" --limit 3
+# Search for topics and get JSON output
+pyalex topics --search "artificial intelligence" --limit 3 --json ai_topics.json
 
 # Get specific entities by ID
 pyalex works W2741809807
 pyalex authors A1234567890
 pyalex topics T1234567890
 
-# Different output formats
-pyalex works --search "climate change" --format json
-pyalex works --search "climate change" --format title
-pyalex works --search "climate change" --format table  # default
-pyalex works --search "climate change" --format summary
-
-# Filter options
-pyalex works --author-id "A1234567890" --year 2023
-pyalex authors --institution-id "I1234567890"
+# Get comprehensive information about institutions
+pyalex institutions --country US --limit 100
+pyalex institutions --sort-by "works_count:desc" --limit 50
 ```
 
-For more options, use the help command:
+### Advanced CLI Features
 
 ```bash
-pyalex --help
-pyalex works --help
-pyalex authors --help  
-pyalex topics --help
+# Different output formats
+pyalex works --search "climate change" --format json      # JSON output
+pyalex works --search "climate change" --format title     # Titles only
+pyalex works --search "climate change" --format table     # Table (default)
+pyalex works --search "climate change" --format summary   # Detailed summaries
+
+# Complex filtering with multiple criteria
+pyalex works --author-id "A1234567890" --year 2023 --is-oa true
+pyalex works --institution-id "I1234567890" --from-date "2023-01-01" --to-date "2023-12-31"
+
+# Sorting and sampling
+pyalex works --sort-by "cited_by_count:desc" --limit 100
+pyalex works --sample 50 --seed 123
+
+# Get all results (use with caution for large datasets)
+pyalex authors --all --json all_authors.json
+
+# Debug mode for API inspection
+pyalex works --search "quantum computing" --debug
+
+# Dry run mode to see queries without executing
+pyalex works --search "quantum computing" --dry-run
+
+# Batch processing from file (pipe IDs to stdin)
+echo -e "W1234567890\nW0987654321" | pyalex from-ids --json results.json
 ```
+
+### CLI vs Original Library
+
+The CLI provides several advantages over the original PyAlex library:
+
+| Feature | Original PyAlex | Enhanced PyAlex CLI |
+|---------|-----------------|-------------------|
+| **Ease of Use** | Requires Python scripting | Direct command-line access |
+| **Quick Queries** | Multiple lines of code | Single command |
+| **Output Formats** | Manual formatting needed | Built-in table, JSON, summary formats |
+| **Batch Operations** | Manual implementation | Built-in batch processing |
+| **Progress Tracking** | Not available | Rich progress bars |
+| **Debug Information** | Limited | Comprehensive debug output |
+| **Configuration** | Code-based only | Command-line options + config |
+
+### Getting Help
+
+```bash
+pyalex --help                    # General help
+pyalex works --help             # Help for works commands
+pyalex authors --help           # Help for authors commands  
+pyalex topics --help            # Help for topics commands
+pyalex institutions --help      # Help for institutions commands
+```
+
+## Compatibility with Original PyAlex
+
+This enhanced version maintains **100% backward compatibility** with the original PyAlex library. All existing Python code will continue to work unchanged:
+
+```python
+# All original PyAlex code works exactly the same
+from pyalex import Works, Authors, config
+
+config.email = "your@email.com"
+works = Works().search("machine learning").get()
+```
+
+The key differences from the [original PyAlex library](https://github.com/J535D165/pyalex) are:
+
+### ✅ What's the Same
+- All Python API methods and classes
+- All configuration options and settings  
+- All data structures and return types
+- All filtering, searching, and pagination features
+- Complete compatibility with existing code
+
+### 🆕 What's Enhanced
+- **Command Line Interface**: Brand new CLI tool for direct access
+- **Async Support**: Enhanced async capabilities with progress tracking
+- **Better Configuration**: Centralized config management with `AlexConfig`
+- **Improved Error Handling**: More robust exception handling and retries
+- **Progress Tracking**: Rich progress bars for long operations
+- **Debug Features**: Enhanced logging and debug output
+- **Code Quality**: Refactored codebase with better organization
+- **Test Organization**: All tests properly organized in `tests/` directory
+
+### 🎯 When to Use What
+
+**Use the CLI when you want to:**
+- Quickly explore OpenAlex data from command line
+- Export data to JSON files for analysis
+- Perform one-off queries without writing code
+- Debug API queries and inspect responses
+- Batch process lists of IDs
+
+**Use the Python API when you want to:**
+- Integrate OpenAlex data into applications
+- Perform complex data analysis workflows
+- Build automated research pipelines
+- Customize data processing and filtering
+- Work with data programmatically in notebooks
 
 ## Getting started
 

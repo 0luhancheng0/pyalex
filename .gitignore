@@ -1,5 +1,5 @@
 data/
-examples/
+**/*.json
 pyalex/_version.py
 
 # Byte-compiled / optimized / DLL files
