@@ -96,6 +96,7 @@ BATCH_FILTER_CONFIGS = {
     'works_source': BatchFilterConfig("primary_location.source", "id"),  # primary_location.source.id
     'works_topic': BatchFilterConfig("primary_topic", "id"),  # primary_topic.id
     'works_topics': BatchFilterConfig("topics", "id"),  # topics.id (all topics, not just primary)
+    'works_subfield': BatchFilterConfig("primary_topic.subfield", "id"),  # primary_topic.subfield.id
     'works_cited_by': BatchFilterConfig("", "cited_by"),  # flat field: cited_by
     'works_cites': BatchFilterConfig("", "cites"),  # flat field: cites
     
@@ -1057,9 +1058,10 @@ def works(
         "--author-id",
         help="Filter by author OpenAlex ID"
     )] = None,
-    institution_id: Annotated[Optional[str], typer.Option(
-        "--institution-id", 
-        help="Filter by institution OpenAlex ID"
+    institution_ids: Annotated[Optional[str], typer.Option(
+        "--institution-ids", 
+        help="Filter by institution OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --institution-ids 'I123,I456,I789')"
     )] = None,
     publication_year: Annotated[Optional[str], typer.Option(
         "--year",
@@ -1074,13 +1076,15 @@ def works(
         "--type",
         help="Filter by work type (e.g. 'article', 'book', 'dataset')"
     )] = None,
-    topic_id: Annotated[Optional[str], typer.Option(
-        "--topic-id",
-        help="Filter by primary topic OpenAlex ID"
+    topic_ids: Annotated[Optional[str], typer.Option(
+        "--topic-ids",
+        help="Filter by primary topic OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --topic-ids 'T123,T456,T789')"
     )] = None,
-    subfield_id: Annotated[Optional[str], typer.Option(
-        "--subfield-id",
-        help="Filter by primary topic subfield OpenAlex ID"
+    subfield_ids: Annotated[Optional[str], typer.Option(
+        "--subfield-ids",
+        help="Filter by primary topic subfield OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --subfield-ids 'SF123,SF456,SF789')"
     )] = None,
     funder_ids: Annotated[Optional[str], typer.Option(
         "--funder-ids",
@@ -1140,8 +1144,12 @@ def works(
       pyalex works --date "2020-01-01:2020-12-31" --all
       pyalex works --date "2020-06-15"
       pyalex works --type "article" --search "COVID-19"
-      pyalex works --topic-id "T10002"
-      pyalex works --subfield-id "SF12345"
+      pyalex works --topic-ids "T10002"
+      pyalex works --topic-ids "T123,T456,T789" --all
+      pyalex works --subfield-ids "SF12345"
+      pyalex works --subfield-ids "SF123,SF456" --all
+      pyalex works --institution-ids "I27837315"
+      pyalex works --institution-ids "I123,I456,I789" --all
       pyalex works --funder-ids "F4320332161"
       pyalex works --funder-ids "F123,F456,F789" --all
       pyalex works --award-ids "AWARD123,AWARD456"
@@ -1166,9 +1174,10 @@ def works(
             query = query.search(search)
         if author_id:
             query = query.filter(author={"id": author_id})
-        if institution_id:
-            query = query.filter(
-                authorships={"institutions": {"id": institution_id}}
+        if institution_ids:
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, institution_ids, 'works_institution', Works
             )
         
         if publication_year:
@@ -1243,11 +1252,17 @@ def works(
         if work_type:
             query = query.filter(type=work_type)
         
-        if topic_id:
-            query = query.filter(primary_topic={"id": topic_id})
+        if topic_ids:
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, topic_ids, 'works_topic', Works
+            )
         
-        if subfield_id:
-            query = query.filter(primary_topic={"subfield": {"id": subfield_id}})
+        if subfield_ids:
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, subfield_ids, 'works_subfield', Works
+            )
         
         if funder_ids:
             # Use the generalized helper for ID list handling
@@ -1365,9 +1380,10 @@ def authors(
         "--search", "-s",
         help="Search term for authors"
     )] = None,
-    institution_id: Annotated[Optional[str], typer.Option(
-        "--institution-id",
-        help="Filter by institution OpenAlex ID (comma-separated for multiple IDs)"
+    institution_ids: Annotated[Optional[str], typer.Option(
+        "--institution-ids",
+        help="Filter by institution OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --institution-ids 'I123,I456,I789')"
     )] = None,
     group_by: Annotated[Optional[str], typer.Option(
         "--group-by",
@@ -1413,8 +1429,8 @@ def authors(
     
     Examples:
       pyalex authors --search "John Smith"
-      pyalex authors --institution-id "I1234567890" --all
-      pyalex authors --institution-id "I1234567890" --limit 50
+      pyalex authors --institution-ids "I1234567890" --all
+      pyalex authors --institution-ids "I123,I456,I789" --limit 50
       pyalex authors --group-by "cited_by_count" --json results.json
       pyalex authors --group-by "has_orcid"
       pyalex authors --sort-by "cited_by_count:desc" --limit 100
@@ -1431,10 +1447,10 @@ def authors(
         
         if search:
             query = query.search(search)
-        if institution_id:
+        if institution_ids:
             # Use the generalized helper for ID list handling
             query = add_id_list_option_to_command(
-                query, institution_id, 'authors_institution', Authors
+                query, institution_ids, 'authors_institution', Authors
             )
         
         # Apply common options (sort, sample, select)
