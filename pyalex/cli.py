@@ -212,10 +212,10 @@ def _sync_retrieve_entities(entity_class, ids, class_name):
 
 
 def _validate_and_apply_common_options(
-    query, all_results, limit, sample, seed, sort_by
+    query, all_results, limit, sample, seed, sort_by, select=None
 ):
     """
-    Validate common options and apply sorting and sampling to a query.
+    Validate common options and apply sorting, sampling, and field selection to a query.
     
     Args:
         query: The OpenAlex query object
@@ -224,6 +224,7 @@ def _validate_and_apply_common_options(
         sample: Sample size
         seed: Random seed
         sort_by: Sort specification
+        select: Comma-separated list of fields to select
     
     Returns:
         Modified query object
@@ -249,6 +250,12 @@ def _validate_and_apply_common_options(
             else:
                 sort_params[sort_item] = "asc"  # Default direction
         query = query.sort(**sort_params)
+    
+    # Apply select options
+    if select:
+        # Parse select string - comma-separated field list
+        fields = [field.strip() for field in select.split(',')]
+        query = query.select(fields)
     
     # Apply sample options
     if sample is not None:
@@ -865,6 +872,12 @@ def works(
         "--seed",
         help="Seed for random sampling (used with --sample)"
     )] = 0,
+    select: Annotated[Optional[str], typer.Option(
+        "--select",
+        help="Select specific fields to return (comma-separated). "
+             "Example: 'id,doi,title,display_name'. "
+             "If not specified, returns all fields."
+    )] = None,
 ):
     """
     Search and retrieve works from OpenAlex.
@@ -1027,9 +1040,9 @@ def works(
                 award_or_filter = "|".join(cleaned_award_list)
                 query = query.filter(grants={"award_id": award_or_filter})
 
-        # Apply common options (sort, sample)
+        # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
-            query, all_results, limit, sample, seed, sort_by
+            query, all_results, limit, sample, seed, sort_by, select
         )
 
         # Handle group_by parameter
@@ -1181,6 +1194,12 @@ def authors(
         "--seed",
         help="Seed for random sampling (used with --sample)"
     )] = 0,
+    select: Annotated[Optional[str], typer.Option(
+        "--select",
+        help="Select specific fields to return (comma-separated). "
+             "Example: 'id,display_name,orcid'. "
+             "If not specified, returns all fields."
+    )] = None,
 ):
     """
     Search and retrieve authors from OpenAlex.
@@ -1230,9 +1249,9 @@ def authors(
                 # multiple queries and combining results
                 query._large_institution_list = cleaned_institution_list
         
-        # Apply common options (sort, sample)
+        # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
-            query, all_results, limit, sample, seed, sort_by
+            query, all_results, limit, sample, seed, sort_by, select
         )
 
         # Handle group_by parameter
@@ -1368,6 +1387,12 @@ def topics(
         "--seed",
         help="Seed for random sampling (used with --sample)"
     )] = 0,
+    select: Annotated[Optional[str], typer.Option(
+        "--select",
+        help="Select specific fields to return (comma-separated). "
+             "Example: 'id,display_name,domain'. "
+             "If not specified, returns all fields."
+    )] = None,
 ):
     """
     Search and retrieve topics from OpenAlex.
@@ -1399,9 +1424,9 @@ def topics(
         if subfield_id:
             query = query.filter(subfield={"id": subfield_id})
         
-        # Apply common options (sort, sample)
+        # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
-            query, all_results, limit, sample, seed, sort_by
+            query, all_results, limit, sample, seed, sort_by, select
         )
         
         _print_debug_url(query)
@@ -1460,6 +1485,12 @@ def sources(
         "--seed",
         help="Seed for random sampling (used with --sample)"
     )] = 0,
+    select: Annotated[Optional[str], typer.Option(
+        "--select",
+        help="Select specific fields to return (comma-separated). "
+             "Example: 'id,display_name,type'. "
+             "If not specified, returns all fields."
+    )] = None,
 ):
     """
     Search and retrieve sources (journals/venues) from OpenAlex.
@@ -1485,9 +1516,9 @@ def sources(
         if search:
             query = query.search(search)
         
-        # Apply common options (sort, sample)
+        # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
-            query, all_results, limit, sample, seed, sort_by
+            query, all_results, limit, sample, seed, sort_by, select
         )
         
         # Handle group_by parameter
@@ -1558,6 +1589,12 @@ def institutions(
         "--seed",
         help="Seed for random sampling (used with --sample)"
     )] = 0,
+    select: Annotated[Optional[str], typer.Option(
+        "--select",
+        help="Select specific fields to return (comma-separated). "
+             "Example: 'id,display_name,country_code'. "
+             "If not specified, returns all fields."
+    )] = None,
 ):
     """
     Search and retrieve institutions from OpenAlex.
@@ -1585,9 +1622,9 @@ def institutions(
         if country_code:
             query = query.filter(country_code=country_code)
         
-        # Apply common options (sort, sample)
+        # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
-            query, all_results, limit, sample, seed, sort_by
+            query, all_results, limit, sample, seed, sort_by, select
         )
         
         # Handle group_by parameter
@@ -1659,6 +1696,12 @@ def publishers(
         "--seed",
         help="Seed for random sampling (used with --sample)"
     )] = 0,
+    select: Annotated[Optional[str], typer.Option(
+        "--select",
+        help="Select specific fields to return (comma-separated). "
+             "Example: 'id,display_name,country_code'. "
+             "If not specified, returns all fields."
+    )] = None,
 ):
     """
     Search and retrieve publishers from OpenAlex.
@@ -1682,9 +1725,9 @@ def publishers(
         if search:
             query = query.search(search)
         
-        # Apply common options (sort, sample)
+        # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
-            query, all_results, limit, sample, seed, sort_by
+            query, all_results, limit, sample, seed, sort_by, select
         )
             
         # Handle group_by parameter
@@ -2128,6 +2171,12 @@ def keywords(
         "--seed",
         help="Seed for random sampling (used with --sample)"
     )] = None,
+    select: Annotated[Optional[str], typer.Option(
+        "--select",
+        help="Select specific fields to return (comma-separated). "
+             "Example: 'id,display_name,score'. "
+             "If not specified, returns all fields."
+    )] = None,
 ):
     """
     Search and retrieve keywords from OpenAlex.
@@ -2150,9 +2199,9 @@ def keywords(
         if search:
             query = query.search(search)
         
-        # Apply common options (sort, sample)
+        # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
-            query, all_results, limit, sample, seed, sort_by
+            query, all_results, limit, sample, seed, sort_by, select
         )
             
         _print_debug_url(query)

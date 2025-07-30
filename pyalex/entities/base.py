@@ -439,7 +439,6 @@ class BaseOpenAlex:
             params_merge(self.params[argument], new_params)
         else:
             self.params[argument] = new_params
-        logger.debug("Params updated:", self.params)
 
     def filter(self, **kwargs):
         """Add filter parameters to the API request.
