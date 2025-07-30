@@ -1438,13 +1438,12 @@ def topics(
         )
         
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Topics query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "topics")
         _print_debug_results(results)
         _output_results(results, json_path)
             
@@ -1530,6 +1529,10 @@ def sources(
             query = query.group_by(group_by)
             _print_debug_url(query)
             
+            if _dry_run_mode:
+                _print_dry_run_query("Sources group-by query", url=query.url)
+                return
+            
             # For group-by operations, retrieve all groups by default
             results = query.get(limit=100000)
             _print_debug_results(results)
@@ -1539,6 +1542,11 @@ def sources(
             return
         
         _print_debug_url(query)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Sources query", url=query.url)
+            return
+        
         results = _execute_query_with_options(query, all_results, limit, "sources")
         _print_debug_results(results)
         _output_results(results, json_path)
@@ -1631,6 +1639,10 @@ def institutions(
             query = query.group_by(group_by)
             _print_debug_url(query)
             
+            if _dry_run_mode:
+                _print_dry_run_query("Institutions group-by query", url=query.url)
+                return
+            
             # For group-by operations, retrieve all groups by default
             results = query.get(limit=100000)
             _print_debug_results(results)
@@ -1640,13 +1652,12 @@ def institutions(
             return
         
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Institutions query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "institutions")
         _print_debug_results(results)
         _output_results(results, json_path)
             
@@ -1730,6 +1741,10 @@ def publishers(
             query = query.group_by(group_by)
             _print_debug_url(query)
             
+            if _dry_run_mode:
+                _print_dry_run_query("Publishers group-by query", url=query.url)
+                return
+            
             # For group-by operations, retrieve all groups by default
             results = query.get(limit=100000)
             _print_debug_results(results)
@@ -1739,13 +1754,12 @@ def publishers(
             return
         
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Publishers query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "publishers")
         _print_debug_results(results)
         _output_results(results, json_path)
             
@@ -1828,6 +1842,10 @@ def funders(
             query = query.group_by(group_by)
             _print_debug_url(query)
             
+            if _dry_run_mode:
+                _print_dry_run_query("Funders group-by query", url=query.url)
+                return
+            
             # For group-by operations, retrieve all groups by default
             results = query.get(limit=100000)
             _print_debug_results(results)
@@ -1837,13 +1855,12 @@ def funders(
             return
         
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Funders query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "funders")
         _print_debug_results(results)
         _output_results(results, json_path)
             
@@ -1912,13 +1929,12 @@ def domains(
         )
         
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Domains query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "domains")
         _print_debug_results(results)
         _output_results(results, json_path)
             
@@ -1993,13 +2009,12 @@ def fields(
         )
             
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Fields query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "fields")
         _print_debug_results(results)
         _output_results(results, json_path)
             
@@ -2075,13 +2090,12 @@ def subfields(
         )
             
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Subfields query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "subfields")
         _print_debug_results(results)
         _output_results(results, json_path)
             
@@ -2156,13 +2170,12 @@ def keywords(
         )
             
         _print_debug_url(query)
-        if all_results:
-            limit_to_use = None  # Get all results
-        elif limit is not None:
-            limit_to_use = limit  # Use specified limit
-        else:
-            limit_to_use = 25  # Default first page
-        results = query.get(limit=limit_to_use)
+        
+        if _dry_run_mode:
+            _print_dry_run_query("Keywords query", url=query.url)
+            return
+        
+        results = _execute_query_with_options(query, all_results, limit, "keywords")
         _print_debug_results(results)
         _output_results(results, json_path)
             
