@@ -232,11 +232,23 @@ def show(
         
         # Display the data
         if isinstance(data, dict):
-            # Single entity
-            _output_results(data, json_path, single=True)
+            # Check if this is a grouped result (contains group_by field)
+            if 'group_by' in data and isinstance(data['group_by'], list):
+                # This is grouped data from --group-by option
+                _output_results(data['group_by'], json_path, grouped=True)
+            else:
+                # Single entity
+                _output_results(data, json_path, single=True)
         elif isinstance(data, list):
-            # List of entities
-            _output_results(data, json_path)
+            # Check if this is a list of grouped items (key, key_display_name, count)
+            if (data and len(data) > 0 and isinstance(data[0], dict) and 
+                all(key in data[0] for key in ['key', 'key_display_name', 'count']) and
+                len(data[0]) == 3):
+                # This is grouped data
+                _output_results(data, json_path, grouped=True)
+            else:
+                # List of entities
+                _output_results(data, json_path)
         else:
             typer.echo("Error: Input must be a JSON object or array", err=True)
             raise typer.Exit(1)

@@ -1,6 +1,7 @@
 """Async HTTP session management for OpenAlex API."""
 
 import asyncio
+import time
 
 try:
     import aiohttp
@@ -8,6 +9,39 @@ except ImportError:
     aiohttp = None
 
 from pyalex.core.config import config
+
+
+class RateLimiter:
+    """Rate limiter for async requests."""
+    
+    def __init__(self, requests_per_second: float = 10.0):
+        self.requests_per_second = requests_per_second
+        self.min_interval = 1.0 / requests_per_second
+        self.last_request_time = 0.0
+        self._lock = asyncio.Lock()
+    
+    async def acquire(self):
+        """Acquire permission to make a request, waiting if necessary."""
+        async with self._lock:
+            now = time.time()
+            time_since_last = now - self.last_request_time
+            if time_since_last < self.min_interval:
+                sleep_time = self.min_interval - time_since_last
+                await asyncio.sleep(sleep_time)
+            self.last_request_time = time.time()
+
+
+# Global rate limiter instance
+_rate_limiter = None
+
+
+def get_rate_limiter() -> RateLimiter:
+    """Get or create the global rate limiter."""
+    global _rate_limiter
+    if _rate_limiter is None:
+        rate_limit = config.requests_per_second * config.rate_limit_buffer
+        _rate_limiter = RateLimiter(rate_limit)
+    return _rate_limiter
 
 
 async def get_async_session():
@@ -51,8 +85,8 @@ async def get_async_session():
     )
 
 
-async def async_get_with_retry(session, url, max_retries=3, backoff_factor=1.0):
-    """Make an async GET request with retry logic.
+async def async_get_with_retry(session, url, max_retries=None, backoff_factor=None):
+    """Make an async GET request with retry logic and rate limiting.
 
     Parameters
     ----------
@@ -61,14 +95,21 @@ async def async_get_with_retry(session, url, max_retries=3, backoff_factor=1.0):
     url : str
         URL to request.
     max_retries : int, optional
-        Maximum number of retries.
+        Maximum number of retries. Uses config.max_retries if None.
     backoff_factor : float, optional
-        Backoff factor for retries.
+        Backoff factor for retries. Uses config.retry_backoff_factor if None.
 
     Returns
     -------
     dict
         JSON response data.
+
+    Raises
+    ------
+    aiohttp.ClientError
+        If the request fails after all retries.
+    QueryError
+        If the request returns a 403 error with query parameter issues.
     """
     if aiohttp is None:
         raise ImportError(
@@ -76,9 +117,21 @@ async def async_get_with_retry(session, url, max_retries=3, backoff_factor=1.0):
             "Install with: pip install aiohttp"
         )
     
+    if max_retries is None:
+        max_retries = config.max_retries
+    if backoff_factor is None:
+        backoff_factor = config.retry_backoff_factor
+    
+    rate_limiter = get_rate_limiter()
+    retry_codes = set(config.retry_http_codes)
+    
     for attempt in range(max_retries + 1):
         try:
+            # Apply rate limiting
+            await rate_limiter.acquire()
+            
             async with session.get(url) as response:
+                # Handle specific 403 errors for query parameter issues
                 if response.status == 403:
                     response_json = await response.json()
                     if (
@@ -88,20 +141,36 @@ async def async_get_with_retry(session, url, max_retries=3, backoff_factor=1.0):
                         from pyalex.core.response import QueryError
                         raise QueryError(response_json["message"])
                 
+                # Check if we should retry based on status code
+                if response.status in retry_codes:
+                    if attempt == max_retries:
+                        response.raise_for_status()
+                    # Calculate exponential backoff with jitter
+                    sleep_time = (
+                        backoff_factor * (2 ** attempt) + 
+                        (time.time() % 1) * 0.1
+                    )
+                    await asyncio.sleep(sleep_time)
+                    continue
+                
+                # Raise for other HTTP errors
                 response.raise_for_status()
                 return await response.json()
                 
         except (aiohttp.ClientError, asyncio.TimeoutError):
             if attempt == max_retries:
                 raise
-            await asyncio.sleep(backoff_factor * (2 ** attempt))
+            # Calculate exponential backoff with jitter for network errors
+            sleep_time = (
+                backoff_factor * (2 ** attempt) + 
+                (time.time() % 1) * 0.1
+            )
+            await asyncio.sleep(sleep_time)
     
-    raise Exception(f"Failed to fetch {url} after {max_retries} retries")
+    raise aiohttp.ClientError(f"Failed to fetch {url} after {max_retries} retries")
 
 
 async def async_batch_requests(urls, max_concurrent=None):
-    if max_concurrent is None:
-        max_concurrent = config.max_concurrent
     """Execute multiple async requests with concurrency control.
 
     Parameters
@@ -109,7 +178,7 @@ async def async_batch_requests(urls, max_concurrent=None):
     urls : list
         List of URLs to request.
     max_concurrent : int, optional
-        Maximum number of concurrent requests.
+        Maximum number of concurrent requests. Uses config.max_concurrent if None.
 
     Returns
     -------
@@ -121,6 +190,9 @@ async def async_batch_requests(urls, max_concurrent=None):
             "aiohttp is required for async functionality. "
             "Install with: pip install aiohttp"
         )
+    
+    if max_concurrent is None:
+        max_concurrent = config.max_concurrent
     
     semaphore = asyncio.Semaphore(max_concurrent)
     
@@ -139,8 +211,6 @@ async def async_batch_requests(urls, max_concurrent=None):
 async def async_batch_requests_with_progress(
     urls, max_concurrent=None, description="Fetching data"
 ):
-    if max_concurrent is None:
-        max_concurrent = config.max_concurrent
     """Execute multiple async requests with concurrency control and rich progress bar.
 
     Parameters
@@ -148,7 +218,7 @@ async def async_batch_requests_with_progress(
     urls : list
         List of URLs to request.
     max_concurrent : int, optional
-        Maximum number of concurrent requests.
+        Maximum number of concurrent requests. Uses config.max_concurrent if None.
     description : str, optional
         Description for the progress bar.
 
@@ -163,10 +233,17 @@ async def async_batch_requests_with_progress(
             "Install with: pip install aiohttp"
         )
     
+    if max_concurrent is None:
+        max_concurrent = config.max_concurrent
+    
     try:
         from rich.progress import (
-            Progress, SpinnerColumn, TextColumn, BarColumn, 
-            MofNCompleteColumn, TimeElapsedColumn
+            BarColumn,
+            MofNCompleteColumn,
+            Progress,
+            SpinnerColumn,
+            TextColumn,
+            TimeElapsedColumn,
         )
         
         semaphore = asyncio.Semaphore(max_concurrent)

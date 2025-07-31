@@ -70,6 +70,16 @@ class Paginator:
         if self._next_value is None or self._is_max():
             raise StopIteration
 
+        # Check if this is a group-by query - group-by only supports page 1
+        has_group_by = (hasattr(self.endpoint_class, 'params') and 
+                       self.endpoint_class.params and 
+                       isinstance(self.endpoint_class.params, dict) and 
+                       'group-by' in self.endpoint_class.params)
+        
+        if has_group_by and self.method == "page" and self._next_value > 1:
+            # Group-by queries only support page 1, stop pagination
+            raise StopIteration
+
         if self.method == "cursor":
             self.endpoint_class._add_params("cursor", self._next_value)
         elif self.method == "page":

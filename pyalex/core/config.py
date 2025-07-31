@@ -7,9 +7,14 @@ except ImportError:
 
 
 # Constants
-DEFAULT_MAX_RETRIES = 0
-DEFAULT_RETRY_BACKOFF_FACTOR = 0.1
-DEFAULT_RETRY_HTTP_CODES = [429, 500, 503]
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_BACKOFF_FACTOR = 0.5
+DEFAULT_RETRY_HTTP_CODES = [429, 500, 502, 503, 504]
+
+# Rate Limiting (OpenAlex API limits)
+DEFAULT_REQUESTS_PER_SECOND = 10  # OpenAlex allows max 10 requests per second
+DEFAULT_REQUESTS_PER_DAY = 100000  # OpenAlex allows max 100,000 requests per day
+DEFAULT_RATE_LIMIT_BUFFER = 0.9  # Use 90% of rate limit to stay safe
 
 # API Limits and Thresholds
 MAX_PER_PAGE = 200
@@ -56,6 +61,12 @@ class AlexConfig(dict):
         Backoff factor for retries.
     retry_http_codes : list
         List of HTTP status codes to retry on.
+    requests_per_second : int
+        Maximum requests per second (OpenAlex rate limit: 10/sec).
+    requests_per_day : int
+        Maximum requests per day (OpenAlex rate limit: 100,000/day).
+    rate_limit_buffer : float
+        Buffer factor for rate limiting (e.g., 0.9 = use 90% of limit).
     """
 
     def __getattr__(self, key):
@@ -73,6 +84,10 @@ config = AlexConfig(
     max_retries=DEFAULT_MAX_RETRIES,
     retry_backoff_factor=DEFAULT_RETRY_BACKOFF_FACTOR,
     retry_http_codes=DEFAULT_RETRY_HTTP_CODES,
+    # Rate limiting configurations
+    requests_per_second=DEFAULT_REQUESTS_PER_SECOND,
+    requests_per_day=DEFAULT_REQUESTS_PER_DAY,
+    rate_limit_buffer=DEFAULT_RATE_LIMIT_BUFFER,
     # CLI specific configurations
     cli_batch_size=DEFAULT_CLI_BATCH_SIZE,
     cli_max_width=CLI_MAX_WIDTH,

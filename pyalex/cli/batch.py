@@ -133,6 +133,42 @@ def register_batch_filter(filter_key, filter_path, id_field="id"):
     BATCH_FILTER_CONFIGS[filter_key] = BatchFilterConfig(filter_path, id_field)
 
 
+def _merge_grouped_results(batch_results_list):
+    """
+    Merge grouped results from multiple batches by aggregating counts.
+    
+    Args:
+        batch_results_list: List of tuples (batch_results, batch_index)
+        
+    Returns:
+        List of merged grouped results with aggregated counts
+    """
+    merged_counts = {}
+    
+    # Sort by batch index to maintain order
+    batch_results_list.sort(key=lambda x: x[1])
+    
+    # Aggregate counts by key
+    for batch_results, _ in batch_results_list:
+        if batch_results:
+            for result in batch_results:
+                key = result.get('key')
+                if key is not None:
+                    if key in merged_counts:
+                        # Sum the counts
+                        merged_counts[key]['count'] += result.get('count', 0)
+                    else:
+                        # First occurrence - store the result
+                        merged_counts[key] = {
+                            'key': key,
+                            'key_display_name': result.get('key_display_name', key),
+                            'count': result.get('count', 0)
+                        }
+    
+    # Convert back to list format, sorted by count (descending)
+    return sorted(merged_counts.values(), key=lambda x: x['count'], reverse=True)
+
+
 def _handle_large_id_list(
     query, 
     id_list, 
@@ -175,7 +211,9 @@ def _handle_large_id_list(
             filter_config.remove_from_params(batch_query.params)
         
         # Apply the batch filter
-        return filter_config.apply_batch_filter(batch_query, batch_ids)
+        batch_query = filter_config.apply_batch_filter(batch_query, batch_ids)
+        
+        return batch_query
     
     # Use the existing batching utility (always uses async when available)
     return _execute_batched_queries(
@@ -495,21 +533,33 @@ async def _async_execute_batched_queries(
         limited_tasks = [limited_batch_process(task) for task in batch_tasks]
         batch_results_list = await asyncio.gather(*limited_tasks)
     
-    # Combine all results and remove duplicates
-    combined_results = []
-    seen_ids = set()
+    # Combine all results and remove duplicates or merge grouped results
+    # Check if this is a grouped query by examining the first batch query
+    has_group_by = False
+    if batch_results_list:
+        test_query = create_query_func([])  # Create empty query to check params
+        has_group_by = (hasattr(test_query, 'params') and test_query.params and 
+                        'group-by' in test_query.params)
     
-    # Sort by batch index to maintain order
-    batch_results_list.sort(key=lambda x: x[1])
-    
-    for batch_results, _ in batch_results_list:
-        if batch_results:
-            # Filter out duplicates based on entity ID
-            for entity in batch_results:
-                entity_id_str = entity.get('id')
-                if entity_id_str and entity_id_str not in seen_ids:
-                    seen_ids.add(entity_id_str)
-                    combined_results.append(entity)
+    if has_group_by:
+        # Handle grouped results - merge by key and sum counts
+        combined_results = _merge_grouped_results(batch_results_list)
+    else:
+        # Handle regular entity results - deduplicate by ID
+        combined_results = []
+        seen_ids = set()
+        
+        # Sort by batch index to maintain order
+        batch_results_list.sort(key=lambda x: x[1])
+        
+        for batch_results, _ in batch_results_list:
+            if batch_results:
+                # Filter out duplicates based on entity ID
+                for entity in batch_results:
+                    entity_id_str = entity.get('id')
+                    if entity_id_str and entity_id_str not in seen_ids:
+                        seen_ids.add(entity_id_str)
+                        combined_results.append(entity)
     
     # Convert abstracts for works if needed
     if 'works' in entity_name.lower():
@@ -560,19 +610,32 @@ async def _get_async_with_progress(query, progress_obj, task_id, limit=None):
     
     # Multi-page async processing with progress updates
     effective_per_page = MAX_PER_PAGE
-    num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
     
-    # Create URLs for all pages
-    urls = []
-    for page_num in range(1, num_pages + 1):
-        params_copy = (
-            query.params.copy() if isinstance(query.params, dict) 
-            else query.params
-        )
-        page_query = query.__class__(params_copy)
-        page_query._add_params("per-page", effective_per_page)
-        page_query._add_params("page", page_num)
-        urls.append(page_query.url)
+    # Check if this is a group-by query
+    has_group_by = (hasattr(query, 'params') and query.params and 
+                    isinstance(query.params, dict) and 'group-by' in query.params)
+    
+    if has_group_by:
+        # For group-by operations, only page 1 is supported (max 200 results)
+        page_query = query.__class__(query.params.copy())
+        page_query._add_params("per-page", 200)
+        urls = [page_query.url]
+        # Update effective_limit for group-by
+        effective_limit = min(200, effective_limit)
+    else:
+        num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
+        
+        # Create URLs for all pages
+        urls = []
+        for page_num in range(1, num_pages + 1):
+            params_copy = (
+                query.params.copy() if isinstance(query.params, dict) 
+                else query.params
+            )
+            page_query = query.__class__(params_copy)
+            page_query._add_params("per-page", effective_per_page)
+            page_query._add_params("page", page_num)
+            urls.append(page_query.url)
     
     # Execute async requests with progress updates
     all_results = []
@@ -661,19 +724,31 @@ async def _async_execute_batched_queries_simple(
     limited_tasks = [limited_batch_process(task) for task in batch_tasks]
     batch_results_list = await asyncio.gather(*limited_tasks)
     
-    # Combine results
-    combined_results = []
-    seen_ids = set()
+    # Combine results and handle grouped vs entity results
+    # Check if this is a grouped query by examining the first batch query
+    has_group_by = False
+    if batch_results_list:
+        test_query = create_query_func([])  # Create empty query to check params
+        has_group_by = (hasattr(test_query, 'params') and test_query.params and 
+                        'group-by' in test_query.params)
     
-    batch_results_list.sort(key=lambda x: x[1])
-    
-    for batch_results, _ in batch_results_list:
-        if batch_results:
-            for entity in batch_results:
-                entity_id_str = entity.get('id')
-                if entity_id_str and entity_id_str not in seen_ids:
-                    seen_ids.add(entity_id_str)
-                    combined_results.append(entity)
+    if has_group_by:
+        # Handle grouped results - merge by key and sum counts
+        combined_results = _merge_grouped_results(batch_results_list)
+    else:
+        # Handle regular entity results - deduplicate by ID
+        combined_results = []
+        seen_ids = set()
+        
+        batch_results_list.sort(key=lambda x: x[1])
+        
+        for batch_results, _ in batch_results_list:
+            if batch_results:
+                for entity in batch_results:
+                    entity_id_str = entity.get('id')
+                    if entity_id_str and entity_id_str not in seen_ids:
+                        seen_ids.add(entity_id_str)
+                        combined_results.append(entity)
     
     # Convert abstracts for works if needed
     if 'works' in entity_name.lower():
@@ -715,25 +790,35 @@ async def _get_async_without_progress(query, limit=None):
     
     # Use async if either total count ≤ 10,000 OR user limit ≤ 10,000
     if total_count <= 10000 or effective_limit <= 10000:
-        # Use async basic paging without progress
-        effective_per_page = MAX_PER_PAGE
-        effective_limit = min(limit or total_count, total_count)
+        # Check if this is a group-by query
+        has_group_by = (hasattr(query, 'params') and query.params and 
+                        isinstance(query.params, dict) and 'group-by' in query.params)
         
-        # Calculate number of pages needed
-        num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
-        
-        # Create URLs for all pages
-        urls = []
-        for page_num in range(1, num_pages + 1):
-            # Create a copy of query with page parameters
-            params_copy = (
-                query.params.copy() if isinstance(query.params, dict) 
-                else query.params
-            )
-            page_query = query.__class__(params_copy)
-            page_query._add_params("per-page", effective_per_page)
-            page_query._add_params("page", page_num)
-            urls.append(page_query.url)
+        if has_group_by:
+            # For group-by operations, only page 1 is supported (max 200 results)
+            page_query = query.__class__(query.params.copy())
+            page_query._add_params("per-page", 200)
+            urls = [page_query.url]
+        else:
+            # Use async basic paging without progress
+            effective_per_page = MAX_PER_PAGE
+            effective_limit = min(limit or total_count, total_count)
+            
+            # Calculate number of pages needed
+            num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
+            
+            # Create URLs for all pages
+            urls = []
+            for page_num in range(1, num_pages + 1):
+                # Create a copy of query with page parameters
+                params_copy = (
+                    query.params.copy() if isinstance(query.params, dict) 
+                    else query.params
+                )
+                page_query = query.__class__(params_copy)
+                page_query._add_params("per-page", effective_per_page)
+                page_query._add_params("page", page_num)
+                urls.append(page_query.url)
         
         # Execute async requests without progress tracking
         max_concurrent = min(config.max_concurrent or 10, len(urls))
@@ -805,11 +890,24 @@ def _sync_execute_batched_queries(
             err=True
         )
     
-    combined_results = []
-    seen_ids = set()  # To avoid duplicates
+    # Check if this is a grouped query by examining a test query
+    has_group_by = False
+    if id_list:
+        test_query = create_query_func([])  # Create empty query to check params
+        has_group_by = (hasattr(test_query, 'params') and test_query.params and 
+                        'group-by' in test_query.params)
+    
+    if has_group_by:
+        # For grouped queries, collect all results for merging
+        batch_results_list = []
+    else:
+        # For entity queries, use deduplication
+        combined_results = []
+        seen_ids = set()  # To avoid duplicates
     
     for i in range(0, len(id_list), _batch_size):
         batch_ids = id_list[i:i + _batch_size]
+        batch_index = i // _batch_size
         
         if _debug_mode:
             from pyalex.logger import get_logger
@@ -839,12 +937,16 @@ def _sync_execute_batched_queries(
             batch_results = batch_query.get()  # Default first page
         
         if batch_results:
-            # Filter out duplicates based on entity ID
-            for entity in batch_results:
-                entity_id_str = entity.get('id')
-                if entity_id_str and entity_id_str not in seen_ids:
-                    seen_ids.add(entity_id_str)
-                    combined_results.append(entity)
+            if has_group_by:
+                # Store results for later merging
+                batch_results_list.append((batch_results, batch_index))
+            else:
+                # Filter out duplicates based on entity ID
+                for entity in batch_results:
+                    entity_id_str = entity.get('id')
+                    if entity_id_str and entity_id_str not in seen_ids:
+                        seen_ids.add(entity_id_str)
+                        combined_results.append(entity)
         
         if _debug_mode:
             batch_count = len(batch_results) if batch_results else 0
@@ -853,6 +955,10 @@ def _sync_execute_batched_queries(
                 f"{batch_count} results", 
                 err=True
             )
+    
+    # Merge results after all batches are processed
+    if has_group_by:
+        combined_results = _merge_grouped_results(batch_results_list)
     
     # Create a result object similar to what query.get() returns
     # Import the appropriate response class based on the first result

@@ -25,8 +25,10 @@ This enhanced version builds upon the excellent [original PyAlex library](https:
 
 ### **🔧 Enhanced Configuration Management**
 - Centralized configuration through `AlexConfig` class
+- **Automatic rate limiting** compliant with OpenAlex API (10 req/sec, 100k/day)
+- **Enhanced retry mechanisms** with exponential backoff for 429/5xx errors
 - Configurable timeouts, connection limits, and batch sizes
-- Better error handling and retry mechanisms
+- Better error handling and resilient network operations
 
 ### **📊 Improved Data Processing**
 - Async pagination support with progress tracking
@@ -221,17 +223,46 @@ import pyalex
 pyalex.config.email = "mail@example.com"
 ```
 
-### Max retries
+### Rate Limiting and Retry Configuration
 
-By default, PyAlex will raise an error at the first failure when querying the OpenAlex API. You can set `max_retries` to a number higher than 0 to allow PyAlex to retry when an error occurs. `retry_backoff_factor` is related to the delay between two retry, and `retry_http_codes` are the HTTP error codes that should trigger a retry.
+This enhanced version of PyAlex includes **automatic rate limiting** and **robust retry mechanisms** that comply with OpenAlex API specifications. PyAlex automatically handles the OpenAlex API rate limits (10 requests/second, 100,000 requests/day) and implements intelligent retry logic for failed requests.
+
+#### Automatic Rate Limiting
+
+PyAlex automatically enforces rate limits to stay within OpenAlex API bounds:
 
 ```python
 from pyalex import config
 
-config.max_retries = 0
-config.retry_backoff_factor = 0.1
-config.retry_http_codes = [429, 500, 503]
+# Rate limiting settings (configured automatically)
+config.requests_per_second = 10          # OpenAlex API limit
+config.requests_per_day = 100000         # OpenAlex API limit  
+config.rate_limit_buffer = 0.9           # Use 90% of limit for safety
 ```
+
+#### Enhanced Retry Mechanisms
+
+PyAlex now provides robust retry logic with exponential backoff for transient failures:
+
+```python
+from pyalex import config
+
+# Enhanced retry configuration (new defaults)
+config.max_retries = 3                    # Retry up to 3 times
+config.retry_backoff_factor = 0.5         # Exponential backoff factor
+config.retry_http_codes = [429, 500, 502, 503, 504]  # HTTP codes to retry
+
+# Legacy configuration (still supported)
+config.max_retries = 0                    # Disable retries
+config.retry_backoff_factor = 0.1         # Shorter backoff
+config.retry_http_codes = [429, 500, 503] # Fewer retry codes
+```
+
+The retry mechanism automatically handles:
+- **429 Too Many Requests**: When rate limits are exceeded
+- **5xx Server Errors**: For temporary server issues (500, 502, 503, 504)
+- **Network Timeouts**: With exponential backoff and jitter
+- **Exponential Backoff**: Delays increase with each retry to avoid overwhelming servers
 
 ### Standards
 

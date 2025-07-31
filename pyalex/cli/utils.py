@@ -37,7 +37,7 @@ def parse_range_filter(value: str):
     
     Supports formats:
     - "100" -> exact value 100
-    - "100:1000" -> range from 100 to 1000
+    - "100:1000" -> range from 100 to 1000 (returns ">99,<1001" for OpenAlex API)
     - ":1000" -> less than or equal to 1000  
     - "100:" -> greater than or equal to 100
     
@@ -56,14 +56,27 @@ def parse_range_filter(value: str):
         end = parts[1].strip() if parts[1].strip() else None
         
         if start and end:
-            # Range: start:end
-            return f"{start}:{end}"
+            # Range: start:end -> use >start-1,<end+1 format for inclusive range
+            try:
+                start_val = int(start)
+                end_val = int(end)
+                return f">{start_val-1},<{end_val+1}"
+            except ValueError as exc:
+                raise ValueError(f"Invalid number format in range: {value}") from exc
         elif start:
-            # Greater than or equal: start:
-            return f">{start}"
+            # Greater than or equal: start: -> use >start-1 for inclusive
+            try:
+                start_val = int(start)
+                return f">{start_val-1}"
+            except ValueError as exc:
+                raise ValueError(f"Invalid number format: {start}") from exc
         elif end:
-            # Less than or equal: :end
-            return f"<{end}"
+            # Less than or equal: :end -> use <end+1 for inclusive
+            try:
+                end_val = int(end)
+                return f"<{end_val+1}"
+            except ValueError as exc:
+                raise ValueError(f"Invalid number format: {end}") from exc
         else:
             raise ValueError(
                 "Invalid range format. Use 'start:end', 'start:', or ':end'"
@@ -75,6 +88,53 @@ def parse_range_filter(value: str):
             return value
         except ValueError as exc:
             raise ValueError(f"Invalid number format: {value}") from exc
+
+
+def apply_range_filter(query, field_name, parsed_value):
+    """
+    Apply a parsed range filter to a query object.
+    
+    Parameters
+    ----------
+    query : BaseOpenAlex
+        The query object to apply the filter to
+    field_name : str
+        The field name to filter on (e.g., 'works_count', 'summary_stats.h_index')
+    parsed_value : str
+        The parsed filter value from parse_range_filter
+        
+    Returns
+    -------
+    BaseOpenAlex
+        Updated query object
+    """
+    if not parsed_value:
+        return query
+        
+    if isinstance(parsed_value, str) and ',' in parsed_value:
+        # Handle range format like ">99,<501"
+        parts = parsed_value.split(',')
+        for part in parts:
+            part = part.strip()
+            if part.startswith('>'):
+                min_val = int(part[1:]) + 1  # Convert >99 to >=100
+                query = query.filter_gt(**{field_name: min_val - 1})
+            elif part.startswith('<'):
+                max_val = int(part[1:]) - 1  # Convert <501 to <=500
+                query = query.filter_lt(**{field_name: max_val + 1})
+    elif isinstance(parsed_value, str) and parsed_value.startswith('>'):
+        # Handle ">99" format
+        min_val = int(parsed_value[1:]) + 1  # Convert >99 to >=100
+        query = query.filter_gt(**{field_name: min_val - 1})
+    elif isinstance(parsed_value, str) and parsed_value.startswith('<'):
+        # Handle "<501" format  
+        max_val = int(parsed_value[1:]) - 1  # Convert <501 to <=500
+        query = query.filter_lt(**{field_name: max_val + 1})
+    else:
+        # Handle single value
+        query = query.filter(**{field_name: parsed_value})
+    
+    return query
 
 
 def _print_debug_url(query):
@@ -466,7 +526,12 @@ def _add_abstract_to_work(work_dict):
     return work_dict
 
 
-def _output_results(results, json_path: Optional[str] = None, single: bool = False):
+def _output_results(
+    results, 
+    json_path: Optional[str] = None, 
+    single: bool = False, 
+    grouped: bool = False
+):
     """Output results in table format to stdout or JSON format to file."""
     # Handle None or empty results
     if results is None:
@@ -477,7 +542,7 @@ def _output_results(results, json_path: Optional[str] = None, single: bool = Fal
             typer.echo("No results found.")
         return
     
-    if not single and (not results or len(results) == 0):
+    if not single and not grouped and (not results or len(results) == 0):
         if json_path:
             with open(json_path, 'w') as f:
                 json.dump([], f, indent=2)
@@ -489,6 +554,9 @@ def _output_results(results, json_path: Optional[str] = None, single: bool = Fal
         # Save JSON to file
         if single:
             data = dict(results)
+        elif grouped:
+            # For grouped data, preserve the original structure
+            data = [dict(r) for r in results]
         else:
             data = [dict(r) for r in results]
         
@@ -497,10 +565,10 @@ def _output_results(results, json_path: Optional[str] = None, single: bool = Fal
 
     else:
         # Display table format to stdout
-        _output_table(results, single)
+        _output_table(results, single, grouped)
 
 
-def _output_table(results, single: bool = False):
+def _output_table(results, single: bool = False, grouped: bool = False):
     """Output results in table format using PrettyTable."""
     # Handle None results
     if results is None:
@@ -510,6 +578,27 @@ def _output_table(results, single: bool = False):
     if single:
         # For single items, wrap in a list for consistent processing
         results = [results]
+    
+    if not results:
+        typer.echo("No results found.")
+        return
+    
+    # Handle grouped data specially
+    if grouped:
+        table = PrettyTable()
+        table.field_names = ["Key", "Display Name", "Count"]
+        table.max_width = MAX_WIDTH
+        table.align = "l"
+        
+        for result in results:
+            key = result.get('key', 'Unknown')
+            display_name = result.get('key_display_name', key)
+            count = result.get('count', 0)
+            
+            table.add_row([key, display_name, f"{count:,}"])
+        
+        typer.echo(table)
+        return
     
     if not results:
         typer.echo("No results found.")

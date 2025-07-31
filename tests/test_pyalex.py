@@ -14,19 +14,19 @@ def test_parse_range_filter_single_value():
 def test_parse_range_filter_range():
     """Test parsing range values."""
     result = parse_range_filter("100:1000")
-    assert result == "100:1000"
+    assert result == ">99,<1001"
 
 
 def test_parse_range_filter_min_only():
     """Test parsing minimum only."""
     result = parse_range_filter("100:")
-    assert result == ">100"
+    assert result == ">99"
 
 
 def test_parse_range_filter_max_only():
     """Test parsing maximum only."""
     result = parse_range_filter(":1000")
-    assert result == "<1000"
+    assert result == "<1001"
 
 
 def test_parse_range_filter_invalid():

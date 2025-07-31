@@ -259,75 +259,84 @@ def create_works_command(app):
                 query, all_results, limit, sample, seed, sort_by, select
             )
 
-            # Handle group_by parameter
+            # Apply group_by parameter BEFORE checking for large ID lists
+            # so it gets preserved in batch processing
             if group_by:
                 query = query.group_by(group_by)
-                
-                # Print debug URL before making the request
-                _print_debug_url(query)
-                
-                try:
-                    # For group-by operations, retrieve all groups by default
-                    results = query.get(limit=100000)  # High limit to get all groups
-                    _print_debug_results(results)
-                except Exception as api_error:
-                    if _debug_mode:
-                        from pyalex.logger import get_logger
-                        logger = get_logger()
-                        logger.debug(f"API call failed: {api_error}")
-                    raise
-                
-                # Output grouped results
-                _output_grouped_results(results, json_path)
-                return
+
+            # Check if we need to handle any large ID lists AFTER group_by processing
+            large_id_attrs = [attr for attr in dir(query) 
+                             if attr.startswith('_large_')]
             
+            if large_id_attrs:
+                # Handle large ID list using the generalized system
+                attr_name = large_id_attrs[0]  # Take the first one found
+                large_id_list = getattr(query, attr_name)
+                delattr(query, attr_name)
+                
+                # Extract the filter config key from the attribute name
+                # e.g., '_large_works_funder_list' -> 'works_funder'
+                filter_config_key = (attr_name.replace('_large_', '')
+                                   .replace('_list', ''))
+                
+                results = _handle_large_id_list(
+                    query,
+                    large_id_list,
+                    filter_config_key,
+                    Works,
+                    filter_config_key.split('_')[1] + " IDs",  # e.g., "funder IDs"
+                    all_results,
+                    limit,
+                    json_path
+                )
+                
+                # Check if results is None or empty
+                if results is None:
+                    typer.echo("No results returned from API", err=True)
+                    return
+                
+                # For grouped results, use the appropriate output function
+                if group_by:
+                    _output_grouped_results(results, json_path)
+                else:
+                    # Always convert abstracts for all works in results
+                    if results:
+                        results = [_add_abstract_to_work(work) for work in results]
+                    _output_results(results, json_path)
+                return
+
             # Print debug URL before making the request
             _print_debug_url(query)
             
+            # Normal single query execution (no large ID lists to handle at this point)
             try:
-                # Check if we need to handle any large ID lists
-                large_id_attrs = [attr for attr in dir(query) if attr.startswith('_large_')]
+                if _dry_run_mode:
+                    _print_dry_run_query(
+                        "Works query",
+                        url=query.url
+                    )
+                    return
                 
-                if large_id_attrs:
-                    # Handle large ID list using the generalized system
-                    attr_name = large_id_attrs[0]  # Take the first one found
-                    large_id_list = getattr(query, attr_name)
-                    delattr(query, attr_name)
-                    
-                    # Extract the filter config key from the attribute name
-                    # e.g., '_large_works_funder_list' -> 'works_funder'
-                    filter_config_key = (attr_name.replace('_large_', '')
-                                       .replace('_list', ''))
-                    
-                    results = _handle_large_id_list(
-                        query,
-                        large_id_list,
-                        filter_config_key,
-                        Works,
-                        filter_config_key.split('_')[1] + " IDs",  # e.g., "funder IDs"
-                        all_results,
-                        limit,
-                        json_path
+                # Execute the query based on type
+                if group_by:
+                    # For group-by operations, only page 1 is supported (max 200 results)
+                    results = query.get(per_page=200)
+                    _print_debug_results(results)
+                    # Output grouped results
+                    _output_grouped_results(results, json_path)
+                    return
+                
+                # Normal works query execution
+                if all_results:
+                    # Get all results using pagination with progress bar
+                    results = _paginate_with_progress(query, "works")
+                elif limit is not None:
+                    # Use smart execution (async or sync based on conditions)
+                    results = _execute_query_smart(
+                        query, all_results=False, limit=limit
                     )
                 else:
-                    # Normal single query execution
-                    if _dry_run_mode:
-                        _print_dry_run_query(
-                            "Works query",
-                            url=query.url
-                        )
-                        return
-                    
-                    if all_results:
-                        # Get all results using pagination with progress bar
-                        results = _paginate_with_progress(query, "works")
-                    elif limit is not None:
-                        # Use smart execution (async or sync based on conditions)
-                        results = _execute_query_smart(
-                            query, all_results=False, limit=limit
-                        )
-                    else:
-                        results = query.get()  # Default first page
+                    results = query.get()  # Default first page
                 
                 _print_debug_results(results)
             except Exception as api_error:

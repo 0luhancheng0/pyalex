@@ -98,7 +98,8 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 query = query.group_by(group_by)
                 _print_debug_url(query)
                 
-                results = query.get(limit=100000)
+                # For group-by operations, only page 1 is supported (max 200 results)
+                results = query.get(per_page=200)
                 _print_debug_results(results)
                 _output_grouped_results(results, json_path)
                 return

@@ -12,7 +12,7 @@ from ..batch import add_id_list_option_to_command, _handle_large_id_list
 from ..utils import (
     _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
     _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _debug_mode, _dry_run_mode, parse_range_filter
+    _handle_cli_exception, _debug_mode, _dry_run_mode, parse_range_filter, apply_range_filter
 )
 
 
@@ -131,11 +131,11 @@ def create_authors_command(app):
             
             if works_count:
                 parsed_works_count = parse_range_filter(works_count)
-                query = query.filter(works_count=parsed_works_count)
+                query = apply_range_filter(query, 'works_count', parsed_works_count)
                 
             if cited_by_count:
                 parsed_cited_by_count = parse_range_filter(cited_by_count)
-                query = query.filter(cited_by_count=parsed_cited_by_count)
+                query = apply_range_filter(query, 'cited_by_count', parsed_cited_by_count)
                 
             if last_known_institution_country:
                 field_name = "last_known_institution.country_code"
@@ -143,17 +143,15 @@ def create_authors_command(app):
                 
             if h_index:
                 parsed_h_index = parse_range_filter(h_index)
-                query = query.filter(**{"summary_stats.h_index": parsed_h_index})
+                query = apply_range_filter(query, "summary_stats.h_index", parsed_h_index)
                 
             if i10_index:
                 parsed_i10_index = parse_range_filter(i10_index)
-                query = query.filter(**{"summary_stats.i10_index": parsed_i10_index})
+                query = apply_range_filter(query, "summary_stats.i10_index", parsed_i10_index)
                 
             if two_year_mean_citedness:
                 parsed_citedness = parse_range_filter(two_year_mean_citedness)
-                query = query.filter(
-                    **{"summary_stats.2yr_mean_citedness": parsed_citedness}
-                )
+                query = apply_range_filter(query, "summary_stats.2yr_mean_citedness", parsed_citedness)
             
             # Apply common options (sort, sample, select)
             query = _validate_and_apply_common_options(
@@ -165,8 +163,8 @@ def create_authors_command(app):
                 query = query.group_by(group_by)
                 _print_debug_url(query)
                 
-                # For group-by operations, retrieve all groups by default
-                results = query.get(limit=100000)  # High limit to get all groups
+                # For group-by operations, only page 1 is supported (max 200 results)
+                results = query.get(per_page=200)
                 _print_debug_results(results)
                 
                 # Output grouped results

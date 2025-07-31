@@ -299,23 +299,34 @@ class BaseOpenAlex:
         effective_per_page = per_page or MAX_PER_PAGE
         effective_limit = min(limit or total_count, total_count)
         
-        # Calculate number of pages needed
-        num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
+        # Check if this is a group-by query
+        has_group_by = (hasattr(self, 'params') and self.params and 
+                        isinstance(self.params, dict) and 'group-by' in self.params)
         
-        # Create URLs for all pages
-        urls = []
-        for page_num in range(1, num_pages + 1):
-            # Create a copy of self with page parameters
-            params_copy = (
-                self.params.copy() if isinstance(self.params, dict) 
-                else self.params
-            )
-            page_query = self.__class__(params_copy)
-            page_query._add_params("per-page", effective_per_page)
-            page_query._add_params("page", page_num)
-            urls.append(page_query.url)
-        
-        logger.info(f"Fetching {num_pages} pages asynchronously...")
+        if has_group_by:
+            # For group-by operations, only page 1 is supported (max 200 results)
+            page_query = self.__class__(self.params.copy())
+            page_query._add_params("per-page", 200)
+            urls = [page_query.url]
+            logger.info("Fetching group-by results (page 1 only)...")
+        else:
+            # Calculate number of pages needed
+            num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
+            
+            # Create URLs for all pages
+            urls = []
+            for page_num in range(1, num_pages + 1):
+                # Create a copy of self with page parameters
+                params_copy = (
+                    self.params.copy() if isinstance(self.params, dict) 
+                    else self.params
+                )
+                page_query = self.__class__(params_copy)
+                page_query._add_params("per-page", effective_per_page)
+                page_query._add_params("page", page_num)
+                urls.append(page_query.url)
+            
+            logger.info(f"Fetching {num_pages} pages asynchronously...")
         
         # Execute async requests with progress tracking
         try:
