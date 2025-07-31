@@ -651,7 +651,16 @@ async def _get_async_with_progress(query, progress_obj, task_id, limit=None):
         
         # Process responses and update progress
         for response_data in responses:
-            if 'results' in response_data:
+            if 'group_by' in response_data:
+                # For group-by queries, data is in 'group_by' field
+                batch_results = response_data['group_by']
+                all_results.extend(batch_results)
+                if not final_meta and 'meta' in response_data:
+                    final_meta = response_data['meta'].copy()
+                
+                # Update progress with actual results fetched
+                progress_obj.update(task_id, advance=len(batch_results))
+            elif 'results' in response_data:
                 batch_results = response_data['results']
                 all_results.extend(batch_results)
                 if not final_meta and 'meta' in response_data:
@@ -829,7 +838,12 @@ async def _get_async_without_progress(query, limit=None):
         final_meta = {}
         
         for response_data in responses:
-            if 'results' in response_data:
+            if 'group_by' in response_data:
+                # For group-by queries, data is in 'group_by' field
+                all_results.extend(response_data['group_by'])
+                if not final_meta and 'meta' in response_data:
+                    final_meta = response_data['meta'].copy()
+            elif 'results' in response_data:
                 all_results.extend(response_data['results'])
                 if not final_meta and 'meta' in response_data:
                     final_meta = response_data['meta'].copy()
