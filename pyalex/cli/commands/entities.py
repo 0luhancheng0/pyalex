@@ -9,7 +9,9 @@ from typing import Optional
 import typer
 from typing_extensions import Annotated
 
-from pyalex import Topics, Sources, Institutions, Publishers, Funders, Domains, Fields, Subfields, Keywords
+from pyalex import (
+    Topics, Sources, Publishers, Domains, Fields, Subfields, Keywords
+)
 from ..utils import (
     _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
     _print_dry_run_query, _output_results, _output_grouped_results,
@@ -126,36 +128,28 @@ def create_entity_commands(app):
     
     # Topics
     topics_func = create_simple_entity_command(app, Topics, "Topics", "topics")
-    app.command()(topics_func)
+    app.command(help="Search and retrieve topics from OpenAlex")(topics_func)
     
     # Sources
     sources_func = create_simple_entity_command(app, Sources, "Sources", "sources")
-    app.command()(sources_func)
-    
-    # Institutions
-    institutions_func = create_simple_entity_command(app, Institutions, "Institutions", "institutions")
-    app.command()(institutions_func)
+    app.command(help="Search and retrieve sources (journals/venues) from OpenAlex")(sources_func)
     
     # Publishers
     publishers_func = create_simple_entity_command(app, Publishers, "Publishers", "publishers")
-    app.command()(publishers_func)
-    
-    # Funders
-    funders_func = create_simple_entity_command(app, Funders, "Funders", "funders")
-    app.command()(funders_func)
+    app.command(help="Search and retrieve publishers from OpenAlex")(publishers_func)
     
     # Domains
     domains_func = create_simple_entity_command(app, Domains, "Domains", "domains")
-    app.command()(domains_func)
+    app.command(help="Search and retrieve domains from OpenAlex")(domains_func)
     
     # Fields
     fields_func = create_simple_entity_command(app, Fields, "Fields", "fields")
-    app.command()(fields_func)
+    app.command(help="Search and retrieve fields from OpenAlex")(fields_func)
     
     # Subfields
     subfields_func = create_simple_entity_command(app, Subfields, "Subfields", "subfields")
-    app.command()(subfields_func)
+    app.command(help="Search and retrieve subfields from OpenAlex")(subfields_func)
     
     # Keywords
     keywords_func = create_simple_entity_command(app, Keywords, "Keywords", "keywords")
-    app.command()(keywords_func)
+    app.command(help="Search and retrieve keywords from OpenAlex")(keywords_func)

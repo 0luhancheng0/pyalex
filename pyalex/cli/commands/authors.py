@@ -12,7 +12,7 @@ from ..batch import add_id_list_option_to_command, _handle_large_id_list
 from ..utils import (
     _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
     _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _debug_mode, _dry_run_mode
+    _handle_cli_exception, _debug_mode, _dry_run_mode, parse_range_filter
 )
 
 
@@ -29,6 +29,35 @@ def create_authors_command(app):
             "--institution-ids",
             help="Filter by institution OpenAlex ID(s). Use comma-separated values for "
                  "OR logic (e.g., --institution-ids 'I123,I456,I789')"
+        )] = None,
+        works_count: Annotated[Optional[str], typer.Option(
+            "--works-count",
+            help="Filter by works count. Use single value (e.g., '100') or "
+                 "range (e.g., '50:500', ':200', '100:')"
+        )] = None,
+        cited_by_count: Annotated[Optional[str], typer.Option(
+            "--cited-by-count",
+            help="Filter by total citation count. Use single value (e.g., '1000') or "
+                 "range (e.g., '500:5000', ':1000', '1000:')"
+        )] = None,
+        last_known_institution_country: Annotated[Optional[str], typer.Option(
+            "--last-known-institution-country",
+            help="Filter by country code of last known institution (e.g. US, UK, CA)"
+        )] = None,
+        h_index: Annotated[Optional[str], typer.Option(
+            "--h-index",
+            help="Filter by h-index from summary stats. Use single value (e.g., '50') "
+                 "or range (e.g., '10:100', ':50', '25:')"
+        )] = None,
+        i10_index: Annotated[Optional[str], typer.Option(
+            "--i10-index", 
+            help="Filter by i10-index from summary stats. Use single value "
+                 "(e.g., '100') or range (e.g., '50:500', ':200', '100:')"
+        )] = None,
+        two_year_mean_citedness: Annotated[Optional[str], typer.Option(
+            "--two-year-mean-citedness",
+            help="Filter by 2-year mean citedness from summary stats. Use single value "
+                 "(e.g., '2.5') or range (e.g., '1.0:5.0', ':3.0', '2.0:')"
         )] = None,
         group_by: Annotated[Optional[str], typer.Option(
             "--group-by",
@@ -75,10 +104,12 @@ def create_authors_command(app):
         Examples:
           pyalex authors --search "John Smith"
           pyalex authors --institution-ids "I1234567890" --all
-          pyalex authors --institution-ids "I123,I456,I789" --limit 50
-          pyalex authors --group-by "cited_by_count" --json results.json
+          pyalex authors --works-count "100:" --cited-by-count "1000:" --limit 50
+          pyalex authors --last-known-institution-country US --h-index "25:" \\
+                         --json results.json
+          pyalex authors --i10-index "50:" --two-year-mean-citedness "2.0:" \\
+                         --sort-by "cited_by_count:desc"
           pyalex authors --group-by "has_orcid"
-          pyalex authors --sort-by "cited_by_count:desc" --limit 100
           pyalex authors --sample 25 --seed 456
         """
         try:
@@ -96,6 +127,32 @@ def create_authors_command(app):
                 # Use the generalized helper for ID list handling
                 query = add_id_list_option_to_command(
                     query, institution_ids, 'authors_institution', Authors
+                )
+            
+            if works_count:
+                parsed_works_count = parse_range_filter(works_count)
+                query = query.filter(works_count=parsed_works_count)
+                
+            if cited_by_count:
+                parsed_cited_by_count = parse_range_filter(cited_by_count)
+                query = query.filter(cited_by_count=parsed_cited_by_count)
+                
+            if last_known_institution_country:
+                field_name = "last_known_institution.country_code"
+                query = query.filter(**{field_name: last_known_institution_country})
+                
+            if h_index:
+                parsed_h_index = parse_range_filter(h_index)
+                query = query.filter(**{"summary_stats.h_index": parsed_h_index})
+                
+            if i10_index:
+                parsed_i10_index = parse_range_filter(i10_index)
+                query = query.filter(**{"summary_stats.i10_index": parsed_i10_index})
+                
+            if two_year_mean_citedness:
+                parsed_citedness = parse_range_filter(two_year_mean_citedness)
+                query = query.filter(
+                    **{"summary_stats.2yr_mean_citedness": parsed_citedness}
                 )
             
             # Apply common options (sort, sample, select)
@@ -120,7 +177,9 @@ def create_authors_command(app):
             
             try:
                 # Check if we need to handle any large ID lists
-                large_id_attrs = [attr for attr in dir(query) if attr.startswith('_large_')]
+                large_id_attrs = [
+                    attr for attr in dir(query) if attr.startswith('_large_')
+                ]
                 
                 if large_id_attrs:
                     # Handle large ID list using the generalized system

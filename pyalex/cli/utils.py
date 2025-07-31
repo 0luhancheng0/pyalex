@@ -31,6 +31,52 @@ def set_global_state(debug_mode: bool, dry_run_mode: bool, batch_size: int):
     _batch_size = batch_size
 
 
+def parse_range_filter(value: str):
+    """
+    Parse range or single value for filtering.
+    
+    Supports formats:
+    - "100" -> exact value 100
+    - "100:1000" -> range from 100 to 1000
+    - ":1000" -> less than or equal to 1000  
+    - "100:" -> greater than or equal to 100
+    
+    Returns:
+        str: Formatted filter value for OpenAlex API
+    """
+    if not value:
+        return None
+        
+    value = value.strip()
+    
+    # Check if it's a range (contains colon)
+    if ':' in value:
+        parts = value.split(':', 1)
+        start = parts[0].strip() if parts[0].strip() else None
+        end = parts[1].strip() if parts[1].strip() else None
+        
+        if start and end:
+            # Range: start:end
+            return f"{start}:{end}"
+        elif start:
+            # Greater than or equal: start:
+            return f">{start}"
+        elif end:
+            # Less than or equal: :end
+            return f"<{end}"
+        else:
+            raise ValueError(
+                "Invalid range format. Use 'start:end', 'start:', or ':end'"
+            )
+    else:
+        # Single value
+        try:
+            int(value)  # Validate it's a number
+            return value
+        except ValueError as exc:
+            raise ValueError(f"Invalid number format: {value}") from exc
+
+
 def _print_debug_url(query):
     """Print the constructed URL for debugging when verbose mode is enabled."""
     if _debug_mode:
