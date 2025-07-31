@@ -124,7 +124,8 @@ def _handle_large_id_list(
     entity_name,
     all_results=False,
     limit=None,
-    json_path=None
+    json_path=None,
+    async_mode=False
 ):
     """
     Generic handler for large ID lists that need to be processed in batches.
@@ -167,7 +168,8 @@ def _handle_large_id_list(
         entity_name,
         all_results,
         limit,
-        json_path
+        json_path,
+        async_mode
     )
 
 
@@ -706,7 +708,276 @@ def _sync_paginate_with_progress(query, entity_type_name):
         return OpenAlexResponseList([], {"count": 0})
 
 
-def _execute_batched_queries(
+async def _async_execute_batched_queries(
+    id_list,
+    create_query_func,
+    entity_name,
+    all_results=False,
+    limit=None,
+    json_path=None
+):
+    """
+    Execute batched queries asynchronously with two-level async processing 
+    and progress bars.
+    
+    Level 1: Async processing of batch queries (one per batch of IDs)
+    Level 2: Async pagination for each batch query with <10k results
+    
+    Args:
+        id_list: List of cleaned IDs to process in batches
+        create_query_func: Function that takes a list of batch IDs and returns a query
+        entity_name: Human-readable name for debug output
+        all_results: Whether to get all results
+        limit: Result limit
+        json_path: JSON output path
+    
+    Returns:
+        Combined results from all batches
+    """
+    if _dry_run_mode:
+        estimated_queries = (len(id_list) + _batch_size - 1) // _batch_size
+        _print_dry_run_query(
+            f"Async batched query for {len(id_list)} {entity_name}",
+            estimated_queries=estimated_queries
+        )
+        return None
+    
+    num_batches = (len(id_list) + _batch_size - 1) // _batch_size
+    
+    if not json_path:
+        typer.echo(
+            f"Processing {len(id_list)} {entity_name} "
+            f"in {num_batches} batches (async)...", 
+            err=True
+        )
+    
+    # Level 1: Create batch queries and handle them asynchronously
+    async def process_single_batch(batch_ids, batch_index):
+        """Process a single batch of IDs with Level 2 async pagination (no progress)."""
+        batch_query = create_query_func(batch_ids)
+        
+        if _debug_mode:
+            typer.echo(
+                f"[DEBUG] Batch {batch_index + 1} query: {batch_query.url}", 
+                err=True
+            )
+        
+        # Determine how to process this batch
+        if all_results:
+            # Use async pagination but disable progress to avoid conflicts
+            try:
+                # Level 2: Use async pagination without progress bars
+                batch_results = await _get_async_without_progress(
+                    batch_query, limit=None
+                )
+            except (AttributeError, ImportError):
+                # Fall back to sync for this batch
+                batch_results = _paginate_with_progress(
+                    batch_query, f"{entity_name} (batch {batch_index + 1})"
+                )
+        elif limit is not None:
+            # For limited results, try async if suitable
+            try:
+                # Level 2: Use async pagination without progress bars
+                batch_results = await _get_async_without_progress(
+                    batch_query, limit=limit
+                )
+            except (AttributeError, ImportError):
+                # Fall back to sync for this batch
+                batch_results = batch_query.get(limit=limit)
+        else:
+            # Default single page
+            try:
+                batch_results = await _get_async_without_progress(batch_query)
+            except (AttributeError, ImportError):
+                batch_results = batch_query.get()
+        
+        if _debug_mode:
+            batch_count = len(batch_results) if batch_results else 0
+            typer.echo(
+                f"[DEBUG] Batch {batch_index + 1} returned {batch_count} results", 
+                err=True
+            )
+        
+        return batch_results, batch_index
+    
+    # Level 1: Process all batches concurrently with progress bar
+    import asyncio
+    
+    # Create batch processing tasks
+    batch_tasks = []
+    for i in range(0, len(id_list), _batch_size):
+        batch_ids = id_list[i:i + _batch_size]
+        batch_index = i // _batch_size
+        task = process_single_batch(batch_ids, batch_index)
+        batch_tasks.append(task)
+    
+    # Execute all batch tasks with progress tracking
+    try:
+        from rich.progress import (
+            BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, 
+            TextColumn, TimeElapsedColumn
+        )
+        use_rich = True
+    except ImportError:
+        use_rich = False
+    
+    batch_results_list = []
+    
+    if use_rich and not json_path:
+        # Use rich progress bar for batch processing
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+        ) as progress:
+            task_id = progress.add_task(
+                f"Processing {entity_name} batches", 
+                total=len(batch_tasks)
+            )
+            
+            # Process batches with limited concurrency
+            max_concurrent = min(config.max_concurrent or 5, len(batch_tasks))
+            semaphore = asyncio.Semaphore(max_concurrent)
+            
+            async def limited_batch_process(batch_task):
+                async with semaphore:
+                    result = await batch_task
+                    progress.update(task_id, advance=1)
+                    return result
+            
+            limited_tasks = [limited_batch_process(task) for task in batch_tasks]
+            batch_results_list = await asyncio.gather(*limited_tasks)
+    else:
+        # Simple concurrent processing without rich progress
+        max_concurrent = min(config.max_concurrent or 5, len(batch_tasks))
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def limited_batch_process(batch_task):
+            async with semaphore:
+                return await batch_task
+        
+        limited_tasks = [limited_batch_process(task) for task in batch_tasks]
+        batch_results_list = await asyncio.gather(*limited_tasks)
+    
+    # Combine all results and remove duplicates
+    combined_results = []
+    seen_ids = set()
+    
+    # Sort by batch index to maintain order
+    batch_results_list.sort(key=lambda x: x[1])
+    
+    for batch_results, _ in batch_results_list:
+        if batch_results:
+            # Filter out duplicates based on entity ID
+            for entity in batch_results:
+                entity_id_str = entity.get('id')
+                if entity_id_str and entity_id_str not in seen_ids:
+                    seen_ids.add(entity_id_str)
+                    combined_results.append(entity)
+    
+    # Convert abstracts for works if needed
+    if 'works' in entity_name.lower():
+        combined_results = [_add_abstract_to_work(work) for work in combined_results]
+    
+    # Create a result object similar to what query.get() returns
+    if combined_results:
+        from pyalex.core.response import OpenAlexResponseList
+        results = OpenAlexResponseList(
+            combined_results, {"count": len(combined_results)}, dict
+        )
+    else:
+        from pyalex.core.response import OpenAlexResponseList
+        results = OpenAlexResponseList(
+            [], {"count": 0}, dict
+        )
+    
+    if not json_path:
+        typer.echo(
+            f"Combined {len(combined_results)} unique results from "
+            f"{len(id_list)} {entity_name} (async)", 
+            err=True
+        )
+    
+    return results
+
+
+async def _get_async_without_progress(query, limit=None):
+    """
+    Async query execution without progress bars to avoid conflicts.
+    
+    This is used for Level 2 async processing when Level 1 progress is active.
+    """
+    from pyalex.client.async_session import async_batch_requests
+    from pyalex.core.config import MAX_PER_PAGE
+    
+    # For single entity retrieval or small limits, use sync method
+    if isinstance(query.params, str) or (limit and limit <= MAX_PER_PAGE):
+        return query.get(limit=limit)
+    
+    # Get count first to decide on pagination strategy
+    count_result = query.get(per_page=1)
+    total_count = count_result.meta.get('count', 0)
+    
+    # Determine effective limit for async decision
+    effective_limit = limit if limit is not None else total_count
+    
+    # Use async if either total count ≤ 10,000 OR user limit ≤ 10,000
+    if total_count <= 10000 or effective_limit <= 10000:
+        # Use async basic paging without progress
+        effective_per_page = MAX_PER_PAGE
+        effective_limit = min(limit or total_count, total_count)
+        
+        # Calculate number of pages needed
+        num_pages = (effective_limit + effective_per_page - 1) // effective_per_page
+        
+        # Create URLs for all pages
+        urls = []
+        for page_num in range(1, num_pages + 1):
+            # Create a copy of query with page parameters
+            params_copy = (
+                query.params.copy() if isinstance(query.params, dict) 
+                else query.params
+            )
+            page_query = query.__class__(params_copy)
+            page_query._add_params("per-page", effective_per_page)
+            page_query._add_params("page", page_num)
+            urls.append(page_query.url)
+        
+        # Execute async requests without progress tracking
+        max_concurrent = min(config.max_concurrent or 10, len(urls))
+        responses = await async_batch_requests(urls, max_concurrent=max_concurrent)
+        
+        # Combine results
+        all_results = []
+        final_meta = {}
+        
+        for response_data in responses:
+            if 'results' in response_data:
+                all_results.extend(response_data['results'])
+                if not final_meta and 'meta' in response_data:
+                    final_meta = response_data['meta'].copy()
+        
+        # Trim to exact limit if specified
+        if limit and len(all_results) > limit:
+            all_results = all_results[:limit]
+        
+        # Update meta count
+        final_meta['count'] = len(all_results)
+        
+        # Create response object
+        from pyalex.core.response import OpenAlexResponseList
+        return OpenAlexResponseList(
+            all_results, final_meta, query.resource_class
+        )
+    else:
+        # Use sync for larger datasets
+        return query.get(limit=limit)
+
+
+def _sync_execute_batched_queries(
     id_list, 
     create_query_func,
     entity_name,
@@ -715,7 +986,7 @@ def _execute_batched_queries(
     json_path=None
 ):
     """
-    Execute batched queries for large lists of IDs using a query creation function.
+    Synchronous fallback for batched queries (original implementation).
     
     Args:
         id_list: List of cleaned IDs to process in batches
@@ -813,6 +1084,60 @@ def _execute_batched_queries(
         )
     
     return results
+
+
+def _execute_batched_queries(
+    id_list, 
+    create_query_func,
+    entity_name,
+    all_results=False,
+    limit=None,
+    json_path=None,
+    async_mode=False
+):
+    """
+    Execute batched queries for large lists of IDs using async when available.
+    
+    Args:
+        id_list: List of cleaned IDs to process in batches
+        create_query_func: Function that takes a list of batch IDs and returns a query
+        entity_name: Human-readable name for debug output
+        all_results: Whether to get all results
+        limit: Result limit
+        json_path: JSON output path
+        async_mode: Force async mode if True
+    
+    Returns:
+        Combined results from all batches
+    """
+    # Force sync mode if async_mode is explicitly False and no async requested
+    if async_mode is False:
+        return _sync_execute_batched_queries(
+            id_list, create_query_func, entity_name, all_results, limit, json_path
+        )
+    
+    # Try to use async for improved performance
+    try:
+        import asyncio
+        
+        # Check if we're already in an async context
+        try:
+            asyncio.get_running_loop()
+            # We're in an async context, but we can't use await here
+            # Fall back to sync
+            return _sync_execute_batched_queries(
+                id_list, create_query_func, entity_name, all_results, limit, json_path
+            )
+        except RuntimeError:
+            # No running loop, we can create one
+            return asyncio.run(_async_execute_batched_queries(
+                id_list, create_query_func, entity_name, all_results, limit, json_path
+            ))
+    except ImportError:
+        # asyncio not available, use sync
+        return _sync_execute_batched_queries(
+            id_list, create_query_func, entity_name, all_results, limit, json_path
+        )
 
 
 
@@ -1139,6 +1464,11 @@ def works(
              "Example: 'id,doi,title,display_name'. "
              "If not specified, returns all fields."
     )] = None,
+    async_mode: Annotated[bool, typer.Option(
+        "--async",
+        help="Use asynchronous mode for faster processing of large ID lists "
+             "(works with --funder-ids, --author-ids, etc.)"
+    )] = False,
 ):
     """
     Search and retrieve works from OpenAlex.
@@ -1339,7 +1669,8 @@ def works(
                     filter_config_key.split('_')[1] + " IDs",  # e.g., "funder IDs"
                     all_results,
                     limit,
-                    json_path
+                    json_path,
+                    async_mode
                 )
             else:
                 # Normal single query execution
