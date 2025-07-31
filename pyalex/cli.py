@@ -103,6 +103,11 @@ BATCH_FILTER_CONFIGS = {
     # Authors filters  
     'authors_institution': BatchFilterConfig("last_known_institutions", "id"),  # last_known_institutions.id
     
+    # Topics filters
+    'topics_domain': BatchFilterConfig("domain", "id"),  # domain.id
+    'topics_field': BatchFilterConfig("field", "id"),  # field.id
+    'topics_subfield': BatchFilterConfig("subfield", "id"),  # subfield.id
+    
     # For future extensions
     'works_referenced_works': BatchFilterConfig("", "referenced_works"),  # For future use
     'authors_works': BatchFilterConfig("", "works"),  # For future use
@@ -1054,9 +1059,10 @@ def works(
         "--search", "-s",
         help="Search term for works"
     )] = None,
-    author_id: Annotated[Optional[str], typer.Option(
-        "--author-id",
-        help="Filter by author OpenAlex ID"
+    author_ids: Annotated[Optional[str], typer.Option(
+        "--author-ids",
+        help="Filter by author OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --author-ids 'A123,A456,A789')"
     )] = None,
     institution_ids: Annotated[Optional[str], typer.Option(
         "--institution-ids", 
@@ -1139,7 +1145,8 @@ def works(
     
     Examples:
       pyalex works --search "machine learning"
-      pyalex works --author-id "A1234567890" --all
+      pyalex works --author-ids "A1234567890" --all
+      pyalex works --author-ids "A123,A456,A789" --limit 50
       pyalex works --year "2019:2020" --json results.json
       pyalex works --date "2020-01-01:2020-12-31" --all
       pyalex works --date "2020-06-15"
@@ -1172,8 +1179,11 @@ def works(
         
         if search:
             query = query.search(search)
-        if author_id:
-            query = query.filter(author={"id": author_id})
+        if author_ids:
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, author_ids, 'works_author', Works
+            )
         if institution_ids:
             # Use the generalized helper for ID list handling
             query = add_id_list_option_to_command(
@@ -1534,17 +1544,20 @@ def topics(
         "--search", "-s",
         help="Search term for topics"
     )] = None,
-    domain_id: Annotated[Optional[str], typer.Option(
-        "--domain-id",
-        help="Filter by domain OpenAlex ID"
+    domain_ids: Annotated[Optional[str], typer.Option(
+        "--domain-ids",
+        help="Filter by domain OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --domain-ids 'D123,D456,D789')"
     )] = None,
-    field_id: Annotated[Optional[str], typer.Option(
-        "--field-id",
-        help="Filter by field OpenAlex ID" 
+    field_ids: Annotated[Optional[str], typer.Option(
+        "--field-ids",
+        help="Filter by field OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --field-ids 'F123,F456,F789')"
     )] = None,
-    subfield_id: Annotated[Optional[str], typer.Option(
-        "--subfield-id",
-        help="Filter by subfield OpenAlex ID"
+    subfield_ids: Annotated[Optional[str], typer.Option(
+        "--subfield-ids",
+        help="Filter by subfield OpenAlex ID(s). Use comma-separated values for "
+             "OR logic (e.g., --subfield-ids 'SF123,SF456,SF789')"
     )] = None,
     all_results: Annotated[bool, typer.Option(
         "--all",
@@ -1584,10 +1597,12 @@ def topics(
     
     Examples:
       pyalex topics --search "artificial intelligence"
-      pyalex topics --domain-id "D1234567890" --all
-      pyalex topics --domain-id "D1234567890" --limit 50
-      pyalex topics --field-id "F1234567890" --json topics.json
-      pyalex topics --subfield-id "SF1234567890"
+      pyalex topics --domain-ids "D1234567890" --all
+      pyalex topics --domain-ids "D123,D456,D789" --limit 50
+      pyalex topics --field-ids "F1234567890" --json topics.json
+      pyalex topics --field-ids "F123,F456" --all
+      pyalex topics --subfield-ids "SF1234567890"
+      pyalex topics --subfield-ids "SF123,SF456,SF789"
       pyalex topics --sort-by "works_count:desc" --limit 100
       pyalex topics --sample 20 --seed 789
     """
@@ -1602,12 +1617,21 @@ def topics(
         
         if search:
             query = query.search(search)
-        if domain_id:
-            query = query.filter(domain={"id": domain_id})
-        if field_id:
-            query = query.filter(field={"id": field_id})
-        if subfield_id:
-            query = query.filter(subfield={"id": subfield_id})
+        if domain_ids:
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, domain_ids, 'topics_domain', Topics
+            )
+        if field_ids:
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, field_ids, 'topics_field', Topics
+            )
+        if subfield_ids:
+            # Use the generalized helper for ID list handling
+            query = add_id_list_option_to_command(
+                query, subfield_ids, 'topics_subfield', Topics
+            )
         
         # Apply common options (sort, sample, select)
         query = _validate_and_apply_common_options(
@@ -2125,10 +2149,6 @@ def fields(
         "--search", "-s",
         help="Search term for fields"
     )] = None,
-    domain_id: Annotated[Optional[str], typer.Option(
-        "--domain-id",
-        help="Filter by domain OpenAlex ID"
-    )] = None,
     all_results: Annotated[bool, typer.Option(
         "--all",
         help="Retrieve all results (default: first page only)"
@@ -2161,7 +2181,7 @@ def fields(
     
     Examples:
       pyalex fields --search "Computer Science"
-      pyalex fields --domain-id "D1234567890" --all
+      pyalex fields --all
       pyalex fields --json fields.json
       pyalex fields --sort-by "works_count:desc" --limit 20
       pyalex fields --sample 5 --seed 606
@@ -2177,8 +2197,6 @@ def fields(
         
         if search:
             query = query.search(search)
-        if domain_id:
-            query = query.filter(domain={"id": domain_id})
         
         # Apply common options (sort, sample)
         query = _validate_and_apply_common_options(
@@ -2205,10 +2223,6 @@ def subfields(
     search: Annotated[Optional[str], typer.Option(
         "--search", "-s",
         help="Search term for subfields"
-    )] = None,
-    field_id: Annotated[Optional[str], typer.Option(
-        "--field-id",
-        help="Filter by field OpenAlex ID"
     )] = None,
     all_results: Annotated[bool, typer.Option(
         "--all",
@@ -2242,7 +2256,7 @@ def subfields(
     
     Examples:
       pyalex subfields --search "Machine Learning"
-      pyalex subfields --field-id "F1234567890" --all
+      pyalex subfields --all
       pyalex subfields --json subfields.json
       pyalex subfields --sort-by "works_count:desc" --limit 30
       pyalex subfields --sample 8 --seed 707
@@ -2258,8 +2272,6 @@ def subfields(
         
         if search:
             query = query.search(search)
-        if field_id:
-            query = query.filter(field={"id": field_id})
         
         # Apply common options (sort, sample)
         query = _validate_and_apply_common_options(
