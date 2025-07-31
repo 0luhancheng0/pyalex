@@ -1181,37 +1181,37 @@ def works(
             )
         
         if publication_year:
-                # Handle publication year ranges (e.g., "2019:2020") or single years
-                if ":" in publication_year:
-                    try:
-                        start_year, end_year = publication_year.split(":")
-                        start_year = int(start_year.strip())
-                        end_year = int(end_year.strip())
-                        
-                        # For inclusive range, use >= start_year and <= end_year
-                        # Since PyAlex only supports > and <, we'll use 
-                        # (start_year - 1) and (end_year + 1)
-                        query = query.filter_gt(publication_year=start_year - 1)
-                        query = query.filter_lt(publication_year=end_year + 1)
-                    except ValueError:
-                        typer.echo(
-                            "Error: Invalid year range format. Use 'start:end' "
-                            "(e.g., '2019:2020')", 
-                            err=True
-                        )
-                        raise typer.Exit(1) from None
-                else:
-                    try:
-                        year = int(publication_year.strip())
-                        query = query.filter(publication_year=year)
-                    except ValueError:
-                        typer.echo(
-                            "Error: Invalid year format. Use a single year or range "
-                            "(e.g., '2020' or '2019:2020')", 
-                            err=True
-                        )
-                        raise typer.Exit(1) from None
-        
+            # Handle publication year ranges (e.g., "2019:2020") or single years
+            if ":" in publication_year:
+                try:
+                    start_year, end_year = publication_year.split(":")
+                    start_year = int(start_year.strip())
+                    end_year = int(end_year.strip())
+                    
+                    # For inclusive range, use >= start_year and <= end_year
+                    # Since PyAlex only supports > and <, we'll use 
+                    # (start_year - 1) and (end_year + 1)
+                    query = query.filter_gt(publication_year=start_year - 1)
+                    query = query.filter_lt(publication_year=end_year + 1)
+                except ValueError:
+                    typer.echo(
+                        "Error: Invalid year range format. Use 'start:end' "
+                        "(e.g., '2019:2020')", 
+                        err=True
+                    )
+                    raise typer.Exit(1) from None
+            else:
+                try:
+                    year = int(publication_year.strip())
+                    query = query.filter(publication_year=year)
+                except ValueError:
+                    typer.echo(
+                        "Error: Invalid year format. Use a single year or range "
+                        "(e.g., '2020' or '2019:2020')", 
+                        err=True
+                    )
+                    raise typer.Exit(1) from None
+    
         if publication_date:
             # Handle publication date ranges (e.g., "2019-01-01:2020-12-31") 
             # or single dates
