@@ -9,14 +9,22 @@ from typing import Optional
 import typer
 from typing_extensions import Annotated
 
-from pyalex import (
-    Topics, Sources, Publishers, Domains, Fields, Subfields, Keywords
-)
-from ..utils import (
-    _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
-    _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _dry_run_mode
-)
+from pyalex import Domains
+from pyalex import Fields
+from pyalex import Keywords
+from pyalex import Publishers
+from pyalex import Sources
+from pyalex import Subfields
+from pyalex import Topics
+
+from ..utils import _dry_run_mode
+from ..utils import _handle_cli_exception
+from ..utils import _output_grouped_results
+from ..utils import _output_results
+from ..utils import _print_debug_results
+from ..utils import _print_debug_url
+from ..utils import _print_dry_run_query
+from ..utils import _validate_and_apply_common_options
 
 
 def create_simple_entity_command(app, entity_class, entity_name, entity_name_lower):
@@ -60,7 +68,7 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
             help="Select specific fields to return (comma-separated)"
         )] = None,
     ):
-        f"""
+        """
         Search and retrieve {entity_name_lower} from OpenAlex.
         
         Examples:
