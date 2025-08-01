@@ -1,5 +1,10 @@
 """
-Authors command for PyAlex CLI.
+Authorsfrom ..utils import (
+    _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
+    _print_dry_run_query, _output_results, _output_grouped_results,
+    _handle_cli_exception, _dry_run_mode, parse_range_filter, apply_range_filter,
+    _paginate_with_progress, _execute_query_smart
+)and for PyAlex CLI.
 """
 
 from typing import Optional
@@ -12,7 +17,8 @@ from ..batch import add_id_list_option_to_command, _handle_large_id_list
 from ..utils import (
     _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
     _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _debug_mode, _dry_run_mode, parse_range_filter, apply_range_filter
+    _handle_cli_exception, _debug_mode, _dry_run_mode, parse_range_filter, apply_range_filter,
+    _paginate_with_progress, _execute_query_smart
 )
 
 
@@ -209,12 +215,15 @@ def create_authors_command(app):
                         return
                     
                     if all_results:
-                        limit_to_use = None  # Get all results
+                        # Get all results using pagination with progress bar
+                        results = _paginate_with_progress(query, "authors")
                     elif limit is not None:
-                        limit_to_use = limit  # Use specified limit
+                        # Use smart execution (async or sync based on conditions)
+                        results = _execute_query_smart(
+                            query, all_results=False, limit=limit
+                        )
                     else:
-                        limit_to_use = 25  # Default first page
-                    results = query.get(limit=limit_to_use)
+                        results = query.get()  # Default first page
                 
                 _print_debug_results(results)
                 _output_results(results, json_path)

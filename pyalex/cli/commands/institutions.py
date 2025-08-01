@@ -11,7 +11,8 @@ from pyalex import Institutions
 from ..utils import (
     _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
     _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _dry_run_mode, parse_range_filter, apply_range_filter
+    _handle_cli_exception, _dry_run_mode, parse_range_filter, apply_range_filter,
+    _paginate_with_progress, _execute_query_smart
 )
 
 
@@ -52,6 +53,11 @@ def create_institutions_command(app):
             "--two-year-mean-citedness",
             help="Filter by 2-year mean citedness from summary stats. Use single value "
                  "(e.g., '2.5') or range (e.g., '1.0:5.0', ':3.0', '2.0:')"
+        )] = None,
+        cited_by_count: Annotated[Optional[str], typer.Option(
+            "--cited-by-count",
+            help="Filter by total citation count. Use single value (e.g., '1000') or "
+                 "range (e.g., '500:5000', ':1000', '1000:')"
         )] = None,
         group_by: Annotated[Optional[str], typer.Option(
             "--group-by",
@@ -101,6 +107,7 @@ def create_institutions_command(app):
           pyalex institutions --type education --h-index "50:" --json results.json
           pyalex institutions --country US --two-year-mean-citedness "2.0:" \\
                        --sort-by "works_count:desc"
+          pyalex institutions --cited-by-count "10000:" --limit 25
           pyalex institutions --group-by "country_code"
           pyalex institutions --sample 25 --seed 202
         """
@@ -137,6 +144,10 @@ def create_institutions_command(app):
             if two_year_mean_citedness:
                 parsed_citedness = parse_range_filter(two_year_mean_citedness)
                 query = apply_range_filter(query, "summary_stats.2yr_mean_citedness", parsed_citedness)
+                
+            if cited_by_count:
+                parsed_cited_by_count = parse_range_filter(cited_by_count)
+                query = apply_range_filter(query, 'cited_by_count', parsed_cited_by_count)
             
             # Apply common options (sort, sample, select)
             query = _validate_and_apply_common_options(
@@ -167,13 +178,15 @@ def create_institutions_command(app):
                 return
             
             if all_results:
-                limit_to_use = None
+                # Get all results using pagination with progress bar
+                results = _paginate_with_progress(query, "institutions")
             elif limit is not None:
-                limit_to_use = limit
+                # Use smart execution (async or sync based on conditions)
+                results = _execute_query_smart(
+                    query, all_results=False, limit=limit
+                )
             else:
-                limit_to_use = 25
-            
-            results = query.get(limit=limit_to_use)
+                results = query.get()  # Default first page
             _print_debug_results(results)
             _output_results(results, json_path)
                 

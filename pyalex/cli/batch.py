@@ -333,6 +333,16 @@ def _execute_batched_queries(
     Returns:
         Combined results from all batches
     """
+    # Enhanced debugging information
+    if _debug_mode:
+        typer.echo(f"[DEBUG] Batch processing {len(id_list)} {entity_name}", err=True)
+        typer.echo(
+            f"[DEBUG] Parameters: all_results={all_results}, limit={limit}", err=True
+        )
+        typer.echo(f"[DEBUG] Batch size: {_batch_size}", err=True)
+        num_batches = (len(id_list) + _batch_size - 1) // _batch_size
+        typer.echo(f"[DEBUG] Will create {num_batches} batches", err=True)
+    
     # Always try to use async for improved performance
     try:
         # Check if we're already in an async context
@@ -340,16 +350,28 @@ def _execute_batched_queries(
             asyncio.get_running_loop()
             # We're in an async context, but we can't use await here
             # Fall back to sync
+            if _debug_mode:
+                typer.echo(
+                    "[DEBUG] Already in async context, using sync batch processing",
+                    err=True
+                )
             return _sync_execute_batched_queries(
                 id_list, create_query_func, entity_name, all_results, limit, json_path
             )
         except RuntimeError:
             # No running loop, we can create one
+            if _debug_mode:
+                typer.echo("[DEBUG] Using async batch processing", err=True)
             return asyncio.run(_async_execute_batched_queries(
                 id_list, create_query_func, entity_name, all_results, limit, json_path
             ))
     except ImportError:
         # asyncio not available, use sync
+        if _debug_mode:
+            typer.echo(
+                "[DEBUG] asyncio not available, using sync batch processing", 
+                err=True
+            )
         return _sync_execute_batched_queries(
             id_list, create_query_func, entity_name, all_results, limit, json_path
         )
@@ -446,53 +468,79 @@ async def _async_execute_batched_queries(
         
         if _debug_mode:
             typer.echo(
-                f"[DEBUG] Batch {batch_index + 1} query: {batch_query.url}", 
+                f"[DEBUG] Batch {batch_index + 1}/{num_batches} query: {batch_query.url}", 
                 err=True
             )
         
-        # Check if this batch needs pagination (for Level 2 progress)
-        needs_pagination = False
-        batch_task_id = None
+        # Always show batch progress - simplified logic
+        batch_task_id = batch_progress.add_task(
+            f"Batch {batch_index + 1}: Processing {len(batch_ids)} IDs",
+            total=100  # Use percentage-based progress
+        )
         
         try:
-            # Get count to determine if we need Level 2 progress
-            if all_results or (limit and limit > MAX_PER_PAGE):
-                count_result = batch_query.get(per_page=1)
-                total_count = count_result.meta.get('count', 0)
-                
-                # Show individual progress if we have significant results
-                if total_count > 200 and total_count <= 10000:
-                    needs_pagination = True
-                    batch_task_id = batch_progress.add_task(
-                        f"Batch {batch_index + 1}: Fetching {total_count} results",
-                        total=total_count
-                    )
-        except Exception:
-            # If count fails, proceed without Level 2 progress
-            pass
-        
-        # Execute the batch query
-        if needs_pagination and batch_task_id is not None:
-            # Use async pagination with progress updates
-            batch_results = await _get_async_with_progress(
-                batch_query, batch_progress, batch_task_id, limit=limit
+            # Start with efficient per_page=200 to get count and first results
+            if _debug_mode:
+                typer.echo("[DEBUG] Using per_page=200 for efficiency", err=True)
+            
+            first_result = batch_query.get(per_page=MAX_PER_PAGE)
+            total_count = first_result.meta.get('count', 0)
+            first_page_results = list(first_result) if first_result else []
+            
+            if _debug_mode:
+                typer.echo(
+                    f"[DEBUG] Batch {batch_index + 1} total: {total_count:,}, "
+                    f"first page: {len(first_page_results)}", err=True
+                )
+            
+            # Update progress description with actual count
+            batch_progress.update(
+                batch_task_id, 
+                description=f"Batch {batch_index + 1}: Fetching {total_count:,} results",
+                total=total_count,
+                completed=len(first_page_results)
             )
-        else:
-            # Use simple async execution
+            
+            # Determine what we need
             if all_results:
-                batch_results = await _get_async_without_progress(
-                    batch_query, limit=None
-                )
+                effective_limit = total_count
             elif limit is not None:
-                batch_results = await _get_async_without_progress(
-                    batch_query, limit=limit
-                )
+                effective_limit = min(limit, total_count)
             else:
-                batch_results = await _get_async_without_progress(batch_query)
+                effective_limit = min(MAX_PER_PAGE, total_count)
+            
+            # Get remaining results if needed
+            if effective_limit <= len(first_page_results):
+                # Already have everything we need
+                batch_results = first_page_results[:effective_limit]
+                batch_progress.update(batch_task_id, completed=effective_limit)
+            else:
+                # Need more results
+                remaining_needed = effective_limit - len(first_page_results)
+                if _debug_mode:
+                    typer.echo(
+                        f"[DEBUG] Batch {batch_index + 1} needs {remaining_needed:,} more results", 
+                        err=True
+                    )
+                
+                # Get remaining results efficiently
+                remaining_results = await _get_async_without_progress_optimized(
+                    batch_query, remaining_needed, first_page_results
+                )
+                
+                batch_results = (first_page_results + list(remaining_results))[:effective_limit]
+                batch_progress.update(batch_task_id, completed=effective_limit)
+                
+        except Exception as e:
+            if _debug_mode:
+                typer.echo(f"[DEBUG] Batch {batch_index + 1} error: {e}", err=True)
+            # Fallback to simple execution with proper limit
+            fallback_limit = None if all_results else limit
+            batch_results = await _get_async_without_progress(batch_query, fallback_limit)
+            batch_progress.update(batch_task_id, completed=100, total=100)
         
         # Clean up Level 2 progress task
-        if batch_task_id is not None:
-            batch_progress.remove_task(batch_task_id)
+        batch_progress.remove_task(batch_task_id)
         
         # Update Level 1 progress
         overall_progress.update(main_task_id, advance=1)
@@ -508,30 +556,38 @@ async def _async_execute_batched_queries(
     
     # Execute with live progress display
     with Live(progress_group, refresh_per_second=10):
-        # Add main progress task
-        main_task_id = overall_progress.add_task(
-            f"Processing {entity_name} batches", 
-            total=num_batches
-        )
+        # Set the batch progress context to prevent conflicts
+        from .utils import set_batch_progress_context
+        set_batch_progress_context(progress_group)
         
-        # Create batch processing tasks
-        batch_tasks = []
-        for i in range(0, len(id_list), _batch_size):
-            batch_ids = id_list[i:i + _batch_size]
-            batch_index = i // _batch_size
-            task = process_single_batch_with_progress(batch_ids, batch_index, main_task_id)
-            batch_tasks.append(task)
-        
-        # Process batches with limited concurrency
-        max_concurrent = min(config.max_concurrent or 5, len(batch_tasks))
-        semaphore = asyncio.Semaphore(max_concurrent)
-        
-        async def limited_batch_process(batch_task):
-            async with semaphore:
-                return await batch_task
-        
-        limited_tasks = [limited_batch_process(task) for task in batch_tasks]
-        batch_results_list = await asyncio.gather(*limited_tasks)
+        try:
+            # Add main progress task
+            main_task_id = overall_progress.add_task(
+                f"Processing {entity_name} batches", 
+                total=num_batches
+            )
+            
+            # Create batch processing tasks
+            batch_tasks = []
+            for i in range(0, len(id_list), _batch_size):
+                batch_ids = id_list[i:i + _batch_size]
+                batch_index = i // _batch_size
+                task = process_single_batch_with_progress(batch_ids, batch_index, main_task_id)
+                batch_tasks.append(task)
+            
+            # Process batches with limited concurrency
+            max_concurrent = min(config.max_concurrent or 5, len(batch_tasks))
+            semaphore = asyncio.Semaphore(max_concurrent)
+            
+            async def limited_batch_process(batch_task):
+                async with semaphore:
+                    return await batch_task
+            
+            limited_tasks = [limited_batch_process(task) for task in batch_tasks]
+            batch_results_list = await asyncio.gather(*limited_tasks)
+        finally:
+            # Clear the batch progress context
+            set_batch_progress_context(None)
     
     # Combine all results and remove duplicates or merge grouped results
     # Check if this is a grouped query by examining the first batch query
@@ -778,6 +834,22 @@ async def _async_execute_batched_queries_simple(
     return results
 
 
+async def _get_async_without_progress_optimized(query, remaining_limit, first_page_results):
+    """
+    Optimized async query execution that reuses first page results.
+    """
+    if remaining_limit <= 0:
+        return []
+    
+    # Use the existing async method but optimized
+    try:
+        remaining_results = await query.get_async(limit=remaining_limit)
+        return list(remaining_results) if remaining_results else []
+    except Exception:
+        # Fallback to sync
+        return list(query.get(limit=remaining_limit)) if query.get(limit=remaining_limit) else []
+
+
 async def _get_async_without_progress(query, limit=None):
     """
     Async query execution without progress bars to avoid conflicts.
@@ -887,7 +959,7 @@ def _sync_execute_batched_queries(
     Returns:
         Combined results from all batches
     """
-    from .utils import _print_dry_run_query, _add_abstract_to_work, _paginate_with_progress
+    from .utils import _print_dry_run_query, _paginate_with_progress
     
     if _dry_run_mode:
         estimated_queries = (len(id_list) + _batch_size - 1) // _batch_size

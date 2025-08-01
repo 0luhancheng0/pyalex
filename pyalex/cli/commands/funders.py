@@ -11,7 +11,8 @@ from pyalex import Funders
 from ..utils import (
     _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
     _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _dry_run_mode, parse_range_filter, apply_range_filter
+    _handle_cli_exception, _dry_run_mode, parse_range_filter, apply_range_filter,
+    _paginate_with_progress, _execute_query_smart
 )
 
 
@@ -167,13 +168,16 @@ def create_funders_command(app):
                 return
             
             if all_results:
-                limit_to_use = None
+                # Get all results using pagination with progress bar
+                results = _paginate_with_progress(query, "funders")
             elif limit is not None:
-                limit_to_use = limit
+                # Use smart execution (async or sync based on conditions)
+                results = _execute_query_smart(
+                    query, all_results=False, limit=limit
+                )
             else:
-                limit_to_use = 25
+                results = query.get()  # Default first page
             
-            results = query.get(limit=limit_to_use)
             _print_debug_results(results)
             _output_results(results, json_path)
                 

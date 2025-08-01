@@ -20,6 +20,11 @@ _debug_mode = False
 _dry_run_mode = False  
 _batch_size = config.cli_batch_size
 
+# Progress context tracking to prevent conflicting progress bars
+_active_progress_context = None
+_batch_progress_context = None
+_progress_depth = 0
+
 MAX_WIDTH = config.cli_max_width
 
 
@@ -29,6 +34,63 @@ def set_global_state(debug_mode: bool, dry_run_mode: bool, batch_size: int):
     _debug_mode = debug_mode
     _dry_run_mode = dry_run_mode
     _batch_size = batch_size
+
+
+def set_batch_progress_context(progress_context):
+    """Set the active batch progress context to prevent conflicts."""
+    global _batch_progress_context
+    _batch_progress_context = progress_context
+
+
+def get_batch_progress_context():
+    """Get the active batch progress context."""
+    return _batch_progress_context
+
+
+def is_in_batch_context():
+    """Check if we're currently in a batch processing context."""
+    return _batch_progress_context is not None
+
+
+def _enter_progress_context():
+    """Enter a progress context, tracking depth."""
+    global _progress_depth
+    _progress_depth += 1
+    return _progress_depth
+
+
+def _exit_progress_context():
+    """Exit a progress context, tracking depth."""
+    global _progress_depth
+    _progress_depth = max(0, _progress_depth - 1)
+    return _progress_depth
+
+
+def _is_progress_active():
+    """Check if any progress context is currently active."""
+    return _progress_depth > 0 or is_in_batch_context()
+
+
+def _should_show_progress():
+    """Determine if we should show a new progress display."""
+    return not _is_progress_active()
+
+
+def _simple_paginate_all(query):
+    """Simple pagination to get all results without progress display."""
+    paginator = query.paginate(method="cursor", cursor="*", per_page=MAX_PER_PAGE)
+    all_results = []
+    for batch in paginator:
+        if not batch:
+            break
+        all_results.extend(batch)
+    
+    if all_results:
+        from pyalex.core.response import OpenAlexResponseList
+        return OpenAlexResponseList(all_results, {"count": len(all_results)})
+    else:
+        from pyalex.core.response import OpenAlexResponseList
+        return OpenAlexResponseList([], {"count": 0})
 
 
 def parse_range_filter(value: str):
@@ -331,7 +393,7 @@ def _validate_and_apply_common_options(
 
 def _execute_query_with_options(query, all_results, limit, entity_name):
     """
-    Execute a query based on the specified options.
+    Execute a query based on the specified options with unified progress display.
     
     Args:
         query: OpenAlex query object
@@ -342,47 +404,248 @@ def _execute_query_with_options(query, all_results, limit, entity_name):
     Returns:
         Query results
     """
+    return _execute_query_with_progress(query, all_results, limit, entity_name)
+
+
+def _execute_query_with_progress(query, all_results=False, limit=None, entity_name="results"):
+    """
+    Execute a query with progress tracking.
+    Enhanced with strategy-based optimization.
+    Only shows progress display if no other progress is active.
+    """
+    # Check if we're already in a progress context before entering a new one
+    if _is_progress_active():
+        # Already in a progress context, use simple execution without new progress
+        if all_results:
+            return _simple_paginate_all(query)
+        elif limit:
+            return query[:limit]
+        else:
+            return query.get()
+    
+    # Enter progress context and show progress
+    _enter_progress_context()
+    try:
+        # Original progress-enabled logic
+        if _debug_mode:
+            typer.echo(f"[DEBUG] Parameters: all_results={all_results}, limit={limit}", err=True)
+            
+        # Get count efficiently for strategy determination
+        if _debug_mode:
+            typer.echo("[DEBUG] Getting count with per_page=200 for efficiency", err=True)
+        
+        first_page_response = query[:200]  # Get first page with more results
+        first_page_results = list(first_page_response)
+        count = query.count()
+        
+        if _debug_mode:
+            typer.echo(f"[DEBUG] First page returned: {len(first_page_results)} results", err=True)
+            typer.echo(f"[DEBUG] Total count: {count:,} results", err=True)
+        
+        # Calculate effective limit
+        if all_results:
+            effective_limit = count
+            strategy_reason = "all results requested"
+        elif limit and limit < count:
+            effective_limit = limit  
+            strategy_reason = f"limit ({limit:,}) < count ({count:,})"
+        else:
+            effective_limit = count
+            strategy_reason = f"limit ({limit:,}) >= count ({count:,})" if limit else "no limit specified"
+        
+        if _debug_mode:
+            typer.echo(f"[DEBUG] Effective limit: {effective_limit:,} ({strategy_reason})", err=True)
+        
+        # Strategy: Single page sufficient
+        if effective_limit <= len(first_page_results):
+            if _debug_mode:
+                typer.echo("[DEBUG] Strategy: Single page sufficient (already fetched)", err=True)
+            return first_page_results[:effective_limit]
+        
+        # Show progress for the total we'll actually fetch
+        _show_simple_progress(f"Fetching {entity_name}", effective_limit, effective_limit)
+        
+        # Strategy selection based on count
+        if effective_limit <= 10000:
+            if _debug_mode:
+                typer.echo("[DEBUG] Strategy: Async pagination (≤10k results)", err=True)
+            return _execute_async_with_progress(query, effective_limit, entity_name, first_page_results)
+        else:
+            if _debug_mode:
+                typer.echo("[DEBUG] Strategy: Sync pagination (>10k results)", err=True)
+            return _sync_paginate_with_progress(query, effective_limit, entity_name, first_page_results)
+        
+    except Exception as e:
+        if _debug_mode:
+            typer.echo(f"[DEBUG] Error in _execute_query_with_progress: {e}", err=True)
+        if _debug_mode:
+            typer.echo("[DEBUG] Using fallback simple execution", err=True)
+        # Fallback to simple execution
+        if all_results:
+            return _simple_paginate_all(query)
+        elif limit:
+            return query[:limit]
+        else:
+            return query.get()
+    finally:
+        _exit_progress_context()
+
+
+def _simple_query_with_progress(query, all_results, limit, entity_name):
+    """Fallback for when count query fails."""
+    if _debug_mode:
+        typer.echo(f"[DEBUG] Using fallback simple execution", err=True)
+    
+    _show_simple_progress(f"Fetching {entity_name}", 1, 1)
+    
     if all_results:
-        return _paginate_with_progress(query, entity_name)
+        return _sync_paginate_with_progress(query, entity_name)
     elif limit is not None:
         return query.get(limit=limit)
     else:
-        return query.get()  # Default first page
+        return query.get()
+
+
+def _show_simple_progress(description, current, total):
+    """Show a simple progress indication for quick operations."""
+    # Don't create competing progress displays if any progress is active
+    if _is_progress_active():
+        if _debug_mode:
+            typer.echo(f"[DEBUG] {description} (progress already active)", err=True)
+        return
+        
+    try:
+        from rich.progress import Progress, SpinnerColumn, TextColumn
+        with Progress(SpinnerColumn(), TextColumn(f"[bold blue]{description}...")) as progress:
+            progress.add_task("", total=total)
+            # Brief pause to show the progress
+            import time
+            time.sleep(0.1)
+    except ImportError:
+        typer.echo(f"{description}...", err=True)
+
+
+def _create_response_from_results(results, meta, response_class):
+    """Create a response object from results list."""
+    try:
+        # Try to use the same class as the original response
+        return response_class(results, meta)
+    except Exception:
+        # Fallback to basic list
+        return results
+
+
+def _execute_async_with_progress(query, effective_limit, entity_name, first_page_results):
+    """Execute async pagination with progress bar."""
+    try:
+        return asyncio.run(_async_paginate_optimized(
+            query, effective_limit, entity_name, first_page_results
+        ))
+    except ImportError:
+        if _debug_mode:
+            typer.echo("[DEBUG] aiohttp not available, falling back to sync", err=True)
+        return _execute_sync_with_progress(query, effective_limit, entity_name)
+
+
+def _execute_sync_with_progress(query, effective_limit, entity_name):
+    """Execute sync pagination with progress bar."""
+    return _sync_paginate_with_progress(query, entity_name)
+
+
+async def _async_paginate_optimized(query, effective_limit, entity_name, first_page_results):
+    """Optimized async pagination that reuses first page results."""
+    # If we're in a batch context, don't create competing progress displays
+    if is_in_batch_context():
+        # Just return the results without creating a new progress context
+        first_page_count = len(first_page_results)
+        remaining_needed = max(0, effective_limit - first_page_count)
+        
+        if _debug_mode:
+            typer.echo(f"[DEBUG] Async paginate in batch context: {effective_limit:,} total, {remaining_needed:,} remaining", err=True)
+        
+        if remaining_needed == 0:
+            return first_page_results[:effective_limit]
+        
+        # Get remaining results without progress display
+        remaining_results = await query.get_async(limit=remaining_needed)
+        all_results = first_page_results + list(remaining_results)
+        return all_results[:effective_limit]
+    
+    # Normal progress display for non-batch context
+    try:
+        from rich.progress import (
+            Progress, SpinnerColumn, TextColumn, BarColumn,
+            MofNCompleteColumn, TimeElapsedColumn
+        )
+        use_rich = True
+    except ImportError:
+        use_rich = False
+    
+    if _debug_mode:
+        typer.echo(f"[DEBUG] Starting async pagination for {effective_limit:,} results", err=True)
+    
+    # Calculate remaining results needed
+    first_page_count = len(first_page_results)
+    remaining_needed = max(0, effective_limit - first_page_count)
+    
+    if remaining_needed == 0:
+        # We already have everything we need
+        if _debug_mode:
+            typer.echo("[DEBUG] First page contains all needed results", err=True)
+        return _create_response_from_results(
+            first_page_results[:effective_limit], 
+            {"count": effective_limit}, 
+            list
+        )
+    
+    # Set up progress bar
+    if use_rich:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn(f"[bold blue]Fetching {entity_name}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+        ) as progress:
+            task_id = progress.add_task("", total=effective_limit, completed=first_page_count)
+            
+            # Get remaining results
+            remaining_results = await query.get_async(limit=remaining_needed)
+            all_results = first_page_results + list(remaining_results)
+            
+            progress.update(task_id, completed=effective_limit)
+            return all_results[:effective_limit]
+    else:
+        # Fallback without rich
+        typer.echo(f"Fetching {entity_name}...", err=True)
+        remaining_results = await query.get_async(limit=remaining_needed)
+        all_results = first_page_results + list(remaining_results)
+        return all_results[:effective_limit]
 
 
 def _paginate_with_progress(query, entity_type_name="results"):
     """
     Paginate through all results with a progress bar.
-    Uses async pagination for datasets <= 10,000 results, sync for larger.
-    
-    Args:
-        query: OpenAlex query object
-        entity_type_name: String name for the entity type for the progress bar
-    
-    Returns:
-        OpenAlexResponseList of all results
+    Avoids nested progress displays by directly handling pagination.
     """
-    
-    # Check if async is available and get total count
-    try:
-        count_result = query.get(per_page=1)
-        total_count = count_result.meta.get('count', 0)
+    if _is_progress_active():
+        # Already in a progress context, just paginate without new progress
+        paginator = query.paginate(method="cursor", cursor="*", per_page=MAX_PER_PAGE)
+        all_results = []
+        for batch in paginator:
+            if not batch:
+                break
+            all_results.extend(batch)
         
-        # Use async for smaller datasets
-        if total_count <= 10000:
-            try:
-                return asyncio.run(
-                    _async_paginate_with_progress(query, entity_type_name, total_count)
-                )
-            except ImportError:
-                # Fall back to sync if aiohttp not available
-                pass
-    except Exception:
-        # If count fails, fall back to sync pagination
-        pass
+        if all_results:
+            from pyalex.core.response import OpenAlexResponseList
+            return OpenAlexResponseList(all_results, {"count": len(all_results)})
+        else:
+            from pyalex.core.response import OpenAlexResponseList
+            return OpenAlexResponseList([], {"count": 0})
     
-    # Sync pagination fallback
-    return _sync_paginate_with_progress(query, entity_type_name)
+    # Not in a progress context, safe to create one
+    return _execute_query_with_progress(query, all_results=True, entity_name=entity_type_name)
 
 
 async def _async_paginate_with_progress(query, entity_type_name, total_count):
@@ -396,29 +659,32 @@ async def _async_paginate_with_progress(query, entity_type_name, total_count):
 
 
 def _execute_query_smart(query, all_results=False, limit=None):
-    """Execute query using the best method (async or sync) based on conditions."""
-    if all_results:
-        # Get all results using pagination with progress bar
-        return _paginate_with_progress(query, "query")
-    elif limit is not None:
-        # Check if we should use async for this limit
-        if query.should_use_async(limit):
-            # Use async execution
-            try:
-                async def _run_query():
-                    return await query.get_async(limit=limit)
-                return asyncio.run(_run_query())
-            except ImportError:
-                # aiohttp not available, fall back to sync
-                return query.get(limit=limit)
-        else:
-            return query.get(limit=limit)
-    else:
-        return query.get()  # Default first page
+    """Execute query using the unified progress system."""
+    return _execute_query_with_progress(query, all_results, limit, "results")
 
 
 def _sync_paginate_with_progress(query, entity_type_name):
     """Sync pagination with progress bar (original implementation)."""
+    # If we're in a batch context, don't create competing progress displays
+    if is_in_batch_context():
+        if _debug_mode:
+            typer.echo(f"[DEBUG] Sync paginate in batch context for {entity_type_name}", err=True)
+        # Just return results without progress display
+        paginator = query.paginate(method="cursor", cursor="*", per_page=MAX_PER_PAGE)
+        all_results = []
+        for batch in paginator:
+            if not batch:
+                break
+            all_results.extend(batch)
+        
+        if all_results:
+            from pyalex.core.response import OpenAlexResponseList
+            return OpenAlexResponseList(all_results, {"count": len(all_results)})
+        else:
+            from pyalex.core.response import OpenAlexResponseList
+            return OpenAlexResponseList([], {"count": 0})
+    
+    # Normal progress display for non-batch context
     try:
         from rich.progress import (
             Progress, SpinnerColumn, TextColumn, BarColumn, 
