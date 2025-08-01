@@ -66,8 +66,12 @@ def create_funders_command(app):
             "--limit", "-l",
             help="Maximum number of results to return (mutually exclusive with --all)"
         )] = None,
-        json_path: Annotated[Optional[str], typer.Option(
+        json_flag: Annotated[bool, typer.Option(
             "--json",
+            help="Output JSON to stdout"
+        )] = False,
+        json_path: Annotated[Optional[str], typer.Option(
+            "--json-file",
             help="Save results to JSON file at specified path"
         )] = None,
         sort_by: Annotated[Optional[str], typer.Option(
@@ -109,6 +113,16 @@ def create_funders_command(app):
             if all_results and limit is not None:
                 typer.echo("Error: --all and --limit are mutually exclusive", err=True)
                 raise typer.Exit(1)
+            
+            # Handle JSON output options
+            effective_json_path = None
+            if json_flag and json_path:
+                typer.echo("Error: --json and --json-file are mutually exclusive", err=True)
+                raise typer.Exit(1)
+            elif json_flag:
+                effective_json_path = "-"  # Use "-" to indicate stdout
+            elif json_path:
+                effective_json_path = json_path
             
             # Search funders
             query = Funders()
@@ -179,7 +193,7 @@ def create_funders_command(app):
                 results = query.get()  # Default first page
             
             _print_debug_results(results)
-            _output_results(results, json_path)
+            _output_results(results, effective_json_path)
                 
         except Exception as e:
             _handle_cli_exception(e)

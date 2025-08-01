@@ -798,26 +798,38 @@ def _output_results(
     single: bool = False, 
     grouped: bool = False
 ):
-    """Output results in table format to stdout or JSON format to file."""
+    """Output results in table format to stdout or JSON format to file/stdout."""
     # Handle None or empty results
     if results is None:
         if json_path:
-            with open(json_path, 'w') as f:
-                json.dump([], f, indent=2)
+            data = []
+            if json_path == "-":
+                # Output JSON to stdout
+                typer.echo(json.dumps(data, indent=2))
+            else:
+                # Save JSON to file
+                with open(json_path, 'w') as f:
+                    json.dump(data, f, indent=2)
         else:
             typer.echo("No results found.")
         return
     
     if not single and not grouped and (not results or len(results) == 0):
         if json_path:
-            with open(json_path, 'w') as f:
-                json.dump([], f, indent=2)
+            data = []
+            if json_path == "-":
+                # Output JSON to stdout
+                typer.echo(json.dumps(data, indent=2))
+            else:
+                # Save JSON to file
+                with open(json_path, 'w') as f:
+                    json.dump(data, f, indent=2)
         else:
             typer.echo("No results found.")
         return
     
     if json_path:
-        # Save JSON to file
+        # Prepare JSON data
         if single:
             data = dict(results)
         elif grouped:
@@ -826,8 +838,13 @@ def _output_results(
         else:
             data = [dict(r) for r in results]
         
-        with open(json_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        if json_path == "-":
+            # Output JSON to stdout
+            typer.echo(json.dumps(data, indent=2))
+        else:
+            # Save JSON to file
+            with open(json_path, 'w') as f:
+                json.dump(data, f, indent=2)
 
     else:
         # Display table format to stdout
@@ -1006,11 +1023,17 @@ def _output_table(results, single: bool = False, grouped: bool = False):
 
 
 def _output_grouped_results(results, json_path: Optional[str] = None):
-    """Output grouped results in table format to stdout or JSON format to file."""
+    """Output grouped results in table format to stdout or JSON format to file/stdout."""
     if results is None:
         if json_path:
-            with open(json_path, 'w') as f:
-                json.dump([], f, indent=2)
+            data = []
+            if json_path == "-":
+                # Output JSON to stdout
+                typer.echo(json.dumps(data, indent=2))
+            else:
+                # Save JSON to file
+                with open(json_path, 'w') as f:
+                    json.dump(data, f, indent=2)
         else:
             typer.echo("No grouped results found.")
         return
@@ -1020,17 +1043,30 @@ def _output_grouped_results(results, json_path: Optional[str] = None):
     
     if not grouped_data:
         if json_path:
-            with open(json_path, 'w') as f:
-                json.dump([], f, indent=2)
+            data = []
+            if json_path == "-":
+                # Output JSON to stdout
+                typer.echo(json.dumps(data, indent=2))
+            else:
+                # Save JSON to file
+                with open(json_path, 'w') as f:
+                    json.dump(data, f, indent=2)
         else:
             typer.echo("No grouped results found.")
         return
     
     if json_path:
-        # Save JSON to file
-        with open(json_path, 'w') as f:
-            json.dump([dict(item) for item in grouped_data], f, indent=2)
-        typer.echo(f"Grouped results saved to {json_path}")
+        # Prepare JSON data
+        data = [dict(item) for item in grouped_data]
+        
+        if json_path == "-":
+            # Output JSON to stdout
+            typer.echo(json.dumps(data, indent=2))
+        else:
+            # Save JSON to file
+            with open(json_path, 'w') as f:
+                json.dump(data, f, indent=2)
+            typer.echo(f"Grouped results saved to {json_path}")
     else:
         # Display table format to stdout
         table = PrettyTable()
