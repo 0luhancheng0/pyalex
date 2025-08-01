@@ -473,7 +473,7 @@ def _execute_query_with_progress(query, all_results=False, limit=None, entity_na
         else:
             if _debug_mode:
                 typer.echo("[DEBUG] Strategy: Sync pagination (>10k results)", err=True)
-            return _sync_paginate_with_progress(query, effective_limit, entity_name, first_page_results)
+            return _sync_paginate_with_progress(query, entity_name)
         
     except Exception as e:
         if _debug_mode:

@@ -69,8 +69,34 @@ class BaseOpenAlex:
         elif isinstance(record_id, str):
             self.params = record_id
             return self._get_from_url(self.url)
+        elif isinstance(record_id, slice):
+            # Handle slice notation for pagination (e.g., query[:200] or query[100:300])
+            start = record_id.start or 0
+            stop = record_id.stop
+            step = record_id.step or 1
+            
+            if step != 1:
+                raise ValueError("Slice step must be 1")
+            if start < 0:
+                raise ValueError("Slice start must be non-negative")
+            if stop is not None and stop <= start:
+                raise ValueError("Slice stop must be greater than start")
+                
+            # Convert slice to limit for get() method
+            if stop is not None:
+                limit = stop - start
+                # If start > 0, we'd need to implement offset/skip functionality
+                # For now, only support slices starting from 0
+                if start > 0:
+                    raise ValueError("Slice with non-zero start not supported yet")
+                return self.get(limit=limit)
+            else:
+                # Open-ended slice like query[100:] - not supported yet
+                raise ValueError("Open-ended slices not supported")
         else:
-            raise ValueError("record_id should be a string or a list of strings")
+            raise ValueError(
+                "record_id should be a string, a list of strings, or a slice"
+            )
 
     def _url_query(self):
         if isinstance(self.params, list):
