@@ -96,7 +96,6 @@ class Paginator:
         if self.per_page is not None:
             self.endpoint_class._add_params("per-page", self.per_page)
 
-        logger.debug(f"Paginator requesting URL: {self.endpoint_class.url}")
         r = self.endpoint_class._get_from_url(self.endpoint_class.url, self._session)
 
         # Print count information on first page and check for approval if needed

@@ -158,7 +158,6 @@ class BaseOpenAlex:
         if session is None:
             session = get_requests_session()
 
-        logger.debug(f"Requesting URL: {url}")
         res = session.get(url, auth=OpenAlexAuth(config))
 
         if res.status_code == 403:

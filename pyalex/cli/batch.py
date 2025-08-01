@@ -12,10 +12,9 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import typer
 
-try:
-    import httpx
-except ImportError:
-    httpx = None
+
+import httpx
+
 
 from pyalex import config
 
@@ -274,7 +273,8 @@ class HttpxBatchExecutor:
                         results.append(result)
                 except Exception as e:
                     if self.config.debug_mode:
-                        typer.echo(f"[DEBUG] Error fetching {url}: {e}", err=True)
+                        from .utils import _debug_print
+                        _debug_print(f"Error fetching {url}: {e}", "ERROR")
         
         return results
     
@@ -286,7 +286,8 @@ class HttpxBatchExecutor:
             return response.json()
         except Exception as e:
             if self.config.debug_mode:
-                typer.echo(f"[DEBUG] Request failed for {url}: {e}", err=True)
+                from .utils import _debug_print
+                _debug_print(f"Request failed for {url}: {e}", "ERROR")
             return None
 
 
@@ -440,17 +441,29 @@ class BatchProcessor:
         """
         # Enhanced debugging information
         if self.config.debug_mode:
-            typer.echo(f"[DEBUG] Batch processing {len(id_list)} {entity_name}", err=True)
-            typer.echo(
-                f"[DEBUG] Parameters: all_results={all_results}, limit={limit}", err=True
+            from .utils import _debug_print
+            _debug_print("=== Batch Processing Configuration ===", "BATCH")
+            _debug_print(
+                f"Total entities to process: {len(id_list)} {entity_name}", 
+                "BATCH"
             )
-            typer.echo(f"[DEBUG] Batch size: {self.config.batch_size}", err=True)
-            num_batches = (len(id_list) + self.config.batch_size - 1) // self.config.batch_size
-            typer.echo(f"[DEBUG] Will create {num_batches} batches", err=True)
+            _debug_print(f"Batch size: {self.config.batch_size}", "BATCH")
+            num_batches = (
+                len(id_list) + self.config.batch_size - 1
+            ) // self.config.batch_size
+            _debug_print(f"Number of batches: {num_batches}", "BATCH")
+            _debug_print(
+                f"Processing parameters: all_results={all_results}, limit={limit}", 
+                "BATCH"
+            )
+            _debug_print("=== Starting Batch Execution ===", "BATCH")
         
         if self.config.dry_run_mode:
             from .utils import _print_dry_run_query
-            estimated_queries = (len(id_list) + self.config.batch_size - 1) // self.config.batch_size
+            estimated_queries = (
+                (len(id_list) + self.config.batch_size - 1) 
+                // self.config.batch_size
+            )
             _print_dry_run_query(
                 f"Batched query for {len(id_list)} {entity_name}",
                 estimated_queries=estimated_queries
@@ -462,6 +475,161 @@ class BatchProcessor:
             id_list, create_query_func, entity_name, all_results, limit, json_path
         )
     
+    def _execute_single_batch(
+        self, 
+        batch_ids: List[str], 
+        batch_index: int, 
+        create_query_func, 
+        entity_name: str,
+        all_results: bool,
+        limit: Optional[int]
+    ):
+        """Execute a single batch and return results."""
+        # Create query for this batch
+        batch_query = create_query_func(batch_ids)
+        
+        if self.config.debug_mode:
+            from .utils import _debug_print
+            _debug_print(
+                f"=== Batch {batch_index + 1} Execution Details ===", "BATCH"
+            )
+            _debug_print(f"Batch size: {len(batch_ids)} IDs", "BATCH")
+            _debug_print(f"Entity type: {entity_name}", "BATCH")
+            _debug_print(f"API URL: {batch_query.url}", "BATCH")
+            _debug_print(
+                f"Execution mode: all_results={all_results}, limit={limit}", 
+                "BATCH"
+            )
+        
+        # Check for large result set warning
+        if all_results:
+            self._warn_if_large_sync_request(batch_query, batch_index, entity_name)
+        
+        # Execute the batch query
+        try:
+            if all_results:
+                # Get all results for this batch using pagination
+                if self.config.debug_mode:
+                    from .utils import _debug_print
+                    _debug_print(
+                        f"Starting pagination for batch {batch_index + 1} "
+                        f"({len(batch_ids)} {entity_name})", 
+                        "BATCH"
+                    )
+                
+                # Set a flag to indicate we're in batch context to prevent 
+                # nested progress
+                import threading
+                batch_context = getattr(
+                    threading.current_thread(), '_pyalex_batch_context', False
+                )
+                threading.current_thread()._pyalex_batch_context = True
+                
+                try:
+                    from .utils import _paginate_with_progress
+                    batch_name = f"{entity_name} (batch {batch_index + 1})"
+                    batch_results = _paginate_with_progress(batch_query, batch_name)
+                finally:
+                    # Restore previous context
+                    threading.current_thread()._pyalex_batch_context = batch_context
+                
+                if self.config.debug_mode:
+                    from .utils import _debug_print
+                    batch_result_count = len(batch_results) if batch_results else 0
+                    _debug_print(
+                        f"Pagination completed for batch {batch_index + 1}: "
+                        f"{batch_result_count} results retrieved", 
+                        "BATCH"
+                    )
+            elif limit is not None:
+                if self.config.debug_mode:
+                    from .utils import _debug_print
+                    _debug_print(
+                        f"Executing limited query for batch {batch_index + 1} "
+                        f"with limit={limit}", "BATCH"
+                    )
+                batch_results = batch_query.get(limit=limit)
+                if self.config.debug_mode:
+                    batch_result_count = len(batch_results) if batch_results else 0
+                    _debug_print(
+                        f"Limited query completed: {batch_result_count} results", 
+                        "BATCH"
+                    )
+            else:
+                if self.config.debug_mode:
+                    from .utils import _debug_print
+                    _debug_print(
+                        f"Executing default query for batch {batch_index + 1} "
+                        "(first page only)", "BATCH"
+                    )
+                batch_results = batch_query.get()  # Default first page
+                if self.config.debug_mode:
+                    batch_result_count = len(batch_results) if batch_results else 0
+                    _debug_print(
+                        f"Default query completed: {batch_result_count} results", 
+                        "BATCH"
+                    )
+                    
+        except Exception as e:
+            from .utils import _debug_print
+            _debug_print(f"=== ERROR in Batch {batch_index + 1} ===", "ERROR")
+            _debug_print(f"Entity type: {entity_name}", "ERROR")
+            _debug_print(f"Batch size: {len(batch_ids)} IDs", "ERROR")
+            _debug_print(f"Error message: {str(e)}", "ERROR")
+            _debug_print(f"Error type: {type(e).__name__}", "ERROR")
+            if self.config.debug_mode:
+                import traceback
+                _debug_print(f"Full traceback:\n{traceback.format_exc()}", "ERROR")
+            raise
+        
+        batch_count = len(batch_results) if batch_results else 0
+        if self.config.debug_mode:
+            from .utils import _debug_print
+            _debug_print(
+                f"=== Batch {batch_index + 1} Summary ===", "BATCH"
+            )
+            _debug_print(f"Results returned: {batch_count}", "BATCH")
+            _debug_print("Batch processing complete", "BATCH")
+        
+        return batch_results
+    
+    def _warn_if_large_sync_request(self, query, batch_index: int, entity_name: str):
+        """Warn if this batch might require cursor pagination (>10k results)."""
+        try:
+            # Quick count check - only do this for the first batch to avoid overhead
+            if batch_index == 0:
+                count = query.count()
+                if count > 10000:
+                    typer.echo(
+                        f"⚠️  WARNING: Batch processing detected large result set "
+                        f"({count:,} {entity_name})", 
+                        err=True
+                    )
+                    typer.echo(
+                        "   This will use synchronous (non-async) requests with "
+                        "cursor pagination, which may be slower.", 
+                        err=True
+                    )
+                    typer.echo(
+                        "   Consider using async methods or filtering to reduce "
+                        "result size.",
+                        err=True
+                    )
+                    
+                    if self.config.debug_mode:
+                        from .utils import _debug_print
+                        _debug_print(
+                            f"Large result set warning issued for batch processing: "
+                            f"{count:,} total {entity_name}", "WARNING"
+                        )
+        except Exception:
+            # If count check fails, silently continue - don't break the batch processing
+            if self.config.debug_mode:
+                from .utils import _debug_print
+                _debug_print(
+                    "Could not check count for large result set warning", "WARNING"
+                )
+
     def _execute_concurrent_batches(
         self,
         id_list: List[str],
@@ -474,13 +642,23 @@ class BatchProcessor:
         """Execute batches concurrently using standard library."""
         from .utils import _add_abstract_to_work
         
+        num_batches = (
+            (len(id_list) + self.config.batch_size - 1) 
+            // self.config.batch_size
+        )
+        
         if not json_path:
-            num_batches = (len(id_list) + self.config.batch_size - 1) // self.config.batch_size
             typer.echo(
                 f"Processing {len(id_list)} {entity_name} "
-                f"in {num_batches} batches (concurrent)...", 
+                f"in {num_batches} batches...", 
                 err=True
             )
+            if num_batches > 10:
+                typer.echo(
+                    f"Note: Large number of batches ({num_batches}) "
+                    f"may take several minutes",
+                    err=True
+                )
         
         # Check if this is a grouped query by examining a test query
         has_group_by = False
@@ -491,53 +669,100 @@ class BatchProcessor:
         
         batch_results_list = []
         
-        # Process in batches
-        for i in range(0, len(id_list), self.config.batch_size):
-            batch_ids = id_list[i:i + self.config.batch_size]
-            batch_index = i // self.config.batch_size
-            
-            if self.config.debug_mode:
-                typer.echo(
-                    f"[DEBUG] Processing batch {batch_index + 1}: {len(batch_ids)} {entity_name}",
-                    err=True
+        # Import rich progress here to avoid issues if rich is not available
+        try:
+            from rich.progress import (
+                BarColumn, Progress, SpinnerColumn, 
+                TextColumn, TimeElapsedColumn
+            )
+            rich_available = True
+        except ImportError:
+            rich_available = False
+        
+        # Use rich progress bar if available and not in debug mode
+        if rich_available and not self.config.debug_mode:
+            # Create simple progress display with just batch-level progress
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TextColumn("({task.completed}/{task.total})"),
+                TimeElapsedColumn(),
+                expand=True
+            ) as progress:
+                # Single progress bar across batches
+                batch_task_id = progress.add_task(
+                    f"Processing {entity_name} batches", 
+                    total=num_batches
                 )
-            
-            # Create query for this batch
-            batch_query = create_query_func(batch_ids)
-            
-            if self.config.debug_mode:
-                typer.echo(f"[DEBUG] Batch API URL: {batch_query.url}", err=True)
-            
-            # Execute the batch query
-            if all_results:
-                # Get all results for this batch using pagination with progress bar
-                from .utils import _paginate_with_progress
-                batch_name = f"{entity_name} (batch {batch_index + 1})"
-                batch_results = _paginate_with_progress(batch_query, batch_name)
-            elif limit is not None:
-                batch_results = batch_query.get(limit=limit)
-            else:
-                batch_results = batch_query.get()  # Default first page
-            
-            if batch_results:
-                batch_results_list.append((batch_results, batch_index))
-            
-            if self.config.debug_mode:
-                batch_count = len(batch_results) if batch_results else 0
-                typer.echo(
-                    f"[DEBUG] Batch {batch_index + 1} returned {batch_count} results", 
-                    err=True
+                
+                # Process in batches with simple progress
+                for i in range(0, len(id_list), self.config.batch_size):
+                    batch_ids = id_list[i:i + self.config.batch_size]
+                    batch_index = i // self.config.batch_size
+                    
+                    # Update progress description for current batch
+                    batch_desc = (
+                        f"Processing batch {batch_index + 1}/{num_batches}: "
+                        f"{len(batch_ids)} {entity_name}"
+                    )
+                    progress.update(batch_task_id, description=batch_desc)
+                    
+                    batch_results = self._execute_single_batch(
+                        batch_ids, batch_index, create_query_func, entity_name,
+                        all_results, limit
+                    )
+                    
+                    if batch_results:
+                        batch_results_list.append((batch_results, batch_index))
+                    
+                    # Update progress after batch completion
+                    progress.update(batch_task_id, advance=1)
+        else:
+            # Fallback to simple text progress or debug mode
+            for i in range(0, len(id_list), self.config.batch_size):
+                batch_ids = id_list[i:i + self.config.batch_size]
+                batch_index = i // self.config.batch_size
+                
+                if self.config.debug_mode:
+                    from .utils import _debug_print
+                    _debug_print(
+                        f"Processing batch {batch_index + 1}: "
+                        f"{len(batch_ids)} {entity_name}",
+                        "BATCH"
+                    )
+                else:
+                    # Non-debug mode: show progress for large batch operations
+                    if num_batches > 5:
+                        typer.echo(
+                            f"Processing batch {batch_index + 1}/{num_batches}...",
+                            err=True
+                        )
+                
+                batch_results = self._execute_single_batch(
+                    batch_ids, batch_index, create_query_func, entity_name,
+                    all_results, limit
                 )
+                
+                if batch_results:
+                    batch_results_list.append((batch_results, batch_index))
         
         # Merge results after all batches are processed
         if has_group_by:
-            combined_results = self.result_merger.merge_grouped_results(batch_results_list)
+            combined_results = self.result_merger.merge_grouped_results(
+                batch_results_list
+            )
         else:
-            combined_results = self.result_merger.merge_entity_results(batch_results_list)
+            combined_results = self.result_merger.merge_entity_results(
+                batch_results_list
+            )
         
         # Convert abstracts for works if needed
         if 'works' in entity_name.lower():
-            combined_results = [_add_abstract_to_work(work) for work in combined_results]
+            combined_results = [
+                _add_abstract_to_work(work) for work in combined_results
+            ]
         
         # Create a result object similar to what query.get() returns
         if combined_results:
@@ -581,7 +806,8 @@ def register_batch_filter(filter_key: str, filter_path: str, id_field: str = "id
 def add_id_list_option_to_command(
     query, option_value: str, filter_config_key: str, entity_class
 ):
-    """Helper function to easily add ID list handling to any command (backward compatibility)."""
+    """Helper function to easily add ID list handling to any command 
+    (backward compatibility)."""
     return _global_processor.add_id_list_option_to_command(
         query, option_value, filter_config_key, entity_class
     )
