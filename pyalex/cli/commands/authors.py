@@ -36,6 +36,10 @@ def create_authors_command(app):
             help="Filter by institution OpenAlex ID(s). Use comma-separated values for "
                  "OR logic (e.g., --institution-ids 'I123,I456,I789')"
         )] = None,
+        orcid: Annotated[Optional[str], typer.Option(
+            "--orcid",
+            help="Filter by ORCID (e.g., '0000-0002-3748-6564')"
+        )] = None,
         works_count: Annotated[Optional[str], typer.Option(
             "--works-count",
             help="Filter by works count. Use single value (e.g., '100') or "
@@ -121,6 +125,7 @@ def create_authors_command(app):
                          --sort-by "cited_by_count:desc"
           pyalex authors --group-by "has_orcid"
           pyalex authors --sample 25 --seed 456
+          pyalex authors --orcid "0000-0002-3748-6564"
         """
         try:
             # Check for mutually exclusive options
@@ -148,6 +153,8 @@ def create_authors_command(app):
                 query = add_id_list_option_to_command(
                     query, institution_ids, 'authors_institution', Authors
                 )
+            if orcid:
+                query = query.filter(orcid=orcid)
             
             if works_count:
                 parsed_works_count = parse_range_filter(works_count)

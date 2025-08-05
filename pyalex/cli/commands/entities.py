@@ -21,6 +21,7 @@ from ..utils import _dry_run_mode
 from ..utils import _handle_cli_exception
 from ..utils import _output_grouped_results
 from ..utils import _output_results
+from ..utils import _paginate_with_progress
 from ..utils import _print_debug_results
 from ..utils import _print_debug_url
 from ..utils import _print_dry_run_query
@@ -128,13 +129,13 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 return
             
             if all_results:
-                limit_to_use = None
+                # Get all results using pagination with progress bar
+                results = _paginate_with_progress(query, entity_name_lower)
             elif limit is not None:
-                limit_to_use = limit
+                results = query.get(limit=limit)
             else:
-                limit_to_use = 25
+                results = query.get()  # Default first page
             
-            results = query.get(limit=limit_to_use)
             _print_debug_results(results)
             _output_results(results, effective_json_path)
                 
