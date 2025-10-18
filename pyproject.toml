@@ -15,7 +15,16 @@ classifiers = [
     "Programming Language :: Python :: 3.12"
 ]
 license = {text = "MIT"}
-dependencies = ["requests", "urllib3", "typer", "prettytable", "rich", "aiohttp", "asyncio"]
+dependencies = [
+    "requests",
+ "urllib3",
+ "typer",
+ "prettytable",
+ "rich",
+ "aiohttp",
+ "asyncio",
+ "httpx>=0.28.1",
+]
 dynamic = ["version"]
 requires-python = ">=3.8"
 
