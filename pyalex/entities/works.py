@@ -1,9 +1,9 @@
 """Work entities for OpenAlex API."""
 
+import asyncio
 import warnings
 
 from pyalex.client.auth import OpenAlexAuth
-from pyalex.client.session import get_requests_session
 from pyalex.core.config import config
 from pyalex.core.response import OpenAlexResponseList
 from pyalex.core.utils import invert_abstract
@@ -21,6 +21,8 @@ class Work(dict):
 
     def ngrams(self, return_meta=False):
         """Get n-grams for the work.
+        
+        Uses async requests internally for optimal performance.
 
         Parameters
         ----------
@@ -35,9 +37,14 @@ class Work(dict):
         openalex_id = self["id"].split("/")[-1]
         n_gram_url = f"{config.openalex_url}/works/{openalex_id}/ngrams"
 
-        res = get_requests_session().get(n_gram_url, auth=OpenAlexAuth(config))
-        res.raise_for_status()
-        results = res.json()
+        # Use async method internally
+        async def fetch_ngrams():
+            from pyalex.client.httpx_session import async_get_with_retry, get_async_client
+            async with await get_async_client() as client:
+                results = await async_get_with_retry(client, n_gram_url)
+                return results
+        
+        results = asyncio.run(fetch_ngrams())
 
         resp_list = OpenAlexResponseList(results["ngrams"], results["meta"])
 

@@ -12,7 +12,8 @@ from typing import Optional
 import typer
 from prettytable import PrettyTable
 
-from pyalex import config, invert_abstract
+from pyalex import config
+from pyalex import invert_abstract
 from pyalex.core.config import MAX_PER_PAGE
 from pyalex.logger import get_logger
 
@@ -26,7 +27,12 @@ _batch_size = config.cli_batch_size
 
 
 def _debug_print(message: str, level: str = "INFO"):
-    """Print colored debug messages when debug mode is enabled."""
+    """Print colored debug messages when debug mode is enabled.
+    
+    Args:
+        message: The message to print.
+        level: The log level (ERROR, WARNING, INFO, SUCCESS, STRATEGY, ASYNC, BATCH).
+    """
     if not _debug_mode:
         return
     
@@ -59,56 +65,97 @@ _progress_depth = 0
 MAX_WIDTH = config.cli_max_width
 
 
-def set_global_state(debug_mode: bool, dry_run_mode: bool, batch_size: int):
-    """Set global state from main CLI configuration."""
+def set_global_state(debug_mode: bool, dry_run_mode: bool, batch_size: int) -> None:
+    """Set global state from main CLI configuration.
+    
+    Args:
+        debug_mode: Whether debug mode is enabled.
+        dry_run_mode: Whether dry run mode is enabled.
+        batch_size: The batch size for processing.
+    """
     global _debug_mode, _dry_run_mode, _batch_size
     _debug_mode = debug_mode
     _dry_run_mode = dry_run_mode
     _batch_size = batch_size
 
 
-def set_batch_progress_context(progress_context):
-    """Set the active batch progress context to prevent conflicts."""
+def set_batch_progress_context(progress_context: Optional[any]) -> None:
+    """Set the active batch progress context to prevent conflicts.
+    
+    Args:
+        progress_context: The progress context to set.
+    """
     global _batch_progress_context
     _batch_progress_context = progress_context
 
 
-def get_batch_progress_context():
-    """Get the active batch progress context."""
+def get_batch_progress_context() -> Optional[any]:
+    """Get the active batch progress context.
+    
+    Returns:
+        The active batch progress context, or None if not set.
+    """
     return _batch_progress_context
 
 
-def is_in_batch_context():
-    """Check if we're currently in a batch processing context."""
+def is_in_batch_context() -> bool:
+    """Check if we're currently in a batch processing context.
+    
+    Returns:
+        True if in batch context, False otherwise.
+    """
     return _batch_progress_context is not None
 
 
-def _enter_progress_context():
-    """Enter a progress context, tracking depth."""
+def _enter_progress_context() -> int:
+    """Enter a progress context, tracking depth.
+    
+    Returns:
+        The current progress depth.
+    """
     global _progress_depth
     _progress_depth += 1
     return _progress_depth
 
 
-def _exit_progress_context():
-    """Exit a progress context, tracking depth."""
+def _exit_progress_context() -> int:
+    """Exit a progress context, tracking depth.
+    
+    Returns:
+        The current progress depth.
+    """
     global _progress_depth
     _progress_depth = max(0, _progress_depth - 1)
     return _progress_depth
 
 
-def _is_progress_active():
-    """Check if any progress context is currently active."""
+def _is_progress_active() -> bool:
+    """Check if any progress context is currently active.
+    
+    Returns:
+        True if progress is active, False otherwise.
+    """
     return _progress_depth > 0 or is_in_batch_context()
 
 
-def _should_show_progress():
-    """Determine if we should show a new progress display."""
+def _should_show_progress() -> bool:
+    """Determine if we should show a new progress display.
+    
+    Returns:
+        True if progress should be shown, False otherwise.
+    """
     return not _is_progress_active()
 
 
 def _simple_paginate_all(query):
-    """Simple pagination to get all results without progress display."""
+    """Simple pagination to get all results without progress display.
+    
+    Args:
+        query: The query object to paginate.
+        
+    Returns:
+        OpenAlexResponseList containing all results.
+    """
     paginator = query.paginate(method="cursor", cursor="*", per_page=MAX_PER_PAGE)
     all_results = []
     for batch in paginator:
@@ -124,9 +171,8 @@ def _simple_paginate_all(query):
         return OpenAlexResponseList([], {"count": 0})
 
 
-def parse_range_filter(value: str):
-    """
-    Parse range or single value for filtering.
+def parse_range_filter(value: str) -> Optional[str]:
+    """Parse range or single value for filtering.
     
     Supports formats:
     - "100" -> exact value 100
@@ -134,8 +180,14 @@ def parse_range_filter(value: str):
     - ":1000" -> less than or equal to 1000  
     - "100:" -> greater than or equal to 100
     
+    Args:
+        value: The range or value to parse.
+    
     Returns:
-        str: Formatted filter value for OpenAlex API
+        Formatted filter value for OpenAlex API, or None if value is empty.
+    
+    Raises:
+        ValueError: If the value format is invalid or contains non-numeric values.
     """
     if not value:
         return None
@@ -184,22 +236,15 @@ def parse_range_filter(value: str):
 
 
 def apply_range_filter(query, field_name, parsed_value):
-    """
-    Apply a parsed range filter to a query object.
+    """Apply a parsed range filter to a query object.
     
-    Parameters
-    ----------
-    query : BaseOpenAlex
-        The query object to apply the filter to
-    field_name : str
-        The field name to filter on (e.g., 'works_count', 'summary_stats.h_index')
-    parsed_value : str
-        The parsed filter value from parse_range_filter
+    Args:
+        query: The query object to apply the filter to.
+        field_name: The field name to filter on (e.g., 'works_count', 'summary_stats.h_index').
+        parsed_value: The parsed filter value from parse_range_filter.
         
-    Returns
-    -------
-    BaseOpenAlex
-        Updated query object
+    Returns:
+        The updated query object.
     """
     if not parsed_value:
         return query
@@ -231,7 +276,11 @@ def apply_range_filter(query, field_name, parsed_value):
 
 
 def _print_debug_url(query):
-    """Print the constructed URL for debugging when verbose mode is enabled."""
+    """Print the constructed URL for debugging when verbose mode is enabled.
+    
+    Args:
+        query: The query object containing the URL to print.
+    """
     if _debug_mode:
         from pyalex.logger import log_api_request
         log_api_request(query.url)
@@ -255,13 +304,72 @@ def _print_dry_run_query(query_description, url=None, estimated_queries=None):
 
 
 def _handle_cli_exception(e: Exception) -> None:
-    """Handle CLI exceptions with optional debug logging."""
+    """
+    Handle CLI exceptions with specific error types and better messages.
+    
+    Args:
+        e: Exception to handle
+    """
+    from pyalex.exceptions import (
+        PyAlexException, NetworkError, APIError, RateLimitError,
+        ValidationError, ConfigurationError, QueryError, DataError, CLIError
+    )
+    
     if _debug_mode:
         from pyalex.logger import get_logger
         logger = get_logger()
         logger.debug("Full traceback:", exc_info=True)
-    typer.echo(f"Error: {e}", err=True)
-    raise typer.Exit(1) from e
+    
+    # Handle specific exception types with better messages
+    if isinstance(e, RateLimitError):
+        typer.echo(f"❌ Rate Limit Error: {e.message}", err=True)
+        if hasattr(e, 'retry_after') and e.retry_after:
+            typer.echo(f"   Please wait {e.retry_after} seconds before retrying.", err=True)
+        typer.echo("   Tip: Set OPENALEX_RATE_LIMIT in .env to reduce request rate.", err=True)
+    elif isinstance(e, NetworkError):
+        typer.echo(f"❌ Network Error: {e.message}", err=True)
+        if e.url:
+            typer.echo(f"   URL: {e.url}", err=True)
+        typer.echo("   Please check your internet connection and try again.", err=True)
+    elif isinstance(e, APIError):
+        typer.echo(f"❌ API Error: {e.message}", err=True)
+        if e.status_code:
+            typer.echo(f"   Status Code: {e.status_code}", err=True)
+        if e.url:
+            typer.echo(f"   URL: {e.url}", err=True)
+    elif isinstance(e, ValidationError):
+        typer.echo(f"❌ Validation Error: {e.message}", err=True)
+        if e.field:
+            typer.echo(f"   Field: {e.field}", err=True)
+        if e.value:
+            typer.echo(f"   Invalid value: {e.value}", err=True)
+    elif isinstance(e, ConfigurationError):
+        typer.echo(f"❌ Configuration Error: {e.message}", err=True)
+        if e.config_key:
+            typer.echo(f"   Key: {e.config_key}", err=True)
+        typer.echo("   Tip: Check your .env file or environment variables.", err=True)
+    elif isinstance(e, QueryError):
+        typer.echo(f"❌ Query Error: {e.message}", err=True)
+        if e.query:
+            typer.echo(f"   Query: {e.query}", err=True)
+    elif isinstance(e, DataError):
+        typer.echo(f"❌ Data Error: {e.message}", err=True)
+        if e.data_type:
+            typer.echo(f"   Data type: {e.data_type}", err=True)
+    elif isinstance(e, CLIError):
+        typer.echo(f"❌ CLI Error: {e.message}", err=True)
+        if e.command:
+            typer.echo(f"   Command: {e.command}", err=True)
+    elif isinstance(e, PyAlexException):
+        # Generic PyAlex exception
+        typer.echo(f"❌ Error: {e.message}", err=True)
+        if e.details:
+            typer.echo(f"   {e.details}", err=True)
+    else:
+        # Unknown exception type
+        typer.echo(f"❌ Unexpected Error: {str(e)}", err=True)
+    
+    # Don't raise typer.Exit here - let the caller handle it
 
 
 def _clean_ids(id_list, url_prefix='https://openalex.org/'):
@@ -276,12 +384,11 @@ def _clean_ids(id_list, url_prefix='https://openalex.org/'):
 
 
 async def _async_retrieve_entities(entity_class, ids, class_name):
-    """Async function to retrieve entities by IDs using batch requests."""
-    try:
-        from pyalex.client.async_session import async_batch_requests
-    except ImportError:
-        # Fall back to sync processing if aiohttp not available
-        return _sync_retrieve_entities(entity_class, ids, class_name)
+    """Async function to retrieve entities by IDs using batch requests.
+    
+    Exclusively uses async requests (httpx) - no sync fallbacks.
+    """
+    from pyalex.client.httpx_session import async_batch_requests
     
     # Calculate number of batches
     num_batches = (len(ids) + _batch_size - 1) // _batch_size
@@ -311,7 +418,10 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
     if num_batches > 1 and not _debug_mode:
         # Try to use rich progress
         try:
-            from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+            from rich.progress import BarColumn
+            from rich.progress import Progress
+            from rich.progress import SpinnerColumn
+            from rich.progress import TextColumn
             
             with Progress(
                 SpinnerColumn(),
@@ -358,96 +468,6 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
     # Convert abstracts for works if requested
     if class_name == 'Works':
         all_results = [_add_abstract_to_work(work) for work in all_results]
-    
-    return all_results
-
-
-def _sync_retrieve_entities(entity_class, ids, class_name):
-    """Sync fallback for entity retrieval."""
-    all_results = []
-    
-    # Calculate number of batches
-    num_batches = (len(ids) + _batch_size - 1) // _batch_size
-    
-    # Use rich progress bar if available and not in debug mode
-    rich_available = False
-    if num_batches > 1:  # Only show progress for multiple batches
-        try:
-            from rich.progress import BarColumn, Progress, TextColumn
-            rich_available = True
-            print("DEBUG: Rich progress available")
-        except ImportError:
-            print("DEBUG: Rich not available")
-            rich_available = False
-    
-    # Process IDs in batches using configurable batch size
-    if rich_available and not _debug_mode:
-        with Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TextColumn("({task.completed}/{task.total})")
-        ) as progress:
-            task_id = progress.add_task(
-                f"Processing {class_name} batches", 
-                total=num_batches
-            )
-            
-            for i in range(0, len(ids), _batch_size):
-                batch_ids = ids[i:i + _batch_size]
-                
-                if len(batch_ids) == 1:
-                    # Single ID - use direct retrieval
-                    batch_results = entity_class()[batch_ids[0]]
-                    if not isinstance(batch_results, list):
-                        batch_results = [batch_results]
-                else:
-                    # Multiple IDs - use OR operator for batch retrieval
-                    id_filter = "|".join(batch_ids)
-                    batch_results = entity_class().filter(openalex_id=id_filter).get()
-                
-                # Handle results
-                if batch_results:
-                    # Convert abstracts for works if requested
-                    if class_name == 'Works':
-                        batch_results = [
-                            _add_abstract_to_work(work) for work in batch_results
-                        ]
-                    
-                    all_results.extend(batch_results)
-                
-                progress.update(task_id, advance=1)
-    else:
-        # Fallback: no progress bar or debug mode
-        for i in range(0, len(ids), _batch_size):
-            batch_ids = ids[i:i + _batch_size]
-            
-            if len(batch_ids) == 1:
-                # Single ID - use direct retrieval
-                batch_results = entity_class()[batch_ids[0]]
-                if not isinstance(batch_results, list):
-                    batch_results = [batch_results]
-            else:
-                # Multiple IDs - use OR operator for batch retrieval
-                id_filter = "|".join(batch_ids)
-                batch_results = entity_class().filter(openalex_id=id_filter).get()
-            
-            # Handle results
-            if batch_results:
-                # Convert abstracts for works if requested
-                if class_name == 'Works':
-                    batch_results = [
-                        _add_abstract_to_work(work) for work in batch_results
-                    ]
-                
-                all_results.extend(batch_results)
-            
-            if _debug_mode and len(ids) > _batch_size:
-                _debug_print(
-                    f"Processed batch {i//_batch_size + 1} "
-                    f"({len(batch_ids)} IDs)", 
-                    category="BATCH"
-                )
     
     return all_results
 
@@ -519,7 +539,7 @@ def _execute_query_with_progress(query, all_results=False, limit=None, entity_na
         elif limit:
             return query[:limit]
         else:
-            return query.get()
+            return asyncio.run(query.get())
     
     # Enter progress context and show progress
     _enter_progress_context()
@@ -568,17 +588,12 @@ def _execute_query_with_progress(query, all_results=False, limit=None, entity_na
                 _debug_print("Strategy: Single page sufficient (already fetched)", "STRATEGY")
             return first_page_results[:effective_limit]
         
-        # Strategy selection based on count
-        if effective_limit <= 10000:
-            if _debug_mode:
-                _debug_print("Strategy: Async pagination (≤10k results)", "STRATEGY")
-            return _execute_async_with_progress(
-                query, effective_limit, entity_name, first_page_results
-            )
-        else:
-            if _debug_mode:
-                _debug_print("Strategy: Sync pagination (>10k results)", "STRATEGY")
-            return _sync_paginate_with_progress(query, entity_name)
+        # Always use async pagination - no sync fallbacks
+        if _debug_mode:
+            _debug_print(f"Strategy: Async pagination ({effective_limit:,} results)", "STRATEGY")
+        return _execute_async_with_progress(
+            query, effective_limit, entity_name, first_page_results
+        )
         
     finally:
         _exit_progress_context()
@@ -592,7 +607,9 @@ def _show_simple_progress(description, current, total):
         return
         
     try:
-        from rich.progress import Progress, SpinnerColumn, TextColumn
+        from rich.progress import Progress
+        from rich.progress import SpinnerColumn
+        from rich.progress import TextColumn
         with Progress(
             SpinnerColumn(), 
             TextColumn(f"[bold blue]{description}...")
@@ -672,7 +689,7 @@ async def _async_paginate_optimized(
             return first_page_results[:effective_limit]
         
         # Get remaining results without progress display
-        remaining_results = await query.get_async(limit=remaining_needed)
+        remaining_results = await query.get(limit=remaining_needed)
         all_results = first_page_results + list(remaining_results)
         return all_results[:effective_limit]
 
@@ -709,7 +726,7 @@ async def _async_paginate_optimized(
     except AttributeError:
         # Fallback if _get_async_basic_paging is not available
         logger.info(f"Fetching remaining {remaining_needed:,} {entity_name}...")
-        remaining_results = await query.get_async(limit=remaining_needed)
+        remaining_results = await query.get(limit=remaining_needed)
         all_results = first_page_results + list(remaining_results)
         return all_results[:effective_limit]
 
@@ -748,128 +765,11 @@ def _paginate_with_progress(query, entity_type_name="results"):
 
 
 def _execute_query_smart(query, all_results=False, limit=None):
-    """Execute query using the unified progress system."""
+    """Execute query using the unified progress system.
+    
+    Exclusively uses async requests - no sync fallbacks.
+    """
     return _execute_query_with_progress(query, all_results, limit, "results")
-
-
-def _sync_paginate_with_progress(query, entity_type_name):
-    """Sync pagination with progress bar (original implementation)."""
-    # If we're in a batch context, don't create competing progress displays
-    if is_in_batch_context():
-        if _debug_mode:
-            logger.debug(f"Sync paginate in batch context for {entity_type_name}")
-        # Just return results without progress display
-        paginator = query.paginate(method="cursor", cursor="*", per_page=MAX_PER_PAGE)
-        all_results = []
-        for batch in paginator:
-            if not batch:
-                break
-            all_results.extend(batch)
-        
-        if all_results:
-            from pyalex.core.response import OpenAlexResponseList
-            return OpenAlexResponseList(all_results, {"count": len(all_results)})
-        else:
-            from pyalex.core.response import OpenAlexResponseList
-            return OpenAlexResponseList([], {"count": 0})
-    
-    # Normal progress display for non-batch context
-    try:
-        from rich.progress import (
-            Progress, SpinnerColumn, TextColumn, BarColumn, 
-            MofNCompleteColumn, TimeElapsedColumn
-        )
-        use_rich = True
-    except ImportError:
-        from tqdm import tqdm
-        use_rich = False
-    
-    # Use the paginate method directly to get all results
-    # Start with cursor pagination to get the total count
-    paginator = query.paginate(
-        method="cursor", 
-        cursor="*", 
-        per_page=MAX_PER_PAGE
-    )
-    
-    all_results = []
-    total_count = None
-    progress_bar = None
-    progress = None
-    task_id = None
-    
-    try:
-        if use_rich:
-            progress = Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                MofNCompleteColumn(),
-                TimeElapsedColumn(),
-            )
-            progress.start()
-        
-        for i, batch in enumerate(paginator):
-            if not batch:
-                break
-                
-            # Set up progress bar after first batch when we know the total
-            if (i == 0 and hasattr(batch, 'meta') and 
-                batch.meta and 'count' in batch.meta):
-                total_count = batch.meta['count']
-                progress_desc = f"Fetching {entity_type_name}"
-                
-                if use_rich:
-                    task_id = progress.add_task(progress_desc, total=total_count)
-                else:
-                    progress_bar = tqdm(
-                        total=total_count,
-                        desc=progress_desc,
-                        unit=" results",
-                        initial=0
-                    )
-            
-            all_results.extend(batch)
-            
-            if use_rich and task_id is not None:
-                progress.update(task_id, advance=len(batch))
-            elif progress_bar:
-                progress_bar.update(len(batch))
-                
-            # Stop if we've collected enough results
-            if total_count and len(all_results) >= total_count:
-                break
-                
-    finally:
-        if use_rich and progress:
-            progress.stop()
-        elif progress_bar:
-            progress_bar.close()
-    
-    # Create a result object similar to what query.get() returns
-    if all_results:
-        from pyalex.core.response import OpenAlexResponseList
-        # Use the same resource classes as the first batch
-        first_batch = next(iter([batch for batch in [all_results[:1]] if batch]), None)
-        if first_batch and hasattr(first_batch[0], '__class__'):
-            # Try to get resource class from the results structure
-            resource_class = getattr(paginator.endpoint_class, 'resource_class', None)
-            resource_entity_class = getattr(
-                paginator.endpoint_class, 'resource_entity_class', None
-            )
-        else:
-            resource_class = None
-            resource_entity_class = None
-            
-        return OpenAlexResponseList(
-            all_results, 
-            {"count": len(all_results)}, 
-            resource_class,
-            resource_entity_class
-        )
-    else:
-        from pyalex.core.response import OpenAlexResponseList
-        return OpenAlexResponseList([], {"count": 0})
 
 
 def _add_abstract_to_work(work_dict):

@@ -8,6 +8,7 @@ import typer
 from typing_extensions import Annotated
 
 from pyalex import config
+
 from . import batch
 from . import utils
 
@@ -58,12 +59,12 @@ def main(
 
 
 # Import and register individual commands
-from .commands.works import create_works_command
 from .commands.authors import create_authors_command
-from .commands.institutions import create_institutions_command
-from .commands.funders import create_funders_command
-from .commands.utils import create_utils_commands
 from .commands.entities import create_entity_commands
+from .commands.funders import create_funders_command
+from .commands.institutions import create_institutions_command
+from .commands.utils import create_utils_commands
+from .commands.works import create_works_command
 
 # Register all commands
 create_works_command(app)

@@ -13,13 +13,22 @@ import typer
 from typing_extensions import Annotated
 
 from pyalex import Authors
-from ..batch import add_id_list_option_to_command, _handle_large_id_list
-from ..utils import (
-    _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
-    _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _debug_mode, _dry_run_mode, parse_range_filter, apply_range_filter,
-    _paginate_with_progress, _execute_query_smart
-)
+
+from ..batch import _handle_large_id_list
+from ..batch import add_id_list_option_to_command
+from ..utils import _debug_mode
+from ..utils import _dry_run_mode
+from ..utils import _execute_query_smart
+from ..utils import _handle_cli_exception
+from ..utils import _output_grouped_results
+from ..utils import _output_results
+from ..utils import _paginate_with_progress
+from ..utils import _print_debug_results
+from ..utils import _print_debug_url
+from ..utils import _print_dry_run_query
+from ..utils import _validate_and_apply_common_options
+from ..utils import apply_range_filter
+from ..utils import parse_range_filter
 
 
 def create_authors_command(app):

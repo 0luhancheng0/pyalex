@@ -2,11 +2,12 @@
 """
 Tests for PyAlex CLI
 """
-import subprocess
 import json
-import pytest
-import tempfile
 import os
+import subprocess
+import tempfile
+
+import pytest
 
 
 def test_cli_help():

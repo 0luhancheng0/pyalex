@@ -1,40 +1,37 @@
 """Utility functions for PyAlex."""
 
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
 from urllib.parse import quote_plus
 
 
-def invert_abstract(inv_index):
+def invert_abstract(inv_index: Optional[Dict[str, List[int]]]) -> Optional[str]:
     """Invert OpenAlex abstract index.
 
-    Parameters
-    ----------
-    inv_index : dict
-        Inverted index of the abstract.
+    Args:
+        inv_index: Inverted index of the abstract.
 
-    Returns
-    -------
-    str
-        Inverted abstract.
+    Returns:
+        Inverted abstract, or None if inv_index is None.
     """
     if inv_index is not None:
         l_inv = [(w, p) for w, pos in inv_index.items() for p in pos]
         return " ".join(map(lambda x: x[0], sorted(l_inv, key=lambda x: x[1])))
+    return None
 
 
-def quote_oa_value(v):
+def quote_oa_value(v: Any) -> Any:
     """Prepare a value for the OpenAlex API.
 
     Applies URL encoding to strings and converts booleans to lowercase strings.
 
-    Parameters
-    ----------
-    v : any
-        Value to be prepared.
+    Args:
+        v: Value to be prepared.
 
-    Returns
-    -------
-    any
-        Prepared value.
+    Returns:
+        Prepared value suitable for OpenAlex API.
     """
     from pyalex.core.expressions import _LogicalExpression
     

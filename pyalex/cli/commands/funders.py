@@ -8,12 +8,19 @@ import typer
 from typing_extensions import Annotated
 
 from pyalex import Funders
-from ..utils import (
-    _validate_and_apply_common_options, _print_debug_url, _print_debug_results,
-    _print_dry_run_query, _output_results, _output_grouped_results,
-    _handle_cli_exception, _dry_run_mode, parse_range_filter, apply_range_filter,
-    _paginate_with_progress, _execute_query_smart
-)
+
+from ..utils import _dry_run_mode
+from ..utils import _execute_query_smart
+from ..utils import _handle_cli_exception
+from ..utils import _output_grouped_results
+from ..utils import _output_results
+from ..utils import _paginate_with_progress
+from ..utils import _print_debug_results
+from ..utils import _print_debug_url
+from ..utils import _print_dry_run_query
+from ..utils import _validate_and_apply_common_options
+from ..utils import apply_range_filter
+from ..utils import parse_range_filter
 
 
 def create_funders_command(app):

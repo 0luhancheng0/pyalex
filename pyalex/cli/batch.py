@@ -5,16 +5,21 @@ This module contains configurations and classes for handling large ID lists
 that need to be processed in batches for better performance and API compliance.
 """
 
+import asyncio
 import copy
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-
-import typer
-
+from typing import Any
+from typing import Callable
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Set
+from typing import Tuple
 
 import httpx
-
+import typer
 
 from pyalex import config
 
@@ -501,11 +506,7 @@ class BatchProcessor:
                 "BATCH"
             )
         
-        # Check for large result set warning
-        if all_results:
-            self._warn_if_large_sync_request(batch_query, batch_index, entity_name)
-        
-        # Execute the batch query
+        # Execute the batch query (using async pagination)
         try:
             if all_results:
                 # Get all results for this batch using pagination
@@ -548,7 +549,7 @@ class BatchProcessor:
                         f"Executing limited query for batch {batch_index + 1} "
                         f"with limit={limit}", "BATCH"
                     )
-                batch_results = batch_query.get(limit=limit)
+                batch_results = asyncio.run(batch_query.get(limit=limit))
                 if self.config.debug_mode:
                     batch_result_count = len(batch_results) if batch_results else 0
                     _debug_print(
@@ -562,7 +563,7 @@ class BatchProcessor:
                         f"Executing default query for batch {batch_index + 1} "
                         "(first page only)", "BATCH"
                     )
-                batch_results = batch_query.get()  # Default first page
+                batch_results = asyncio.run(batch_query.get())  # Default first page
                 if self.config.debug_mode:
                     batch_result_count = len(batch_results) if batch_results else 0
                     _debug_print(
@@ -592,43 +593,6 @@ class BatchProcessor:
             _debug_print("Batch processing complete", "BATCH")
         
         return batch_results
-    
-    def _warn_if_large_sync_request(self, query, batch_index: int, entity_name: str):
-        """Warn if this batch might require cursor pagination (>10k results)."""
-        try:
-            # Quick count check - only do this for the first batch to avoid overhead
-            if batch_index == 0:
-                count = query.count()
-                if count > 10000:
-                    typer.echo(
-                        f"⚠️  WARNING: Batch processing detected large result set "
-                        f"({count:,} {entity_name})", 
-                        err=True
-                    )
-                    typer.echo(
-                        "   This will use synchronous (non-async) requests with "
-                        "cursor pagination, which may be slower.", 
-                        err=True
-                    )
-                    typer.echo(
-                        "   Consider using async methods or filtering to reduce "
-                        "result size.",
-                        err=True
-                    )
-                    
-                    if self.config.debug_mode:
-                        from .utils import _debug_print
-                        _debug_print(
-                            f"Large result set warning issued for batch processing: "
-                            f"{count:,} total {entity_name}", "WARNING"
-                        )
-        except Exception:
-            # If count check fails, silently continue - don't break the batch processing
-            if self.config.debug_mode:
-                from .utils import _debug_print
-                _debug_print(
-                    "Could not check count for large result set warning", "WARNING"
-                )
 
     def _execute_concurrent_batches(
         self,
@@ -671,10 +635,11 @@ class BatchProcessor:
         
         # Import rich progress here to avoid issues if rich is not available
         try:
-            from rich.progress import (
-                BarColumn, Progress, SpinnerColumn, 
-                TextColumn, TimeElapsedColumn
-            )
+            from rich.progress import BarColumn
+            from rich.progress import Progress
+            from rich.progress import SpinnerColumn
+            from rich.progress import TextColumn
+            from rich.progress import TimeElapsedColumn
             rich_available = True
         except ImportError:
             rich_available = False

@@ -9,10 +9,12 @@ from typing import Optional
 import typer
 from typing_extensions import Annotated
 
-from ..utils import (
-    _clean_ids, _async_retrieve_entities, _sync_retrieve_entities,
-    _output_results, _handle_cli_exception, _debug_mode
-)
+from pyalex.exceptions import CLIError, DataError, ValidationError
+
+from ..utils import _async_retrieve_entities
+from ..utils import _clean_ids
+from ..utils import _handle_cli_exception
+from ..utils import _output_results
 
 
 def from_ids(
@@ -45,7 +47,7 @@ def from_ids(
             data = json.loads(input_data)
         except json.JSONDecodeError as e:
             typer.echo(f"Error: Invalid JSON input: {e}", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from e
         
         # Extract IDs from input
         ids = []
@@ -163,26 +165,21 @@ def from_ids(
             typer.echo(f"Error: Could not determine entity type for '{first_id}'", err=True)
             raise typer.Exit(1)
         
-        # Retrieve entities
-        try:
-            # Try async first for better performance
-            import asyncio
-            try:
-                results = asyncio.run(
-                    _async_retrieve_entities(entity_class, cleaned_ids, class_name)
-                )
-            except ImportError:
-                # Fall back to sync if aiohttp not available
-                results = _sync_retrieve_entities(entity_class, cleaned_ids, class_name)
-        except Exception:
-            # Fall back to sync on any async error
-            results = _sync_retrieve_entities(entity_class, cleaned_ids, class_name)
+        # Retrieve entities using async requests only
+        import asyncio
+        results = asyncio.run(
+            _async_retrieve_entities(entity_class, cleaned_ids, class_name)
+        )
         
         # Output results
         _output_results(results, json_path)
         
+    except (CLIError, DataError, ValidationError) as e:
+        _handle_cli_exception(e)
+        raise typer.Exit(1) from e
     except Exception as e:
         _handle_cli_exception(e)
+        raise typer.Exit(1) from e
 
 
 def show(
@@ -209,7 +206,7 @@ def show(
         # Read JSON data
         if file_path:
             try:
-                with open(file_path, 'r') as f:
+                with open(file_path) as f:
                     data = json.load(f)
             except FileNotFoundError:
                 typer.echo(f"Error: File '{file_path}' not found", err=True)
@@ -253,8 +250,12 @@ def show(
             typer.echo("Error: Input must be a JSON object or array", err=True)
             raise typer.Exit(1)
             
+    except (CLIError, DataError) as e:
+        _handle_cli_exception(e)
+        raise typer.Exit(1) from e
     except Exception as e:
         _handle_cli_exception(e)
+        raise typer.Exit(1) from e
 
 
 def create_utils_commands(app):

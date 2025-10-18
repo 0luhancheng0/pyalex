@@ -11,7 +11,6 @@ from pyalex.core.response import OpenAlexResponseList
 from pyalex.core.utils import invert_abstract
 from pyalex.entities import Author
 from pyalex.entities import Authors
-from pyalex.entities import autocomplete
 from pyalex.entities import Domain
 from pyalex.entities import Domains
 from pyalex.entities import Field
@@ -34,14 +33,15 @@ from pyalex.entities import Topic
 from pyalex.entities import Topics
 from pyalex.entities import Work
 from pyalex.entities import Works
-
-# New utility functions  
-from pyalex.utils import from_id
-from pyalex.utils import get_entity_type
+from pyalex.entities import autocomplete
 
 # Import logging configuration
 from pyalex.logger import get_logger
 from pyalex.logger import setup_logger
+
+# New utility functions  
+from pyalex.utils import from_id
+from pyalex.utils import get_entity_type
 
 __all__ = [
     "Works",

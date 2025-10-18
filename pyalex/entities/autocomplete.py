@@ -3,6 +3,7 @@
 from urllib.parse import quote_plus
 from urllib.parse import urlunparse
 
+from pyalex.core.response import OpenAlexResponseList
 from pyalex.entities.base import BaseOpenAlex
 
 
@@ -16,7 +17,7 @@ class AutocompleteCollection(BaseOpenAlex):
 
     resource_class = Autocomplete
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> OpenAlexResponseList:
         return self._get_from_url(
             urlunparse(
                 (
@@ -31,17 +32,13 @@ class AutocompleteCollection(BaseOpenAlex):
         )
 
 
-def autocomplete(s):
+def autocomplete(s: str) -> OpenAlexResponseList:
     """Autocomplete with any type of entity.
 
-    Parameters
-    ----------
-    s : str
-        String to autocomplete.
+    Args:
+        s: String to autocomplete.
 
-    Returns
-    -------
-    OpenAlexResponseList
+    Returns:
         List of autocomplete results.
     """
     return AutocompleteCollection()[s]

@@ -1,8 +1,8 @@
 """Pagination utilities for OpenAlex API."""
 
+import asyncio
 import logging
 
-from pyalex.client.session import get_requests_session
 from pyalex.core.config import CURSOR_START_VALUE
 from pyalex.core.config import MAX_PER_PAGE
 from pyalex.core.config import MIN_PER_PAGE
@@ -56,7 +56,6 @@ class Paginator:
         self._first_page = True  # Track if this is the first page
 
         self._next_value = value
-        self._session = get_requests_session()
 
     def __iter__(self):
         return self
@@ -96,7 +95,8 @@ class Paginator:
         if self.per_page is not None:
             self.endpoint_class._add_params("per-page", self.per_page)
 
-        r = self.endpoint_class._get_from_url(self.endpoint_class.url, self._session)
+        # Use async method internally (syncio.run wraps async call)
+        r = asyncio.run(self.endpoint_class._get_from_url_async(self.endpoint_class.url))
 
         # Print count information on first page and check for approval if needed
         if self._first_page and hasattr(r, 'meta') and r.meta and 'count' in r.meta:

@@ -2,8 +2,8 @@
 
 from .authors import Author
 from .authors import Authors
-from .autocomplete import autocomplete
 from .autocomplete import Autocomplete
+from .autocomplete import autocomplete
 from .domains import Domain
 from .domains import Domains
 from .fields import Field

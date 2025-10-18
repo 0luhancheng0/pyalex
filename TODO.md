@@ -1,9 +1,21 @@
-## Completed Tasks
 
-- ✅ **Add color coded debug messages** - Implemented `_debug_print` function with Rich console support and color categories (ERROR, WARNING, INFO, SUCCESS, STRATEGY, ASYNC, BATCH) throughout utils.py and batch.py
 
-- ✅ **Fix asyncio event loop error & Remove sync fallback** - Replaced silent sync fallback with explicit RuntimeError in utils.py (lines 578-582) to prevent silent performance degradation. All [DEBUG] messages converted to color-coded categories ([BATCH], [ERROR], [INFO], [STRATEGY], etc.)
+## TODO 
 
-## Active Tasks
+Complete following tasks
 
-No active tasks
+- ✅ **Add API documentation** - COMPLETED
+  - ✓ Created MkDocs configuration with Material theme
+  - ✓ Documented all major modules and classes
+  - ✓ Added configuration reference
+  - ✓ Added comprehensive troubleshooting guide
+  - ✓ Set up Read the Docs integration (.readthedocs.yaml)
+  - ⏳ Host on Read the Docs (requires repository setup)
+
+- ✅ **Improve error handling throughout codebase** - COMPLETED
+  - ✓ Created `pyalex/exceptions.py` with 9 custom exception classes
+  - ✓ Updated `httpx_session.py` to raise specific exceptions
+  - ✓ Updated CLI exception handler with detailed error messages
+  - ✓ Maintained exception chains with `from err`
+  - ✓ Added helpful error messages for each exception type
+

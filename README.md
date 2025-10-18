@@ -113,21 +113,70 @@ pyalex works --search "climate change" --group-by "oa_status"
 pyalex works --author-ids "A1234567890" --group-by "type"
 ```
 
+## � Examples & Documentation
+
+### Python API Examples
+
+Check out the `examples/` directory for comprehensive Python usage examples:
+
+- **basic_usage.py** - Simple queries and fundamental operations
+- **advanced_filtering.py** - Complex filters and combinations
+- **pagination_examples.py** - Efficient handling of large result sets
+- **batch_operations.py** - Processing multiple items efficiently
+- **async_usage.py** - Async patterns for better performance
+
+Run any example:
+```bash
+cd examples
+python basic_usage.py
+```
+
+### CLI Examples
+
+See `examples/CLI_EXAMPLES.md` for detailed command-line usage patterns including:
+- Searching and filtering
+- Export and batch processing
+- Configuration via environment variables
+- Performance optimization tips
+
+### Configuration
+
+PyAlex supports configuration via environment variables. Create a `.env` file in your project:
+
+```bash
+# Your email (recommended for polite pool access)
+OPENALEX_EMAIL=your.email@example.com
+
+# Optional: API key for authenticated requests
+OPENALEX_API_KEY=your_api_key_here
+
+# Rate limiting (requests per second)
+OPENALEX_RATE_LIMIT=10.0
+
+# Batch size for CLI operations
+OPENALEX_CLI_BATCH_SIZE=100
+```
+
+See `.env.example` for all available configuration options.
+
 ## 🔗 Asynchronous Processing
 
-The library includes async support for improved performance when making multiple requests or handling large datasets:
+PyAlex is now **async-only** for better performance. All HTTP requests use `httpx` with HTTP/2 support:
 
+```python
 ```python
 import asyncio
 from pyalex import Works
 
 async def fetch_works():
-    works = Works().search("machine learning").filter(publication_year=2023)
-    async for work in works:
-        print(work['title'])
-
-asyncio.run(fetch_works())
+    # Get AI research from 2023 with >100 citations
+    results = await Works().search("artificial intelligence").filter(
+        publication_year=2023,
+        cited_by_count=">100"
+    ).get(limit=100)
 ```
+
+See `examples/async_usage.py` for more async patterns.
 
 ## 🤝 Contributing
 

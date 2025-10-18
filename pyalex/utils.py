@@ -22,21 +22,19 @@ def from_id(openalex_id: str) -> Union[dict, None]:
     This function analyzes the OpenAlex ID to determine the entity type
     and returns the appropriate entity object.
     
-    Parameters
-    ----------
-    openalex_id : str
-        The OpenAlex ID (e.g., 'W2741809807', 'A2208157607', etc.)
+    Args:
+        openalex_id: The OpenAlex ID (e.g., 'W2741809807', 'A2208157607', etc.).
         
-    Returns
-    -------
-    Union[dict, None]
-        The OpenAlex entity object, or None if ID format is not recognized
+    Returns:
+        The OpenAlex entity object, or None if ID format is not recognized.
         
-    Examples
-    --------
-    >>> work = from_id('W2741809807')
-    >>> author = from_id('A2208157607')
-    >>> source = from_id('S2764455177')
+    Raises:
+        ValueError: If the ID format is not recognized.
+        
+    Examples:
+        >>> work = from_id('W2741809807')
+        >>> author = from_id('A2208157607')
+        >>> source = from_id('S2764455177')
     """
     # Clean the ID - remove URL prefix if present
     if openalex_id.startswith('https://openalex.org/'):
@@ -87,22 +85,20 @@ def from_id(openalex_id: str) -> Union[dict, None]:
 def get_entity_type(openalex_id: str) -> str:
     """Get the entity type from an OpenAlex ID.
     
-    Parameters
-    ---------- 
-    openalex_id : str
-        The OpenAlex ID
+    Args:
+        openalex_id: The OpenAlex ID.
         
-    Returns
-    -------
-    str
-        The entity type ('work', 'author', 'source', etc.)
+    Returns:
+        The entity type ('work', 'author', 'source', etc.).
         
-    Examples
-    --------
-    >>> get_entity_type('W2741809807')
-    'work'
-    >>> get_entity_type('A2208157607') 
-    'author'
+    Raises:
+        ValueError: If the ID format is not recognized.
+        
+    Examples:
+        >>> get_entity_type('W2741809807')
+        'work'
+        >>> get_entity_type('A2208157607') 
+        'author'
     """
     # Clean the ID - remove URL prefix if present
     if openalex_id.startswith('https://openalex.org/'):

@@ -5,7 +5,8 @@ import time
 
 import pytest
 
-from pyalex.client.async_session import RateLimiter, get_rate_limiter
+from pyalex.client.async_session import RateLimiter
+from pyalex.client.async_session import get_rate_limiter
 from pyalex.core.config import config
 
 

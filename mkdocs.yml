@@ -1,0 +1,103 @@
+site_name: PyAlex Documentation
+site_description: Python interface to the OpenAlex database
+site_author: PyAlex Contributors
+site_url: https://pyalex.readthedocs.io
+
+repo_name: 0luhancheng0/pyalex
+repo_url: https://github.com/0luhancheng0/pyalex
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotation
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_root_heading: true
+            show_category_heading: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+  - User Guide:
+    - Basic Usage: guide/basic-usage.md
+    - Advanced Filtering: guide/advanced-filtering.md
+    - Pagination: guide/pagination.md
+    - Batch Operations: guide/batch-operations.md
+    - Async Usage: guide/async-usage.md
+    - CLI Usage: guide/cli-usage.md
+  - API Reference:
+    - Entities:
+      - Works: api/entities/works.md
+      - Authors: api/entities/authors.md
+      - Institutions: api/entities/institutions.md
+      - Sources: api/entities/sources.md
+      - Topics: api/entities/topics.md
+      - Funders: api/entities/funders.md
+    - Core:
+      - Configuration: api/core/config.md
+      - Query Building: api/core/query.md
+      - Expressions: api/core/expressions.md
+    - Client:
+      - HTTP Session: api/client/httpx_session.md
+    - CLI:
+      - Commands: api/cli/commands.md
+      - Utilities: api/cli/utils.md
+    - Exceptions: api/exceptions.md
+  - Examples:
+    - Python Examples: examples/python.md
+    - CLI Examples: examples/cli.md
+    - Jupyter Notebooks: examples/notebooks.md
+  - Troubleshooting: troubleshooting.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md

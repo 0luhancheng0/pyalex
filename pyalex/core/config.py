@@ -1,9 +1,20 @@
 """Configuration management for PyAlex."""
 
+import os
+from pathlib import Path
+
 try:
     from pyalex._version import __version__
 except ImportError:
     __version__ = "0.0.0"
+
+# Try to load .env file if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    # Load .env from current directory or parent directories
+    load_dotenv(dotenv_path=Path.cwd() / '.env', verbose=False)
+except ImportError:
+    pass  # python-dotenv not installed, use environment variables as-is
 
 
 # Constants
@@ -76,26 +87,53 @@ class AlexConfig(dict):
         return super().__setitem__(key, value)
 
 
+def _get_env_int(key: str, default: int) -> int:
+    """Get integer from environment variable with validation."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        import warnings
+        warnings.warn(f"Invalid integer for {key}: {value}. Using default: {default}")
+        return default
+
+
+def _get_env_float(key: str, default: float) -> float:
+    """Get float from environment variable with validation."""
+    value = os.getenv(key)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        import warnings
+        warnings.warn(f"Invalid float for {key}: {value}. Using default: {default}")
+        return default
+
+
 config = AlexConfig(
-    email="0lh.cheng0@gmail.com",
-    api_key=None,
-    user_agent=f"pyalex/{__version__}",
-    openalex_url="https://api.openalex.org",
-    max_retries=DEFAULT_MAX_RETRIES,
-    retry_backoff_factor=DEFAULT_RETRY_BACKOFF_FACTOR,
+    # Environment variables override defaults
+    email=os.getenv("OPENALEX_EMAIL", "0lh.cheng0@gmail.com"),
+    api_key=os.getenv("OPENALEX_API_KEY", None),
+    user_agent=os.getenv("OPENALEX_USER_AGENT", f"pyalex/{__version__}"),
+    openalex_url=os.getenv("OPENALEX_URL", "https://api.openalex.org"),
+    max_retries=_get_env_int("OPENALEX_MAX_RETRIES", DEFAULT_MAX_RETRIES),
+    retry_backoff_factor=_get_env_float("OPENALEX_RETRY_BACKOFF", DEFAULT_RETRY_BACKOFF_FACTOR),
     retry_http_codes=DEFAULT_RETRY_HTTP_CODES,
     # Rate limiting configurations
-    requests_per_second=DEFAULT_REQUESTS_PER_SECOND,
-    requests_per_day=DEFAULT_REQUESTS_PER_DAY,
-    rate_limit_buffer=DEFAULT_RATE_LIMIT_BUFFER,
+    requests_per_second=_get_env_float("OPENALEX_RATE_LIMIT", DEFAULT_REQUESTS_PER_SECOND),
+    requests_per_day=_get_env_int("OPENALEX_REQUESTS_PER_DAY", DEFAULT_REQUESTS_PER_DAY),
+    rate_limit_buffer=_get_env_float("OPENALEX_RATE_BUFFER", DEFAULT_RATE_LIMIT_BUFFER),
     # CLI specific configurations
-    cli_batch_size=DEFAULT_CLI_BATCH_SIZE,
-    cli_max_width=CLI_MAX_WIDTH,
-    cli_name_truncate_length=CLI_NAME_TRUNCATE_LENGTH,
+    cli_batch_size=_get_env_int("OPENALEX_CLI_BATCH_SIZE", DEFAULT_CLI_BATCH_SIZE),
+    cli_max_width=_get_env_int("OPENALEX_CLI_MAX_WIDTH", CLI_MAX_WIDTH),
+    cli_name_truncate_length=_get_env_int("OPENALEX_CLI_NAME_LENGTH", CLI_NAME_TRUNCATE_LENGTH),
     # HTTP client configurations
-    total_timeout=DEFAULT_TOTAL_TIMEOUT,
-    connect_timeout=DEFAULT_CONNECT_TIMEOUT,
-    connection_limit=DEFAULT_CONNECTION_LIMIT,
-    connection_limit_per_host=DEFAULT_CONNECTION_LIMIT_PER_HOST,
-    max_concurrent=DEFAULT_MAX_CONCURRENT,
+    total_timeout=_get_env_float("OPENALEX_TOTAL_TIMEOUT", DEFAULT_TOTAL_TIMEOUT),
+    connect_timeout=_get_env_float("OPENALEX_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT),
+    connection_limit=_get_env_int("OPENALEX_CONNECTION_LIMIT", DEFAULT_CONNECTION_LIMIT),
+    connection_limit_per_host=_get_env_int("OPENALEX_CONNECTION_LIMIT_PER_HOST", DEFAULT_CONNECTION_LIMIT_PER_HOST),
+    max_concurrent=_get_env_int("OPENALEX_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT),
 )

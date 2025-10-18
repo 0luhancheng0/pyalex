@@ -237,14 +237,12 @@ async def async_batch_requests_with_progress(
         max_concurrent = config.max_concurrent
     
     try:
-        from rich.progress import (
-            BarColumn,
-            MofNCompleteColumn,
-            Progress,
-            SpinnerColumn,
-            TextColumn,
-            TimeElapsedColumn,
-        )
+        from rich.progress import BarColumn
+        from rich.progress import MofNCompleteColumn
+        from rich.progress import Progress
+        from rich.progress import SpinnerColumn
+        from rich.progress import TextColumn
+        from rich.progress import TimeElapsedColumn
         
         semaphore = asyncio.Semaphore(max_concurrent)
         results = [None] * len(urls)
