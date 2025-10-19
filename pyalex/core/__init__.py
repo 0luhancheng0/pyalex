@@ -15,14 +15,14 @@ from .utils import quote_oa_value
 
 __all__ = [
     "AlexConfig",
-    "config", 
+    "config",
     "or_",
     "not_",
     "gt_",
     "lt_",
     "Paginator",
     "flatten_kv",
-    "params_merge", 
+    "params_merge",
     "wrap_values_nested_dict",
     "invert_abstract",
     "quote_oa_value",

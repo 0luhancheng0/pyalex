@@ -4,36 +4,34 @@ PyAlex Logging Configuration
 This module provides centralized logging configuration for the PyAlex package.
 It handles both library usage and CLI usage scenarios with appropriate log levels.
 """
+
 import logging
 import sys
-from typing import Optional
 
 # Package-level logger
-logger = logging.getLogger('pyalex')
+logger = logging.getLogger("pyalex")
 
 # Constants for log formatting
-LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-SIMPLE_FORMAT = '%(levelname)s: %(message)s'
-DEBUG_FORMAT = '%(asctime)s - %(name)s:%(lineno)d - %(levelname)s - %(message)s'
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+SIMPLE_FORMAT = "%(levelname)s: %(message)s"
+DEBUG_FORMAT = "%(asctime)s - %(name)s:%(lineno)d - %(levelname)s - %(message)s"
 
 
 def setup_logger(
-    level: str = 'INFO',
-    format_type: str = 'simple',
-    stream: Optional[object] = None
+    level: str = "INFO", format_type: str = "simple", stream: object | None = None
 ) -> logging.Logger:
     """
     Set up the PyAlex logger with specified configuration.
-    
+
     Parameters
     ----------
     level : str, default 'INFO'
         Logging level ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
-    format_type : str, default 'simple' 
+    format_type : str, default 'simple'
         Format type ('simple', 'detailed', 'debug')
     stream : object, optional
         Output stream (default: stderr for library, stdout for CLI)
-        
+
     Returns
     -------
     logging.Logger
@@ -41,42 +39,42 @@ def setup_logger(
     """
     # Convert string level to logging constant
     numeric_level = getattr(logging, level.upper(), logging.INFO)
-    
+
     # Choose format based on type
     format_map = {
-        'simple': SIMPLE_FORMAT,
-        'detailed': LOG_FORMAT, 
-        'debug': DEBUG_FORMAT
+        "simple": SIMPLE_FORMAT,
+        "detailed": LOG_FORMAT,
+        "debug": DEBUG_FORMAT,
     }
     log_format = format_map.get(format_type, SIMPLE_FORMAT)
-    
+
     # Set default stream based on usage context
     if stream is None:
         # Use stdout for CLI debug mode, stderr for library usage
         stream = sys.stderr
-    
+
     # Remove existing handlers to avoid duplicates
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
-    
+
     # Create and configure handler
     handler = logging.StreamHandler(stream)
     handler.setLevel(numeric_level)
     formatter = logging.Formatter(log_format)
     handler.setFormatter(formatter)
-    
+
     # Configure logger
     logger.setLevel(numeric_level)
     logger.addHandler(handler)
     logger.propagate = False  # Prevent duplicate messages
-    
+
     return logger
 
 
 def get_logger() -> logging.Logger:
     """
     Get the configured PyAlex logger.
-    
+
     Returns
     -------
     logging.Logger
@@ -88,35 +86,27 @@ def get_logger() -> logging.Logger:
 def setup_cli_logging(debug: bool = False) -> logging.Logger:
     """
     Set up logging specifically for CLI usage.
-    
+
     Parameters
     ----------
     debug : bool, default False
         Whether to enable debug mode with verbose output
-        
+
     Returns
     -------
     logging.Logger
         Configured logger for CLI usage
     """
     if debug:
-        return setup_logger(
-            level='DEBUG',
-            format_type='debug', 
-            stream=sys.stdout
-        )
+        return setup_logger(level="DEBUG", format_type="debug", stream=sys.stdout)
     else:
-        return setup_logger(
-            level='WARNING',
-            format_type='simple',
-            stream=sys.stderr
-        )
+        return setup_logger(level="WARNING", format_type="simple", stream=sys.stderr)
 
 
 def log_api_request(url: str) -> None:
     """
     Log an API request URL at debug level.
-    
+
     Parameters
     ----------
     url : str
@@ -128,7 +118,7 @@ def log_api_request(url: str) -> None:
 def log_api_response(results, response_type: str = "results") -> None:
     """
     Log information about API response at debug level.
-    
+
     Parameters
     ----------
     results : object
@@ -139,18 +129,25 @@ def log_api_response(results, response_type: str = "results") -> None:
     if results is None:
         logger.debug(f"No {response_type} returned from API")
         return
-        
+
     logger.debug(f"Response type: {type(results)}")
-    
-    if hasattr(results, '__len__'):
+
+    if hasattr(results, "__len__"):
         try:
             length = len(results)
             logger.debug(f"Response length: {length}")
         except (TypeError, AttributeError):
             pass
-    
-    if hasattr(results, 'meta') and results.meta:
-        count = results.meta.get('count')
+
+    # Check for metadata in attrs (for DataFrames) or as attribute
+    meta = None
+    if hasattr(results, "attrs") and "meta" in results.attrs:
+        meta = results.attrs["meta"]
+    elif hasattr(results, "meta"):
+        meta = results.meta
+
+    if meta:
+        count = meta.get("count")
         if count is not None:
             logger.debug(f"Total count from meta: {count:,}")
 
@@ -158,7 +155,7 @@ def log_api_response(results, response_type: str = "results") -> None:
 def log_error(error: Exception, context: str = "") -> None:
     """
     Log an error with optional context.
-    
+
     Parameters
     ----------
     error : Exception
@@ -175,7 +172,7 @@ def log_error(error: Exception, context: str = "") -> None:
 def log_debug_traceback(error: Exception) -> None:
     """
     Log full traceback at debug level.
-    
+
     Parameters
     ----------
     error : Exception
@@ -185,4 +182,4 @@ def log_debug_traceback(error: Exception) -> None:
 
 
 # Initialize default logger configuration for library usage
-setup_logger(level='WARNING', format_type='simple')
+setup_logger(level="WARNING", format_type="simple")

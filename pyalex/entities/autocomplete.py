@@ -9,6 +9,7 @@ from pyalex.entities.base import BaseOpenAlex
 
 class Autocomplete(dict):
     """Class representing an autocomplete entity in OpenAlex."""
+
     pass
 
 

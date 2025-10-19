@@ -4,8 +4,9 @@ Main CLI application for PyAlex.
 This module contains the main typer app and global configuration.
 """
 
+from typing import Annotated
+
 import typer
-from typing_extensions import Annotated
 
 from pyalex import config
 
@@ -19,41 +20,53 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
 # Global options
 @app.callback()
 def main(
-    debug: Annotated[bool, typer.Option(
-        "--debug", "-d",
-        help="Enable debug output including API URLs and internal details"
-    )] = False,
-    dry_run: Annotated[bool, typer.Option(
-        "--dry-run",
-        help="Print a list of queries that would be run without executing them"
-    )] = False,
-    batch_size: Annotated[int, typer.Option(
-        "--batch-size",
-        help=f"Batch size for requests with multiple IDs "
-             f"(default: {config.cli_batch_size})"
-    )] = config.cli_batch_size,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            "-d",
+            help="Enable debug output including API URLs and internal details",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Print a list of queries that would be run without executing them",
+        ),
+    ] = False,
+    batch_size: Annotated[
+        int,
+        typer.Option(
+            "--batch-size",
+            help=f"Batch size for requests with multiple IDs "
+            f"(default: {config.cli_batch_size})",
+        ),
+    ] = config.cli_batch_size,
 ):
     """
     PyAlex CLI - Access the OpenAlex database from the command line.
-    
+
     OpenAlex doesn't require authentication for most requests.
     """
     # Set global state in submodules
     batch.set_global_state(debug, dry_run, batch_size)
     utils.set_global_state(debug, dry_run, batch_size)
-    
+
     if debug:
         from pyalex.logger import setup_cli_logging
+
         logger = setup_cli_logging(debug=True)
         logger.debug(f"Email: {config.email}")
         logger.debug(f"User Agent: {config.user_agent}")
         logger.debug(
             "Debug mode enabled - API URLs and internal details will be displayed"
         )
-    
+
     if dry_run:
         typer.echo(f"Dry run mode enabled - batch size: {batch_size}", err=True)
 

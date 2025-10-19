@@ -2,6 +2,7 @@
 """
 Tests for PyAlex CLI
 """
+
 import json
 import os
 import subprocess
@@ -12,11 +13,7 @@ import pytest
 
 def test_cli_help():
     """Test that the CLI help command works."""
-    result = subprocess.run(
-        ["pyalex", "--help"], 
-        capture_output=True, 
-        text=True
-    )
+    result = subprocess.run(["pyalex", "--help"], capture_output=True, text=True)
     assert result.returncode == 0
     assert "CLI interface for the OpenAlex database" in result.stdout
 
@@ -24,9 +21,7 @@ def test_cli_help():
 def test_works_help():
     """Test that the works subcommand help works."""
     result = subprocess.run(
-        ["pyalex", "works", "--help"], 
-        capture_output=True, 
-        text=True
+        ["pyalex", "works", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
     assert "Search and retrieve works from OpenAlex" in result.stdout
@@ -35,9 +30,7 @@ def test_works_help():
 def test_authors_help():
     """Test that the authors subcommand help works."""
     result = subprocess.run(
-        ["pyalex", "authors", "--help"], 
-        capture_output=True, 
-        text=True
+        ["pyalex", "authors", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
     assert "Search and retrieve authors from OpenAlex" in result.stdout
@@ -46,9 +39,7 @@ def test_authors_help():
 def test_topics_help():
     """Test that the topics subcommand help works."""
     result = subprocess.run(
-        ["pyalex", "topics", "--help"], 
-        capture_output=True, 
-        text=True
+        ["pyalex", "topics", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
     assert "Search and retrieve topics from OpenAlex" in result.stdout
@@ -57,9 +48,7 @@ def test_topics_help():
 def test_keywords_help():
     """Test that the keywords subcommand help works."""
     result = subprocess.run(
-        ["pyalex", "keywords", "--help"], 
-        capture_output=True, 
-        text=True
+        ["pyalex", "keywords", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
     assert "Search and retrieve keywords from OpenAlex" in result.stdout
@@ -68,9 +57,7 @@ def test_keywords_help():
 def test_show_help():
     """Test that the show subcommand help works."""
     result = subprocess.run(
-        ["pyalex", "show", "--help"], 
-        capture_output=True, 
-        text=True
+        ["pyalex", "show", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
     assert "Display a JSON file containing OpenAlex data" in result.stdout
@@ -81,7 +68,7 @@ def test_works_search():
     result = subprocess.run(
         ["pyalex", "works", "--search", "test", "--limit", "1"],
         capture_output=True,
-        text=True
+        text=True,
     )
     assert result.returncode == 0
     # Should contain some data or status message
@@ -93,7 +80,7 @@ def test_works_summary_format():
     result = subprocess.run(
         ["pyalex", "works", "--search", "test", "--limit", "1"],
         capture_output=True,
-        text=True
+        text=True,
     )
     assert result.returncode == 0
     # Should show table format with headers
@@ -109,28 +96,22 @@ def test_show_json_file():
             "display_name": "Test Work",
             "publication_year": 2023,
             "cited_by_count": 42,
-            "primary_location": {
-                "source": {
-                    "display_name": "Test Journal"
-                }
-            }
+            "primary_location": {"source": {"display_name": "Test Journal"}},
         }
     ]
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(sample_data, f)
         temp_file = f.name
-    
+
     try:
         # Test show command (table format is default)
         result = subprocess.run(
-            ["pyalex", "show", temp_file],
-            capture_output=True,
-            text=True
+            ["pyalex", "show", temp_file], capture_output=True, text=True
         )
         assert result.returncode == 0
         assert "Test Work" in result.stdout
-        
+
     finally:
         # Clean up temp file
         os.unlink(temp_file)
@@ -139,9 +120,7 @@ def test_show_json_file():
 def test_show_nonexistent_file():
     """Test that show command handles nonexistent files gracefully."""
     result = subprocess.run(
-        ["pyalex", "show", "nonexistent_file.json"],
-        capture_output=True,
-        text=True
+        ["pyalex", "show", "nonexistent_file.json"], capture_output=True, text=True
     )
     assert result.returncode == 1
     assert "not found" in result.stderr
@@ -152,7 +131,7 @@ def test_works_publication_date():
     result = subprocess.run(
         ["pyalex", "works", "--date", "2020-01-01", "--limit", "1"],
         capture_output=True,
-        text=True
+        text=True,
     )
     assert result.returncode == 0
     # Should return some output (table or other format)
@@ -164,7 +143,7 @@ def test_works_publication_date_range():
     result = subprocess.run(
         ["pyalex", "works", "--date", "2020-01-01:2020-01-31", "--limit", "1"],
         capture_output=True,
-        text=True
+        text=True,
     )
     assert result.returncode == 0
     # Should return some output (table or other format)
@@ -176,7 +155,7 @@ def test_works_publication_date_invalid():
     result = subprocess.run(
         ["pyalex", "works", "--date", "invalid-date", "--limit", "1"],
         capture_output=True,
-        text=True
+        text=True,
     )
     assert result.returncode == 1
     assert "Invalid date format" in result.stderr
@@ -187,7 +166,7 @@ def test_works_publication_date_invalid_range():
     result = subprocess.run(
         ["pyalex", "works", "--date", "2020-13-01:2020-14-01", "--limit", "1"],
         capture_output=True,
-        text=True
+        text=True,
     )
     assert result.returncode == 1
     assert "Invalid date range format" in result.stderr

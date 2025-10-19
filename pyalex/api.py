@@ -3,7 +3,7 @@ PyAlex API module.
 
 This module imports from the refactored structure for better organization:
 - models/: Pydantic models for type safety
-- client/: HTTP client and authentication 
+- client/: HTTP client and authentication
 - core/: Core functionality like pagination, filtering
 - entities/: Entity-specific classes
 
@@ -52,24 +52,22 @@ from pyalex.utils import get_entity_type
 __all__ = [
     # Configuration
     "config",
-    
     # Response classes
     "OpenAlexResponseList",
     "QueryError",
     "Paginator",
-    
     # Main entity classes
     "Work",
-    "Works", 
+    "Works",
     "Author",
     "Authors",
     "Source",
-    "Sources", 
+    "Sources",
     "Institution",
     "Institutions",
     "Topic",
     "Topics",
-    "Publisher", 
+    "Publisher",
     "Publishers",
     "Funder",
     "Funders",
@@ -77,19 +75,16 @@ __all__ = [
     "Keywords",
     "Domain",
     "Domains",
-    "Field", 
+    "Field",
     "Fields",
     "Subfield",
     "Subfields",
-    
     # Autocomplete
     "Autocomplete",
     "autocomplete",
-    
     # Aliases
     "People",
     "Journals",
-    
     # Utility functions
     "invert_abstract",
     "from_id",

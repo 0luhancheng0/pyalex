@@ -7,17 +7,20 @@ This script demonstrates fundamental PyAlex operations:
 - Retrieving results
 """
 
-from pyalex import Works, Authors, Institutions
+from pyalex import Authors
+from pyalex import Institutions
+from pyalex import Works
+
 
 def example_1_simple_work_search():
     """Search for works by keyword."""
     print("=" * 60)
     print("Example 1: Simple Work Search")
     print("=" * 60)
-    
+
     # Search for works about "machine learning"
     results = Works().search("machine learning").get(limit=5)
-    
+
     print(f"Found {len(results)} works:")
     for work in results:
         print(f"  - {work['title']}")
@@ -31,10 +34,10 @@ def example_2_filter_by_year():
     print("=" * 60)
     print("Example 2: Filter by Publication Year")
     print("=" * 60)
-    
+
     # Get works from 2023
     results = Works().filter(publication_year=2023).get(limit=5)
-    
+
     print(f"Found {len(results)} works from 2023:")
     for work in results:
         print(f"  - {work['title']}")
@@ -47,10 +50,10 @@ def example_3_author_lookup():
     print("=" * 60)
     print("Example 3: Author Lookup")
     print("=" * 60)
-    
+
     # Search for authors
     results = Authors().search("Geoffrey Hinton").get(limit=3)
-    
+
     print(f"Found {len(results)} authors:")
     for author in results:
         print(f"  - {author['display_name']}")
@@ -65,10 +68,10 @@ def example_4_institution_search():
     print("=" * 60)
     print("Example 4: Institution Search")
     print("=" * 60)
-    
+
     # Search for universities
     results = Institutions().search("MIT").get(limit=3)
-    
+
     print(f"Found {len(results)} institutions:")
     for inst in results:
         print(f"  - {inst['display_name']}")
@@ -82,11 +85,11 @@ def example_5_get_by_id():
     print("=" * 60)
     print("Example 5: Get Work by ID")
     print("=" * 60)
-    
+
     # Get a specific work (example ID)
     # Note: Replace with a real OpenAlex ID
     work_id = "https://openalex.org/W2741809807"
-    
+
     try:
         work = Works()[work_id]
         print(f"Title: {work['title']}")
@@ -101,20 +104,20 @@ def example_5_get_by_id():
 def main():
     """Run all examples."""
     print("\n🚀 PyAlex Basic Usage Examples\n")
-    
+
     try:
         example_1_simple_work_search()
         example_2_filter_by_year()
         example_3_author_lookup()
         example_4_institution_search()
         example_5_get_by_id()
-        
+
         print("\n✅ All examples completed!")
         print("\nNext steps:")
         print("  - Try advanced_filtering.py for complex queries")
         print("  - See pagination_examples.py for handling large datasets")
         print("  - Check async_usage.py for high-performance async queries")
-        
+
     except Exception as e:
         print(f"\n❌ Error: {e}")
         print("\nMake sure you have:")

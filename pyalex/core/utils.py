@@ -1,13 +1,10 @@
 """Utility functions for PyAlex."""
 
 from typing import Any
-from typing import Dict
-from typing import List
-from typing import Optional
 from urllib.parse import quote_plus
 
 
-def invert_abstract(inv_index: Optional[Dict[str, List[int]]]) -> Optional[str]:
+def invert_abstract(inv_index: dict[str, list[int]] | None) -> str | None:
     """Invert OpenAlex abstract index.
 
     Args:
@@ -34,7 +31,7 @@ def quote_oa_value(v: Any) -> Any:
         Prepared value suitable for OpenAlex API.
     """
     from pyalex.core.expressions import _LogicalExpression
-    
+
     # workaround for bug https://groups.google.com/u/1/g/openalex-users/c/t46RWnzZaXc
     if isinstance(v, bool):
         return str(v).lower()

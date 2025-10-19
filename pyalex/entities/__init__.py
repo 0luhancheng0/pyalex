@@ -34,7 +34,7 @@ __all__ = [
     "Works",
     "Author",
     "Authors",
-    "Source", 
+    "Source",
     "Sources",
     "Institution",
     "Institutions",

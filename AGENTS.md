@@ -1,5 +1,12 @@
 # Repository Guidelines
 
+
+## Coding Principles 
+
+- Prioritise simplicity over comprehensiveness
+- Try reduce the amount of conditional branching, always prioritise vectorised operations especially when you dealing with pandas dataframe
+- If something can be done using existing methods for library, do not rewrite them on your own
+
 ## Project Structure & Module Organization
 Core Python package lives in `pyalex/`, with high-level CLI entry points in `cli.py` and subcommands under `pyalex/cli/`. HTTP orchestration and retry helpers live in `pyalex/client/` and `pyalex/core/`, while entity-specific wrappers sit under `pyalex/entities/`. Shared utilities (logging, type detection, batching) are in `pyalex/utils.py` and `pyalex/logger.py`. End-to-end usage samples live in `pyalex/examples/`. Tests mirror this layout in `tests/` with `test_cli.py`, `test_async_retry.py`, and `test_pyalex.py`. Packaging, dependency, and lint settings are defined in `pyproject.toml`, with pinned sync environments tracked by `uv.lock`.
 

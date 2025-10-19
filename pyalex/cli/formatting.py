@@ -8,11 +8,16 @@ This module handles all output formatting for the CLI, including:
 - Debug messages
 """
 
-from typing import Any, Dict, List, Optional
-from rich.console import Console
-from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from typing import Any
+
 from rich import print as rprint
+from rich.console import Console
+from rich.progress import BarColumn
+from rich.progress import Progress
+from rich.progress import SpinnerColumn
+from rich.progress import TaskProgressColumn
+from rich.progress import TextColumn
+from rich.table import Table
 
 console = Console()
 
@@ -20,7 +25,7 @@ console = Console()
 def print_debug(message: str, level: str = "INFO") -> None:
     """
     Print debug message with color coding.
-    
+
     Args:
         message: The debug message to print
         level: The severity level (INFO, WARNING, ERROR, DEBUG, STRATEGY)
@@ -36,11 +41,12 @@ def print_debug(message: str, level: str = "INFO") -> None:
     rprint(f"[{color}][{level}][/{color}] {message}")
 
 
-def print_dry_run_query(query_description: str, url: Optional[str] = None, 
-                        estimated_queries: Optional[int] = None) -> None:
+def print_dry_run_query(
+    query_description: str, url: str | None = None, estimated_queries: int | None = None
+) -> None:
     """
     Print dry-run information about a query.
-    
+
     Args:
         query_description: Description of the query
         url: Optional URL that would be queried
@@ -56,7 +62,7 @@ def print_dry_run_query(query_description: str, url: Optional[str] = None,
 def print_debug_url(query: Any) -> None:
     """
     Print the URL for a query.
-    
+
     Args:
         query: The query object to print URL for
     """
@@ -67,10 +73,10 @@ def print_debug_url(query: Any) -> None:
         rprint(f"[yellow]Could not construct URL: {e}[/yellow]")
 
 
-def print_debug_results(results: List[Dict]) -> None:
+def print_debug_results(results: list[dict]) -> None:
     """
     Print debug information about results.
-    
+
     Args:
         results: List of result dictionaries
     """
@@ -80,7 +86,7 @@ def print_debug_results(results: List[Dict]) -> None:
 def show_simple_progress(description: str, current: int, total: int) -> None:
     """
     Show simple progress indication.
-    
+
     Args:
         description: Progress description
         current: Current progress value
@@ -90,14 +96,14 @@ def show_simple_progress(description: str, current: int, total: int) -> None:
     rprint(f"[cyan]{description}:[/cyan] {current:,}/{total:,} ({percentage:.0f}%)")
 
 
-def create_table(title: str, columns: List[str]) -> Table:
+def create_table(title: str, columns: list[str]) -> Table:
     """
     Create a Rich table with standard styling.
-    
+
     Args:
         title: Table title
         columns: List of column names
-        
+
     Returns:
         Configured Rich Table object
     """
@@ -110,26 +116,26 @@ def create_table(title: str, columns: List[str]) -> Table:
 def truncate_text(text: str, max_length: int = 50) -> str:
     """
     Truncate text to max length with ellipsis.
-    
+
     Args:
         text: Text to truncate
         max_length: Maximum length
-        
+
     Returns:
         Truncated text
     """
     if not text:
         return ""
-    return text if len(text) <= max_length else f"{text[:max_length-3]}..."
+    return text if len(text) <= max_length else f"{text[: max_length - 3]}..."
 
 
 def format_count(count: int) -> str:
     """
     Format a count with thousand separators.
-    
+
     Args:
         count: Number to format
-        
+
     Returns:
         Formatted string
     """
@@ -139,7 +145,7 @@ def format_count(count: int) -> str:
 def create_progress() -> Progress:
     """
     Create a Rich Progress bar with standard configuration.
-    
+
     Returns:
         Configured Progress object
     """
@@ -148,14 +154,14 @@ def create_progress() -> Progress:
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
-        console=console
+        console=console,
     )
 
 
 def print_error(message: str) -> None:
     """
     Print an error message.
-    
+
     Args:
         message: Error message to print
     """
@@ -165,7 +171,7 @@ def print_error(message: str) -> None:
 def print_warning(message: str) -> None:
     """
     Print a warning message.
-    
+
     Args:
         message: Warning message to print
     """
@@ -175,7 +181,7 @@ def print_warning(message: str) -> None:
 def print_success(message: str) -> None:
     """
     Print a success message.
-    
+
     Args:
         message: Success message to print
     """
@@ -185,7 +191,7 @@ def print_success(message: str) -> None:
 def print_info(message: str) -> None:
     """
     Print an info message.
-    
+
     Args:
         message: Info message to print
     """

@@ -5,16 +5,14 @@ This module defines specific exception types for different error scenarios,
 enabling better error handling and more informative error messages.
 """
 
-from typing import Optional
-
 
 class PyAlexException(Exception):
     """Base exception class for all PyAlex errors."""
-    
-    def __init__(self, message: str, details: Optional[str] = None):
+
+    def __init__(self, message: str, details: str | None = None):
         """
         Initialize PyAlex exception.
-        
+
         Args:
             message: Main error message
             details: Optional additional details
@@ -22,7 +20,7 @@ class PyAlexException(Exception):
         self.message = message
         self.details = details
         super().__init__(self.format_message())
-    
+
     def format_message(self) -> str:
         """Format the complete error message."""
         if self.details:
@@ -33,18 +31,19 @@ class PyAlexException(Exception):
 class NetworkError(PyAlexException):
     """
     Raised when network-related errors occur.
-    
+
     Examples:
         - Connection timeout
         - DNS resolution failure
         - Network unreachable
     """
-    
-    def __init__(self, message: str, url: Optional[str] = None, 
-                 status_code: Optional[int] = None):
+
+    def __init__(
+        self, message: str, url: str | None = None, status_code: int | None = None
+    ):
         """
         Initialize network error.
-        
+
         Args:
             message: Error message
             url: URL that caused the error
@@ -52,13 +51,13 @@ class NetworkError(PyAlexException):
         """
         self.url = url
         self.status_code = status_code
-        
+
         details = []
         if url:
             details.append(f"URL: {url}")
         if status_code:
             details.append(f"Status: {status_code}")
-        
+
         detail_str = ", ".join(details) if details else None
         super().__init__(message, detail_str)
 
@@ -66,19 +65,24 @@ class NetworkError(PyAlexException):
 class APIError(PyAlexException):
     """
     Raised when OpenAlex API returns an error.
-    
+
     Examples:
         - 400 Bad Request
         - 404 Not Found
         - 429 Rate Limit Exceeded
         - 500 Internal Server Error
     """
-    
-    def __init__(self, message: str, status_code: Optional[int] = None,
-                 response_text: Optional[str] = None, url: Optional[str] = None):
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        response_text: str | None = None,
+        url: str | None = None,
+    ):
         """
         Initialize API error.
-        
+
         Args:
             message: Error message
             status_code: HTTP status code
@@ -88,7 +92,7 @@ class APIError(PyAlexException):
         self.status_code = status_code
         self.response_text = response_text
         self.url = url
-        
+
         details = []
         if status_code:
             details.append(f"Status: {status_code}")
@@ -96,7 +100,7 @@ class APIError(PyAlexException):
             details.append(f"URL: {url}")
         if response_text and len(response_text) < 200:
             details.append(f"Response: {response_text}")
-        
+
         detail_str = ", ".join(details) if details else None
         super().__init__(message, detail_str)
 
@@ -104,17 +108,21 @@ class APIError(PyAlexException):
 class RateLimitError(APIError):
     """
     Raised when rate limit is exceeded.
-    
+
     The OpenAlex API has rate limits:
     - 10 requests per second (anonymous)
     - 100,000 requests per day
     """
-    
-    def __init__(self, message: str = "Rate limit exceeded", 
-                 retry_after: Optional[int] = None, **kwargs):
+
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded",
+        retry_after: int | None = None,
+        **kwargs,
+    ):
         """
         Initialize rate limit error.
-        
+
         Args:
             message: Error message
             retry_after: Seconds to wait before retrying
@@ -129,19 +137,20 @@ class RateLimitError(APIError):
 class ValidationError(PyAlexException):
     """
     Raised when input validation fails.
-    
+
     Examples:
         - Invalid date format
         - Invalid OpenAlex ID format
         - Invalid filter value
         - Mutually exclusive options provided
     """
-    
-    def __init__(self, message: str, field: Optional[str] = None,
-                 value: Optional[str] = None):
+
+    def __init__(
+        self, message: str, field: str | None = None, value: str | None = None
+    ):
         """
         Initialize validation error.
-        
+
         Args:
             message: Error message
             field: Field that failed validation
@@ -149,13 +158,13 @@ class ValidationError(PyAlexException):
         """
         self.field = field
         self.value = value
-        
+
         details = []
         if field:
             details.append(f"Field: {field}")
         if value:
             details.append(f"Value: {value}")
-        
+
         detail_str = ", ".join(details) if details else None
         super().__init__(message, detail_str)
 
@@ -163,17 +172,17 @@ class ValidationError(PyAlexException):
 class ConfigurationError(PyAlexException):
     """
     Raised when configuration is invalid or missing.
-    
+
     Examples:
         - Missing required configuration
         - Invalid configuration value
         - Configuration file not found
     """
-    
-    def __init__(self, message: str, config_key: Optional[str] = None):
+
+    def __init__(self, message: str, config_key: str | None = None):
         """
         Initialize configuration error.
-        
+
         Args:
             message: Error message
             config_key: Configuration key that caused the error
@@ -186,17 +195,17 @@ class ConfigurationError(PyAlexException):
 class QueryError(PyAlexException):
     """
     Raised when a query is malformed or invalid.
-    
+
     Examples:
         - Invalid filter syntax
         - Unsupported operation
         - Invalid sort field
     """
-    
-    def __init__(self, message: str, query: Optional[str] = None):
+
+    def __init__(self, message: str, query: str | None = None):
         """
         Initialize query error.
-        
+
         Args:
             message: Error message
             query: Query that caused the error
@@ -209,17 +218,17 @@ class QueryError(PyAlexException):
 class DataError(PyAlexException):
     """
     Raised when data processing fails.
-    
+
     Examples:
         - Unexpected data format
         - Missing required fields
         - Data parsing error
     """
-    
-    def __init__(self, message: str, data_type: Optional[str] = None):
+
+    def __init__(self, message: str, data_type: str | None = None):
         """
         Initialize data error.
-        
+
         Args:
             message: Error message
             data_type: Type of data being processed
@@ -232,17 +241,17 @@ class DataError(PyAlexException):
 class CLIError(PyAlexException):
     """
     Raised when CLI-specific errors occur.
-    
+
     Examples:
         - Invalid command-line argument
         - File not found
         - Output file write error
     """
-    
-    def __init__(self, message: str, command: Optional[str] = None):
+
+    def __init__(self, message: str, command: str | None = None):
         """
         Initialize CLI error.
-        
+
         Args:
             message: Error message
             command: Command that caused the error
@@ -254,51 +263,58 @@ class CLIError(PyAlexException):
 
 # Convenience functions for common error scenarios
 
-def raise_network_error(message: str, url: Optional[str] = None, 
-                       status_code: Optional[int] = None) -> None:
+
+def raise_network_error(
+    message: str, url: str | None = None, status_code: int | None = None
+) -> None:
     """
     Raise a NetworkError with formatted message.
-    
+
     Args:
         message: Error message
         url: URL that caused the error
         status_code: HTTP status code
-        
+
     Raises:
         NetworkError
     """
     raise NetworkError(message, url=url, status_code=status_code)
 
 
-def raise_api_error(message: str, status_code: Optional[int] = None,
-                   response_text: Optional[str] = None, 
-                   url: Optional[str] = None) -> None:
+def raise_api_error(
+    message: str,
+    status_code: int | None = None,
+    response_text: str | None = None,
+    url: str | None = None,
+) -> None:
     """
     Raise an APIError with formatted message.
-    
+
     Args:
         message: Error message
         status_code: HTTP status code
         response_text: Response body
         url: URL that was requested
-        
+
     Raises:
         APIError
     """
-    raise APIError(message, status_code=status_code, 
-                  response_text=response_text, url=url)
+    raise APIError(
+        message, status_code=status_code, response_text=response_text, url=url
+    )
 
 
-def raise_validation_error(message: str, field: Optional[str] = None,
-                          value: Optional[str] = None) -> None:
+def raise_validation_error(
+    message: str, field: str | None = None, value: str | None = None
+) -> None:
     """
     Raise a ValidationError with formatted message.
-    
+
     Args:
         message: Error message
         field: Field that failed validation
         value: Invalid value
-        
+
     Raises:
         ValidationError
     """

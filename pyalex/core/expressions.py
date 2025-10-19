@@ -3,6 +3,7 @@
 
 class or_(dict):
     """Logical OR expression class."""
+
     pass
 
 

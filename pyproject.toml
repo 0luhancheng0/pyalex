@@ -25,6 +25,7 @@ dependencies = [
     "markdown-include>=0.8.1",
     "mkdocs-material>=9.6.22",
     "embedding-atlas>=0.10.0",
+    "anywidget>=0.9.18",
 ]
 dynamic = ["version"]
 requires-python = ">=3.10"
@@ -33,6 +34,7 @@ requires-python = ">=3.10"
 pyalex = "pyalex.cli:app"
 
 [project.optional-dependencies]
+dataframe = ["pandas>=1.0.0"]
 lint = ["ruff"]
 test = ["pytest", "pytest-xdist", "dotenv"]
 docs = [

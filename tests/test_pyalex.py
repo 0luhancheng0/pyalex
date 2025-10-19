@@ -1,6 +1,7 @@
 """
 Fast unit tests for PyAlex core functionality.
 """
+
 import pytest
 
 from pyalex.cli.utils import parse_range_filter

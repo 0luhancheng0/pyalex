@@ -20,19 +20,20 @@ def test_rate_limiter_init():
 
 def test_rate_limiter_enforces_delay():
     """Test that rate limiter enforces proper delays."""
+
     async def _test():
         limiter = RateLimiter(requests_per_second=10.0)  # 0.1 second intervals
-        
+
         await limiter.acquire()
         first_acquire = time.time()
-        
+
         await limiter.acquire()
         second_acquire = time.time()
-        
+
         # Second acquire should be delayed by at least min_interval
         delay = second_acquire - first_acquire
         assert delay >= 0.09  # Allow for small timing variations
-    
+
     asyncio.run(_test())
 
 
@@ -55,7 +56,7 @@ def test_get_rate_limiter_singleton():
     limiter1 = get_rate_limiter()
     limiter2 = get_rate_limiter()
     assert limiter1 is limiter2
-    
+
     # Check that it respects config with buffer
     expected_rate = config.requests_per_second * config.rate_limit_buffer
     assert limiter1.requests_per_second == expected_rate
@@ -68,7 +69,7 @@ def test_async_config_integration():
     assert config.retry_backoff_factor > 0, "Should have positive backoff factor"
     assert config.requests_per_second <= 10, "Should not exceed OpenAlex rate limit"
     assert config.rate_limit_buffer < 1.0, "Should use buffer to stay under limit"
-    
+
     # Test rate limiter respects configuration
     rate_limiter = get_rate_limiter()
     expected_rate = config.requests_per_second * config.rate_limit_buffer

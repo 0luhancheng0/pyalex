@@ -10,4 +10,4 @@ This module is organized into separate files for better maintainability:
 
 from .main import app
 
-__all__ = ['app']
+__all__ = ["app"]
