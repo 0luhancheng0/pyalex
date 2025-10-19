@@ -201,39 +201,83 @@ def show(
     file_path: Annotated[
         str | None,
         typer.Argument(
-            help="Path to the JSON file to display (if not provided, reads from stdin)"
+            help="Path to the JSON or Parquet file to display "
+            "(if not provided, reads from stdin)"
         ),
-    ] = None,
-    json_path: Annotated[
-        str | None,
-        typer.Option("--json", help="Save results to JSON file at specified path"),
     ] = None,
 ):
     """
-    Display a JSON file containing OpenAlex data in table format.
+    Display a JSON or Parquet file containing OpenAlex data in table format.
 
-    Takes a JSON file as input and displays it in a formatted table.
-    Can read from a file or from stdin if no file is provided.
+    Takes a JSON or Parquet file as input and displays it in a formatted table.
+    Can read JSON from a file or from stdin if no file is provided.
 
     Examples:
       pyalex show results.json
+      pyalex show results.parquet
       cat results.json | pyalex show
-      pyalex show data.json --json reformatted.json
     """
     try:
-        # Read JSON data
-        if file_path:
+
+        # Determine if input is parquet or JSON
+        is_parquet = False
+        if file_path and file_path.lower().endswith(".parquet"):
+            is_parquet = True
+
+        # Read data
+        if is_parquet:
+            # Read parquet file
+            try:
+                import pandas as pd
+
+                df = pd.read_parquet(file_path)
+                # Convert to list of dicts for consistent processing
+                # Use orient='records' which handles nested structures better
+                data = df.to_dict("records")
+                
+                # Convert any numpy types to native Python types for JSON serialization
+                def convert_numpy_types(obj):
+                    """Recursively convert numpy types to Python native types."""
+                    import numpy as np
+                    
+                    if isinstance(obj, np.integer):
+                        return int(obj)
+                    elif isinstance(obj, np.floating):
+                        return float(obj)
+                    elif isinstance(obj, np.ndarray):
+                        return obj.tolist()
+                    elif isinstance(obj, dict):
+                        return {k: convert_numpy_types(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [convert_numpy_types(item) for item in obj]
+                    else:
+                        return obj
+                
+                # Apply conversion to all data
+                data = convert_numpy_types(data)
+                
+            except FileNotFoundError:
+                typer.echo(f"Error: File '{file_path}' not found", err=True)
+                raise typer.Exit(1) from None
+            except Exception as e:
+                typer.echo(
+                    f"Error: Failed to read Parquet file '{file_path}': {e}",
+                    err=True,
+                )
+                raise typer.Exit(1) from None
+        elif file_path:
+            # Read JSON file
             try:
                 with open(file_path) as f:
                     data = json.load(f)
             except FileNotFoundError:
                 typer.echo(f"Error: File '{file_path}' not found", err=True)
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
             except json.JSONDecodeError as e:
                 typer.echo(f"Error: Invalid JSON in file '{file_path}': {e}", err=True)
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
         else:
-            # Read from stdin
+            # Read from stdin (JSON only)
             input_data = sys.stdin.read().strip()
             if not input_data:
                 typer.echo("Error: No input provided", err=True)
@@ -243,17 +287,17 @@ def show(
                 data = json.loads(input_data)
             except json.JSONDecodeError as e:
                 typer.echo(f"Error: Invalid JSON input: {e}", err=True)
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
 
-        # Display the data
+        # Display the data (table output only)
         if isinstance(data, dict):
             # Check if this is a grouped result (contains group_by field)
             if "group_by" in data and isinstance(data["group_by"], list):
                 # This is grouped data from --group-by option
-                _output_results(data["group_by"], json_path, grouped=True)
+                _output_results(data["group_by"], grouped=True)
             else:
                 # Single entity
-                _output_results(data, json_path, single=True)
+                _output_results(data, single=True)
         elif isinstance(data, list):
             # Check if this is a list of grouped items (key, key_display_name, count)
             if (
@@ -264,10 +308,10 @@ def show(
                 and len(data[0]) == 3
             ):
                 # This is grouped data
-                _output_results(data, json_path, grouped=True)
+                _output_results(data, grouped=True)
             else:
                 # List of entities
-                _output_results(data, json_path)
+                _output_results(data)
         else:
             typer.echo("Error: Input must be a JSON object or array", err=True)
             raise typer.Exit(1)

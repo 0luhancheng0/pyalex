@@ -9,7 +9,7 @@ import typer
 from pyalex import Institutions
 
 from ..command_patterns import execute_standard_query
-from ..command_patterns import validate_json_output_options
+from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
 from ..utils import _handle_cli_exception
 from ..utils import _output_grouped_results
@@ -111,6 +111,13 @@ def create_institutions_command(app):
                 "--json-file", help="Save results to JSON file at specified path"
             ),
         ] = None,
+        parquet_path: Annotated[
+            str | None,
+            typer.Option(
+                "--parquet-file",
+                help="Save results to Parquet file at specified path",
+            ),
+        ] = None,
         sort_by: Annotated[
             str | None,
             typer.Option(
@@ -160,7 +167,9 @@ def create_institutions_command(app):
         try:
             # Validate options
             validate_pagination_options(all_results, limit)
-            effective_json_path = validate_json_output_options(json_flag, json_path)
+            effective_json_path, effective_parquet_path = (
+                validate_output_format_options(json_flag, json_path, parquet_path)
+            )
 
             # Build query
             query = Institutions()
@@ -219,7 +228,9 @@ def create_institutions_command(app):
             # Handle output based on query type
             if group_by:
                 # Grouped results - use specialized output function
-                _output_grouped_results(results, effective_json_path)
+                _output_grouped_results(
+                    results, effective_json_path, effective_parquet_path
+                )
                 return
 
             # Handle None results
@@ -227,7 +238,7 @@ def create_institutions_command(app):
                 typer.echo("No results returned from API", err=True)
                 return
 
-            _output_results(results, effective_json_path)
+            _output_results(results, effective_json_path, effective_parquet_path)
 
         except Exception as e:
             _handle_cli_exception(e)

@@ -54,6 +54,53 @@ def validate_json_output_options(json_flag: bool, json_path: str | None) -> str 
     return None
 
 
+def validate_output_format_options(
+    json_flag: bool, json_path: str | None, parquet_path: str | None
+) -> tuple[str | None, str | None]:
+    """Validate and resolve output format options.
+
+    Parameters
+    ----------
+    json_flag : bool
+        Whether --json flag was provided
+    json_path : Optional[str]
+        Path provided via --json-file option
+    parquet_path : Optional[str]
+        Path provided via --parquet-file option
+
+    Returns
+    -------
+    tuple[Optional[str], Optional[str]]
+        Tuple of (effective_json_path, parquet_path)
+        - effective_json_path: "-" for stdout, path string for file, or None
+        - parquet_path: path string for file or None
+
+    Raises
+    ------
+    typer.Exit
+        If multiple output format options are provided (mutually exclusive)
+    """
+    # Count how many output options are provided
+    options_provided = sum([json_flag, json_path is not None, parquet_path is not None])
+    
+    if options_provided > 1:
+        typer.echo(
+            "Error: --json, --json-file, and --parquet-file are mutually exclusive", 
+            err=True
+        )
+        raise typer.Exit(1)
+    
+    # Resolve JSON path
+    if json_flag:
+        effective_json_path = "-"  # stdout
+    elif json_path:
+        effective_json_path = json_path
+    else:
+        effective_json_path = None
+    
+    return effective_json_path, parquet_path
+
+
 def validate_pagination_options(all_results: bool, limit: int | None) -> None:
     """Validate pagination options are not mutually exclusive.
 

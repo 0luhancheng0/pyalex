@@ -23,6 +23,7 @@ PyAlex provides a powerful command-line interface to interact with the [OpenAlex
 - **Batch Processing**: Handle large datasets efficiently with async processing
 - **Grouping & Aggregation**: Group results by various fields for analysis
 - **Pagination Control**: Retrieve specific pages or all results
+- **Embeddings Visualization**: Interactive visualization of research embeddings with Embedding Atlas
 
 ## 🛠️ CLI Reference
 
@@ -113,7 +114,7 @@ pyalex works --search "climate change" --group-by "oa_status"
 pyalex works --author-ids "A1234567890" --group-by "type"
 ```
 
-## � Examples & Documentation
+## 📚 Examples & Documentation
 
 ### Python API Examples
 
@@ -124,12 +125,33 @@ Check out the `examples/` directory for comprehensive Python usage examples:
 - **pagination_examples.py** - Efficient handling of large result sets
 - **batch_operations.py** - Processing multiple items efficiently
 - **async_usage.py** - Async patterns for better performance
+- **streamlit_example.py** - Interactive Streamlit app with Embedding Atlas
 
 Run any example:
 ```bash
 cd examples
 python basic_usage.py
+# Or run the Streamlit app
+streamlit run streamlit_example.py
 ```
+
+### Embeddings Visualization
+
+PyAlex includes integration with [Embedding Atlas](https://apple.github.io/embedding-atlas/) for interactive visualization of research embeddings in Streamlit apps:
+
+```python
+from pyalex import Works
+from pyalex.embeddings import prepare_works_for_embeddings, pyalex_embedding_atlas
+
+# Fetch and prepare data
+works = Works().search("machine learning").get(limit=1000)
+prepared = prepare_works_for_embeddings(works, text_column="abstract")
+
+# Create interactive visualization
+selection = pyalex_embedding_atlas(prepared, show_table=True)
+```
+
+See `pyalex/embeddings/README.md` and `docs/embeddings.md` for full documentation.
 
 ### CLI Examples
 

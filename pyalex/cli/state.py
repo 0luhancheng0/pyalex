@@ -10,6 +10,7 @@ This module manages global state for the CLI including:
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -20,7 +21,7 @@ class CLIState:
     dry_run_mode: bool = False
     batch_size: int = 100
     progress_context_depth: int = 0
-    batch_progress_context: any | None = None
+    batch_progress_context: Any | None = None
 
     def is_debug(self) -> bool:
         """Check if debug mode is enabled."""
@@ -63,7 +64,7 @@ class CLIState:
         """Determine if progress should be shown."""
         return self.progress_context_depth <= 1
 
-    def set_batch_progress(self, context: any | None) -> None:
+    def set_batch_progress(self, context: Any | None) -> None:
         """
         Set the batch progress context.
 
@@ -72,7 +73,7 @@ class CLIState:
         """
         self.batch_progress_context = context
 
-    def get_batch_progress(self) -> any | None:
+    def get_batch_progress(self) -> Any | None:
         """Get the current batch progress context."""
         return self.batch_progress_context
 
@@ -154,12 +155,12 @@ def should_show_progress() -> bool:
     return _cli_state.should_show_progress()
 
 
-def set_batch_progress_context(context: any | None) -> None:
+def set_batch_progress_context(context: Any | None) -> None:
     """Set the batch progress context."""
     _cli_state.set_batch_progress(context)
 
 
-def get_batch_progress_context() -> any | None:
+def get_batch_progress_context() -> Any | None:
     """Get the batch progress context."""
     return _cli_state.get_batch_progress()
 
@@ -198,7 +199,7 @@ def progress_context():
 
 
 @contextmanager
-def batch_progress_context(progress_obj: any):
+def batch_progress_context(progress_obj: Any):
     """Context manager for batch progress tracking.
 
     Automatically manages batch progress context, ensuring proper cleanup.

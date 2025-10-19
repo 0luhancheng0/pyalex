@@ -62,6 +62,13 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 "--json-file", help="Save results to JSON file at specified path"
             ),
         ] = None,
+        parquet_path: Annotated[
+            str | None,
+            typer.Option(
+                "--parquet-file",
+                help="Save results to Parquet file at specified path",
+            ),
+        ] = None,
         sort_by: Annotated[
             str | None, typer.Option("--sort-by", help="Sort results by field")
         ] = None,
@@ -96,17 +103,26 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 typer.echo("Error: --all and --limit are mutually exclusive", err=True)
                 raise typer.Exit(1)
 
-            # Handle JSON output options
-            effective_json_path = None
-            if json_flag and json_path:
+            # Handle output format options - check mutual exclusivity
+            options_provided = sum(
+                [json_flag, json_path is not None, parquet_path is not None]
+            )
+
+            if options_provided > 1:
                 typer.echo(
-                    "Error: --json and --json-file are mutually exclusive", err=True
+                    "Error: --json, --json-file, and --parquet-file are mutually exclusive",
+                    err=True,
                 )
                 raise typer.Exit(1)
-            elif json_flag:
-                effective_json_path = "-"  # Use "-" to indicate stdout
+
+            # Resolve JSON path
+            effective_json_path = None
+            if json_flag:
+                effective_json_path = "-"  # stdout
             elif json_path:
                 effective_json_path = json_path
+
+            effective_parquet_path = parquet_path
 
             # Create query
             query = entity_class()
@@ -127,7 +143,9 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 # For group-by operations, only page 1 is supported (max 200 results)
                 results = asyncio.run(query.get(per_page=200))
                 _print_debug_results(results)
-                _output_grouped_results(results, json_path)
+                _output_grouped_results(
+                    results, effective_json_path, effective_parquet_path
+                )
                 return
 
             _print_debug_url(query)
@@ -145,7 +163,7 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 results = asyncio.run(query.get())  # Default first page
 
             _print_debug_results(results)
-            _output_results(results, effective_json_path)
+            _output_results(results, effective_json_path, effective_parquet_path)
 
         except Exception as e:
             _handle_cli_exception(e)

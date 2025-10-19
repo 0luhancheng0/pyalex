@@ -12,7 +12,7 @@ from pyalex import Works
 from ..batch import add_id_list_option_to_command
 from ..command_patterns import execute_standard_query
 from ..command_patterns import handle_large_id_list_if_needed
-from ..command_patterns import validate_json_output_options
+from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
 from ..utils import _add_abstract_to_work
 from ..utils import _handle_cli_exception
@@ -129,6 +129,13 @@ def create_works_command(app):
                 "--json-file", help="Save results to JSON file at specified path"
             ),
         ] = None,
+        parquet_path: Annotated[
+            str | None,
+            typer.Option(
+                "--parquet-file",
+                help="Save results to Parquet file at specified path",
+            ),
+        ] = None,
         sort_by: Annotated[
             str | None,
             typer.Option(
@@ -192,7 +199,9 @@ def create_works_command(app):
         try:
             # Validate options
             validate_pagination_options(all_results, limit)
-            effective_json_path = validate_json_output_options(json_flag, json_path)
+            effective_json_path, effective_parquet_path = (
+                validate_output_format_options(json_flag, json_path, parquet_path)
+            )
 
             # Build query
             query = Works()
@@ -330,7 +339,9 @@ def create_works_command(app):
             # Handle output based on query type
             if group_by:
                 # Grouped results - use specialized output function
-                _output_grouped_results(results, effective_json_path)
+                _output_grouped_results(
+                    results, effective_json_path, effective_parquet_path
+                )
                 return
 
             # Handle None or empty results
@@ -354,7 +365,9 @@ def create_works_command(app):
             if len(results_list) > 0:
                 results_list = [_add_abstract_to_work(work) for work in results_list]
 
-            _output_results(results_list, effective_json_path)
+            _output_results(
+                results_list, effective_json_path, effective_parquet_path
+            )
 
         except Exception as e:
             _handle_cli_exception(e)

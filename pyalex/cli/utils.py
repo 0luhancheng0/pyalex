@@ -7,6 +7,7 @@ output formatting, and query execution.
 
 import asyncio
 import json
+from typing import Any
 
 import typer
 from prettytable import PrettyTable
@@ -80,7 +81,7 @@ def set_global_state(debug_mode: bool, dry_run_mode: bool, batch_size: int) -> N
     _batch_size = batch_size
 
 
-def set_batch_progress_context(progress_context: any | None) -> None:
+def set_batch_progress_context(progress_context: Any | None) -> None:
     """Set the active batch progress context to prevent conflicts.
 
     Args:
@@ -90,7 +91,7 @@ def set_batch_progress_context(progress_context: any | None) -> None:
     _batch_progress_context = progress_context
 
 
-def get_batch_progress_context() -> any | None:
+def get_batch_progress_context() -> Any | None:
     """Get the active batch progress context.
 
     Returns:
@@ -824,21 +825,28 @@ def _add_abstract_to_work(work_dict):
 
 
 def _output_results(
-    results, json_path: str | None = None, single: bool = False, grouped: bool = False
+    results,
+    json_path: str | None = None,
+    parquet_path: str | None = None,
+    single: bool = False,
+    grouped: bool = False,
 ):
-    """Output results in table format to stdout or JSON format to file/stdout."""
+    """Output results in table, JSON, or Parquet format."""
     # Debug: print type of results
     import sys
 
     if hasattr(sys, "_debug_output"):
         print(
-            f"DEBUG _output_results: type={type(results)}, hasattr to_dict={hasattr(results, 'to_dict')}",
+            f"DEBUG _output_results: type={type(results)}, "
+            f"hasattr to_dict={hasattr(results, 'to_dict')}",
             file=sys.stderr,
         )
-        if hasattr(results, "__iter__") and not isinstance(results, (str, dict)):
+        if hasattr(results, "__iter__") and not isinstance(
+            results, str | dict
+        ):
             try:
                 print(f"DEBUG _output_results: len={len(results)}", file=sys.stderr)
-            except:
+            except Exception:
                 pass
 
     # Handle None or empty results
@@ -852,6 +860,12 @@ def _output_results(
                 # Save JSON to file
                 with open(json_path, "w") as f:
                     json.dump(data, f, indent=2)
+        elif parquet_path:
+            # Create empty DataFrame and save to parquet
+            import pandas as pd
+            df = pd.DataFrame()
+            df.to_parquet(parquet_path, index=False)
+            typer.echo(f"Empty results saved to {parquet_path}")
         else:
             typer.echo("No results found.")
         return
@@ -861,19 +875,25 @@ def _output_results(
         import pandas as pd
 
         if isinstance(results, pd.DataFrame):
+            results_df = results
             results = results.to_dict("records")
         elif hasattr(results, "to_dict") and callable(results.to_dict):
             # It's a DataFrame or DataFrame-like object
+            results_df = results
             results = results.to_dict("records")
         elif not isinstance(results, list):
             # Single item, wrap in list
             results = [results]
+            results_df = None
+        else:
+            results_df = None
     except ImportError:
         # pandas not installed, handle without DataFrame check
         if hasattr(results, "to_dict") and callable(results.to_dict):
             results = results.to_dict("records")
         elif not isinstance(results, list):
             results = [results]
+        results_df = None
 
     if not single and not grouped and (not results or len(results) == 0):
         if json_path:
@@ -885,11 +905,40 @@ def _output_results(
                 # Save JSON to file
                 with open(json_path, "w") as f:
                     json.dump(data, f, indent=2)
+        elif parquet_path:
+            # Create empty DataFrame and save to parquet
+            import pandas as pd
+            df = pd.DataFrame()
+            df.to_parquet(parquet_path, index=False)
+            typer.echo(f"Empty results saved to {parquet_path}")
         else:
             typer.echo("No results found.")
         return
 
-    if json_path:
+    if parquet_path:
+        # Save to Parquet file with normalization
+        import pandas as pd
+        
+        # Convert to DataFrame if needed
+        if results_df is not None:
+            df = results_df
+        else:
+            if single:
+                df = pd.DataFrame([dict(results)])
+            elif grouped:
+                df = pd.DataFrame([dict(r) for r in results])
+            else:
+                df = pd.DataFrame([dict(r) for r in results])
+        
+        # Normalize the DataFrame to flatten nested structures
+        # This exposes all attributes for downstream processing
+        df = pd.json_normalize(df.to_dict(orient="records"))
+        
+        # Save to parquet
+        df.to_parquet(parquet_path, index=False)
+        typer.echo(f"Results saved to {parquet_path}")
+        
+    elif json_path:
         # Prepare JSON data
         if single:
             data = dict(results)
@@ -950,8 +999,10 @@ def _output_table(results, single: bool = False, grouped: bool = False):
     typer.echo(table)
 
 
-def _output_grouped_results(results, json_path: str | None = None):
-    """Output grouped results in table format to stdout or JSON format to file/stdout."""
+def _output_grouped_results(
+    results, json_path: str | None = None, parquet_path: str | None = None
+):
+    """Output grouped results in table, JSON, or Parquet format."""
     import pandas as pd
 
     if results is None:
@@ -964,6 +1015,11 @@ def _output_grouped_results(results, json_path: str | None = None):
                 # Save JSON to file
                 with open(json_path, "w") as f:
                     json.dump(data, f, indent=2)
+        elif parquet_path:
+            # Create empty DataFrame and save to parquet
+            df = pd.DataFrame()
+            df.to_parquet(parquet_path, index=False)
+            typer.echo(f"Empty grouped results saved to {parquet_path}")
         else:
             typer.echo("No grouped results found.")
         return
@@ -973,7 +1029,10 @@ def _output_grouped_results(results, json_path: str | None = None):
 
     # Convert DataFrame to list of dicts if needed
     if isinstance(grouped_data, pd.DataFrame):
+        grouped_df = grouped_data
         grouped_data = grouped_data.to_dict("records")
+    else:
+        grouped_df = None
 
     # Check for empty results
     is_empty = False
@@ -992,11 +1051,30 @@ def _output_grouped_results(results, json_path: str | None = None):
                 # Save JSON to file
                 with open(json_path, "w") as f:
                     json.dump(data, f, indent=2)
+        elif parquet_path:
+            # Create empty DataFrame and save to parquet
+            df = pd.DataFrame()
+            df.to_parquet(parquet_path, index=False)
+            typer.echo(f"Empty grouped results saved to {parquet_path}")
         else:
             typer.echo("No grouped results found.")
         return
 
-    if json_path:
+    if parquet_path:
+        # Save to Parquet file with normalization
+        if grouped_df is not None:
+            df = grouped_df
+        else:
+            df = pd.DataFrame([dict(item) for item in grouped_data])
+        
+        # Normalize the DataFrame to flatten nested structures
+        # This exposes all attributes for downstream processing
+        df = pd.json_normalize(df.to_dict(orient="records"))
+        
+        df.to_parquet(parquet_path, index=False)
+        typer.echo(f"Grouped results saved to {parquet_path}")
+        
+    elif json_path:
         # Prepare JSON data
         data = [dict(item) for item in grouped_data]
 
