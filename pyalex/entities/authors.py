@@ -1,7 +1,12 @@
 """Author entities for OpenAlex API."""
 
+from typing import TYPE_CHECKING
+
 from pyalex.entities.base import BaseOpenAlex
 from pyalex.entities.base import RangeFilterMixin
+
+if TYPE_CHECKING:
+    pass
 
 
 class Author(dict):

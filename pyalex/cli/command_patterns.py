@@ -82,14 +82,14 @@ def validate_output_format_options(
     """
     # Count how many output options are provided
     options_provided = sum([json_flag, json_path is not None, parquet_path is not None])
-    
+
     if options_provided > 1:
         typer.echo(
-            "Error: --json, --json-file, and --parquet-file are mutually exclusive", 
-            err=True
+            "Error: --json, --json-file, and --parquet-file are mutually exclusive",
+            err=True,
         )
         raise typer.Exit(1)
-    
+
     # Resolve JSON path
     if json_flag:
         effective_json_path = "-"  # stdout
@@ -97,7 +97,7 @@ def validate_output_format_options(
         effective_json_path = json_path
     else:
         effective_json_path = None
-    
+
     return effective_json_path, parquet_path
 
 

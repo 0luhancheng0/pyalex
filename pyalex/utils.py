@@ -1,18 +1,29 @@
 """Entity identification and type detection utilities."""
 
 import re
+from typing import TYPE_CHECKING
 
+from pyalex.entities.authors import Author
 from pyalex.entities.authors import Authors
 from pyalex.entities.domains import Domains
 from pyalex.entities.fields import Fields
+from pyalex.entities.funders import Funder
 from pyalex.entities.funders import Funders
+from pyalex.entities.institutions import Institution
 from pyalex.entities.institutions import Institutions
 from pyalex.entities.keywords import Keywords
+from pyalex.entities.publishers import Publisher
 from pyalex.entities.publishers import Publishers
+from pyalex.entities.sources import Source
 from pyalex.entities.sources import Sources
 from pyalex.entities.subfields import Subfields
+from pyalex.entities.topics import Topic
 from pyalex.entities.topics import Topics
+from pyalex.entities.works import Work
 from pyalex.entities.works import Works
+
+if TYPE_CHECKING:
+    pass
 
 # Entity pattern definitions - single source of truth for all entity types
 ENTITY_PATTERNS: dict[str, tuple[str, type, str]] = {
@@ -65,7 +76,9 @@ def _match_entity_pattern(openalex_id: str) -> tuple[str, type, str]:
     raise ValueError(f"Unknown OpenAlex ID format: {openalex_id}")
 
 
-def from_id(openalex_id: str) -> dict | None:
+def from_id(
+    openalex_id: str,
+) -> Work | Author | Source | Institution | Topic | Publisher | Funder | dict | None:
     """Get an OpenAlex entity from its ID with automatic type detection.
 
     This function analyzes the OpenAlex ID to determine the entity type

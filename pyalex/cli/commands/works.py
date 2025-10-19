@@ -14,7 +14,6 @@ from ..command_patterns import execute_standard_query
 from ..command_patterns import handle_large_id_list_if_needed
 from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
-from ..utils import _add_abstract_to_work
 from ..utils import _handle_cli_exception
 from ..utils import _output_grouped_results
 from ..utils import _output_results
@@ -349,25 +348,8 @@ def create_works_command(app):
                 typer.echo("No results returned from API", err=True)
                 return
 
-            # Convert results to list format for normal (non-grouped) queries
-            import pandas as pd
-
-            if isinstance(results, pd.DataFrame):
-                results_list = results.to_dict("records")
-            elif hasattr(results, "to_dict") and callable(results.to_dict):
-                results_list = results.to_dict("records")
-            elif isinstance(results, list):
-                results_list = results
-            else:
-                results_list = list(results) if results is not None else []
-
-            # Add abstracts to works
-            if len(results_list) > 0:
-                results_list = [_add_abstract_to_work(work) for work in results_list]
-
-            _output_results(
-                results_list, effective_json_path, effective_parquet_path
-            )
+            # Abstract conversion now happens automatically in _output_results
+            _output_results(results, effective_json_path, effective_parquet_path)
 
         except Exception as e:
             _handle_cli_exception(e)

@@ -814,13 +814,21 @@ def _execute_query_smart(query, all_results=False, limit=None):
 
 
 def _add_abstract_to_work(work_dict):
-    """Convert inverted abstract index to readable abstract for a work."""
-    if (
-        isinstance(work_dict, dict)
-        and "abstract_inverted_index" in work_dict
-        and work_dict["abstract_inverted_index"] is not None
-    ):
-        work_dict["abstract"] = invert_abstract(work_dict["abstract_inverted_index"])
+    """Convert inverted abstract index to readable abstract for a work.
+
+    Also drops the abstract_inverted_index field after conversion to avoid
+    issues with json_normalize and reduce data size.
+    """
+    if isinstance(work_dict, dict) and "abstract_inverted_index" in work_dict:
+        # If abstract_inverted_index exists but is None, just drop it
+        if work_dict["abstract_inverted_index"] is None:
+            work_dict.pop("abstract_inverted_index", None)
+        else:
+            # Convert to readable abstract and drop the inverted index
+            work_dict["abstract"] = invert_abstract(
+                work_dict["abstract_inverted_index"]
+            )
+            work_dict.pop("abstract_inverted_index", None)
     return work_dict
 
 
@@ -841,9 +849,7 @@ def _output_results(
             f"hasattr to_dict={hasattr(results, 'to_dict')}",
             file=sys.stderr,
         )
-        if hasattr(results, "__iter__") and not isinstance(
-            results, str | dict
-        ):
+        if hasattr(results, "__iter__") and not isinstance(results, str | dict):
             try:
                 print(f"DEBUG _output_results: len={len(results)}", file=sys.stderr)
             except Exception:
@@ -863,6 +869,7 @@ def _output_results(
         elif parquet_path:
             # Create empty DataFrame and save to parquet
             import pandas as pd
+
             df = pd.DataFrame()
             df.to_parquet(parquet_path, index=False)
             typer.echo(f"Empty results saved to {parquet_path}")
@@ -895,6 +902,20 @@ def _output_results(
             results = [results]
         results_df = None
 
+    # Process abstracts for works data (detect by presence of abstract_inverted_index)
+    # This needs to happen before normalization to ensure clean data
+    if results and isinstance(results, list) and len(results) > 0:
+        first_item = results[0] if not single else results
+        if isinstance(first_item, dict) and "abstract_inverted_index" in first_item:
+            # This is works data - convert abstracts and remove inverted index
+            if single:
+                results = _add_abstract_to_work(results)
+            else:
+                results = [_add_abstract_to_work(work) for work in results]
+            # Update the DataFrame as well if it exists
+            if results_df is not None:
+                results_df = pd.DataFrame(results)
+
     if not single and not grouped and (not results or len(results) == 0):
         if json_path:
             data = []
@@ -908,6 +929,7 @@ def _output_results(
         elif parquet_path:
             # Create empty DataFrame and save to parquet
             import pandas as pd
+
             df = pd.DataFrame()
             df.to_parquet(parquet_path, index=False)
             typer.echo(f"Empty results saved to {parquet_path}")
@@ -918,7 +940,7 @@ def _output_results(
     if parquet_path:
         # Save to Parquet file with normalization
         import pandas as pd
-        
+
         # Convert to DataFrame if needed
         if results_df is not None:
             df = results_df
@@ -929,15 +951,15 @@ def _output_results(
                 df = pd.DataFrame([dict(r) for r in results])
             else:
                 df = pd.DataFrame([dict(r) for r in results])
-        
+
         # Normalize the DataFrame to flatten nested structures
         # This exposes all attributes for downstream processing
         df = pd.json_normalize(df.to_dict(orient="records"))
-        
+
         # Save to parquet
         df.to_parquet(parquet_path, index=False)
         typer.echo(f"Results saved to {parquet_path}")
-        
+
     elif json_path:
         # Prepare JSON data
         if single:
@@ -1066,14 +1088,14 @@ def _output_grouped_results(
             df = grouped_df
         else:
             df = pd.DataFrame([dict(item) for item in grouped_data])
-        
+
         # Normalize the DataFrame to flatten nested structures
         # This exposes all attributes for downstream processing
         df = pd.json_normalize(df.to_dict(orient="records"))
-        
+
         df.to_parquet(parquet_path, index=False)
         typer.echo(f"Grouped results saved to {parquet_path}")
-        
+
     elif json_path:
         # Prepare JSON data
         data = [dict(item) for item in grouped_data]

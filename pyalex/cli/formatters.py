@@ -6,12 +6,16 @@ for different OpenAlex entity types (works, authors, institutions, etc.).
 
 from abc import ABC
 from abc import abstractmethod
+from typing import TYPE_CHECKING
 from typing import Any
 
 from prettytable import PrettyTable
 
 from pyalex.core.config import config
 from pyalex.core.entity_detection import EntityTypeDetector
+
+if TYPE_CHECKING:
+    pass
 
 MAX_WIDTH = 100
 

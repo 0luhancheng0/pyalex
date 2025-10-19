@@ -218,7 +218,6 @@ def show(
       cat results.json | pyalex show
     """
     try:
-
         # Determine if input is parquet or JSON
         is_parquet = False
         if file_path and file_path.lower().endswith(".parquet"):
@@ -234,12 +233,12 @@ def show(
                 # Convert to list of dicts for consistent processing
                 # Use orient='records' which handles nested structures better
                 data = df.to_dict("records")
-                
+
                 # Convert any numpy types to native Python types for JSON serialization
                 def convert_numpy_types(obj):
                     """Recursively convert numpy types to Python native types."""
                     import numpy as np
-                    
+
                     if isinstance(obj, np.integer):
                         return int(obj)
                     elif isinstance(obj, np.floating):
@@ -252,10 +251,10 @@ def show(
                         return [convert_numpy_types(item) for item in obj]
                     else:
                         return obj
-                
+
                 # Apply conversion to all data
                 data = convert_numpy_types(data)
-                
+
             except FileNotFoundError:
                 typer.echo(f"Error: File '{file_path}' not found", err=True)
                 raise typer.Exit(1) from None

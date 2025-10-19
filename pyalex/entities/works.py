@@ -2,11 +2,15 @@
 
 import asyncio
 import warnings
+from typing import TYPE_CHECKING
 
 from pyalex.core.config import config
 from pyalex.core.response import OpenAlexResponseList
 from pyalex.core.utils import invert_abstract
 from pyalex.entities.base import BaseOpenAlex
+
+if TYPE_CHECKING:
+    pass
 
 
 class Work(dict):
