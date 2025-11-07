@@ -17,7 +17,7 @@ from pyalex.core.entity_detection import EntityTypeDetector
 if TYPE_CHECKING:
     pass
 
-MAX_WIDTH = 100
+MAX_WIDTH = 300
 
 
 class TableFormatter(ABC):
@@ -88,7 +88,7 @@ class AuthorsTableFormatter(TableFormatter):
         return ["Name", "Works", "Citations", "Institution", "ID"]
 
     def extract_row_data(self, result: dict[str, Any]) -> list[Any]:
-        name = (result.get("display_name") or "Unknown")[:40]
+        name = (result.get("display_name") or "Unknown")[: self.max_width]
         works = result.get("works_count", 0)
         citations = result.get("cited_by_count", 0)
 
@@ -115,7 +115,7 @@ class InstitutionsTableFormatter(TableFormatter):
         return ["Name", "Country", "Works", "Citations", "ID"]
 
     def extract_row_data(self, result: dict[str, Any]) -> list[Any]:
-        name = (result.get("display_name") or "Unknown")[:40]
+        name = (result.get("display_name") or "Unknown")[: self.max_width]
         country = result.get("country_code", "N/A")
         works = result.get("works_count", 0)
         citations = result.get("cited_by_count", 0)
@@ -131,7 +131,7 @@ class SourcesTableFormatter(TableFormatter):
         return ["Name", "Type", "ISSN", "Works", "ID"]
 
     def extract_row_data(self, result: dict[str, Any]) -> list[Any]:
-        name = (result.get("display_name") or "Unknown")[:40]
+        name = (result.get("display_name") or "Unknown")[: self.max_width]
         source_type = result.get("type", "N/A")
         issn = result.get("issn_l", result.get("issn", ["N/A"]))
         if isinstance(issn, list):
@@ -149,7 +149,7 @@ class PublishersTableFormatter(TableFormatter):
         return ["Name", "Level", "Works", "Sources", "ID"]
 
     def extract_row_data(self, result: dict[str, Any]) -> list[Any]:
-        name = (result.get("display_name") or "Unknown")[:40]
+        name = (result.get("display_name") or "Unknown")[: self.max_width]
         level = result.get("hierarchy_level", "N/A")
         works = result.get("works_count", 0)
         sources = result.get("sources_count", 0)
@@ -205,7 +205,7 @@ class FallbackTableFormatter(TableFormatter):
 
 
 class TableFormatterFactory:
-    """Factory for creating appropriate table formatters based on entity type detection."""
+    """Factory for creating table formatters based on entity type detection."""
 
     @staticmethod
     def detect_entity_type(first_result: dict[str, Any]) -> str:

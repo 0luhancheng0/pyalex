@@ -244,7 +244,8 @@ def apply_range_filter(query, field_name, parsed_value):
 
     Args:
         query: The query object to apply the filter to.
-        field_name: The field name to filter on (e.g., 'works_count', 'summary_stats.h_index').
+        field_name: The field name to filter on (e.g., 'works_count',
+            'summary_stats.h_index').
         parsed_value: The parsed filter value from parse_range_filter.
 
     Returns:
@@ -447,7 +448,10 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
                 TextColumn("({task.completed}/{task.total})"),
             ) as progress:
                 task_id = progress.add_task(
-                    f"Processing {len(ids):,} {class_name} in {num_batches} concurrent batches",
+                    (
+                        f"Processing {len(ids):,} {class_name} in "
+                        f"{num_batches} concurrent batches"
+                    ),
                     total=100,
                 )
 
@@ -461,7 +465,10 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
         except ImportError:
             # Fallback: simple text message
             typer.echo(
-                f"Processing {len(ids):,} {class_name} in {num_batches} concurrent batches...",
+                (
+                    f"Processing {len(ids):,} {class_name} in "
+                    f"{num_batches} concurrent batches..."
+                ),
                 err=True,
             )
             responses = await async_batch_requests(urls, max_concurrent=5)
@@ -544,6 +551,22 @@ def _validate_and_apply_common_options(
         query = query.sample(sample, seed=seed)
 
     return query
+
+
+def parse_select_fields(select: str | None) -> list[str] | None:
+    """Parse a comma-separated select string into a list of fields.
+
+    Args:
+        select: Raw select option string from the CLI.
+
+    Returns:
+        Ordered list of field paths or None when selection is empty.
+    """
+    if not select:
+        return None
+
+    fields = [field.strip() for field in select.split(",") if field.strip()]
+    return fields or None
 
 
 def _execute_query_with_progress(
@@ -838,6 +861,7 @@ def _output_results(
     parquet_path: str | None = None,
     single: bool = False,
     grouped: bool = False,
+    selected_fields: list[str] | None = None,
 ):
     """Output results in table, JSON, or Parquet format."""
     # Debug: print type of results
@@ -980,10 +1004,15 @@ def _output_results(
 
     else:
         # Display table format to stdout
-        _output_table(results, single, grouped)
+        _output_table(results, single, grouped, selected_fields=selected_fields)
 
 
-def _output_table(results, single: bool = False, grouped: bool = False):
+def _output_table(
+    results,
+    single: bool = False,
+    grouped: bool = False,
+    selected_fields: list[str] | None = None,
+):
     """Output results in table format using PrettyTable.
 
     Uses the TableFormatterFactory to automatically detect entity type
@@ -1011,6 +1040,79 @@ def _output_table(results, single: bool = False, grouped: bool = False):
     # Handle empty results
     if len(results) == 0:
         typer.echo("No results found.")
+        return
+
+    if selected_fields is None and not grouped:
+        entity_type = TableFormatterFactory.detect_entity_type(results[0])
+        candidate_fields = list(results[0].keys())
+        if (
+            entity_type == "fallback"
+            and candidate_fields
+            and len(candidate_fields) <= 12
+        ):
+            selected_fields = candidate_fields
+
+    if selected_fields:
+        table = PrettyTable()
+        table.field_names = selected_fields
+        table.max_width = MAX_WIDTH
+        table.align = "l"
+
+        def _extract_field_value(data: Any, field_path: str) -> Any:
+            parts = field_path.split(".")
+            current_items = [data]
+
+            for part in parts:
+                next_items: list[Any] = []
+                for item in current_items:
+                    if isinstance(item, dict):
+                        next_items.append(item.get(part))
+                    elif isinstance(item, list):
+                        if part.isdigit():
+                            idx = int(part)
+                            if 0 <= idx < len(item):
+                                next_items.append(item[idx])
+                        else:
+                            for list_item in item:
+                                if isinstance(list_item, dict) and part in list_item:
+                                    next_items.append(list_item.get(part))
+                    else:
+                        next_items.append(None)
+                current_items = [value for value in next_items if value is not None]
+                if not current_items:
+                    break
+
+            if not current_items:
+                return ""
+
+            if len(current_items) == 1:
+                return current_items[0]
+            return current_items
+
+        def _stringify_value(value: Any) -> Any:
+            if value is None:
+                return ""
+            if isinstance(value, (int, float)):
+                return value
+            if isinstance(value, str):
+                return value
+            if isinstance(value, list):
+                flattened = [str(_stringify_value(item)) for item in value if item]
+                return ", ".join(flattened)
+            if isinstance(value, dict):
+                if "display_name" in value:
+                    return str(value["display_name"])
+                return json.dumps(value, ensure_ascii=False)
+            return str(value)
+
+        for result in results:
+            row = []
+            for field in selected_fields:
+                value = _extract_field_value(result, field)
+                row.append(_stringify_value(value))
+            table.add_row(row)
+
+        typer.echo(table)
         return
 
     # Use factory to create and populate table

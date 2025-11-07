@@ -8,7 +8,7 @@ import os
 import subprocess
 import tempfile
 
-import pytest
+import pytest  # type: ignore[import-not-found]
 
 
 def test_cli_help():
@@ -85,6 +85,29 @@ def test_works_summary_format():
     assert result.returncode == 0
     # Should show table format with headers
     assert "Name" in result.stdout or "ID" in result.stdout
+
+
+def test_works_select_fields_table_header():
+    """Works select should use selected fields as table headers."""
+    result = subprocess.run(
+        [
+            "pyalex",
+            "works",
+            "--select",
+            "title,fwci",
+            "--limit",
+            "1",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    header_line = next(
+        (line for line in result.stdout.splitlines() if line.startswith("|")),
+        "",
+    )
+    assert "| title" in header_line
+    assert "| fwci" in header_line
 
 
 def test_show_json_file():

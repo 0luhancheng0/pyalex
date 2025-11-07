@@ -195,6 +195,7 @@ def handle_large_id_list_if_needed(
     limit: int | None,
     json_path: str | None,
     group_by: str | None = None,
+    selected_fields: list[str] | None = None,
 ):
     """Check for and handle large ID lists attached to query.
 
@@ -279,7 +280,11 @@ def handle_large_id_list_if_needed(
         if entity_class.__name__ == "Works" and len(results_list) > 0:
             results_list = [_add_abstract_to_work(work) for work in results_list]
 
-        _output_results(results_list, json_path)
+        _output_results(
+            results_list,
+            json_path,
+            selected_fields=selected_fields,
+        )
 
     return results  # Return results to signal they were handled
 
@@ -491,7 +496,7 @@ def with_error_handling(func: Callable) -> Callable:
             from .utils import _handle_cli_exception
 
             _handle_cli_exception(e)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     return wrapper
 

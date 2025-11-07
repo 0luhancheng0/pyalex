@@ -41,8 +41,9 @@ class EntityTypeDetector:
                 and ("last_known_institutions" in r or "last_known_institution" in r)
             ),
         ),
-        ("institutions", lambda r: "country_code" in r and "works_count" in r),
+        # Check sources before institutions since sources can also have country_code
         ("sources", lambda r: "issn" in r or "issn_l" in r),
+        ("institutions", lambda r: "country_code" in r and "works_count" in r),
         ("publishers", lambda r: "hierarchy_level" in r),
         ("funders", lambda r: ("works_count" in r and "grants_count" in r)),
         ("topics", lambda r: ("works_count" in r and "subfield" in r)),

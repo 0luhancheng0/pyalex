@@ -27,6 +27,7 @@ dependencies = [
     "embedding-atlas>=0.10.0",
     "anywidget>=0.9.18",
     "pydantic>=2.0.0",
+    "fastmcp>=2.12.5",
 ]
 dynamic = ["version"]
 requires-python = ">=3.10"
@@ -65,3 +66,6 @@ force-single-line = true
 [tool.pytest.ini_options]
 pythonpath = ["."]
 addopts = "-v -W error --ignore=tests/slow"
+
+[tool.ruff.lint.per-file-ignores]
+"mcp_server.py" = ["E501"]  # Allow longer lines in MCP server

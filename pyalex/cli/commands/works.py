@@ -18,6 +18,7 @@ from ..utils import _handle_cli_exception
 from ..utils import _output_grouped_results
 from ..utils import _output_results
 from ..utils import _validate_and_apply_common_options
+from ..utils import parse_select_fields
 
 
 def create_works_command(app):
@@ -40,8 +41,10 @@ def create_works_command(app):
             str | None,
             typer.Option(
                 "--institution-ids",
-                help="Filter by institution OpenAlex ID(s). Use comma-separated values for "
-                "OR logic (e.g., --institution-ids 'I123,I456,I789')",
+                help=(
+                    "Filter by institution OpenAlex ID(s). Use comma-separated values "
+                    "for OR logic (e.g., --institution-ids 'I123,I456,I789')"
+                ),
             ),
         ] = None,
         publication_year: Annotated[
@@ -69,16 +72,22 @@ def create_works_command(app):
             str | None,
             typer.Option(
                 "--topic-ids",
-                help="Filter by primary topic OpenAlex ID(s). Use comma-separated values for "
-                "OR logic (e.g., --topic-ids 'T123,T456,T789')",
+                help=(
+                    "Filter by primary topic OpenAlex ID(s). "
+                    "Use comma-separated values for OR logic "
+                    "(e.g., --topic-ids 'T123,T456,T789')"
+                ),
             ),
         ] = None,
         subfield_ids: Annotated[
             str | None,
             typer.Option(
                 "--subfield-ids",
-                help="Filter by primary topic subfield OpenAlex ID(s). Use comma-separated values for "
-                "OR logic (e.g., --subfield-ids 'SF123,SF456,SF789')",
+                help=(
+                    "Filter by primary topic subfield OpenAlex ID(s). Use "
+                    "comma-separated values for OR logic (e.g., --subfield-ids "
+                    "'SF123,SF456,SF789')"
+                ),
             ),
         ] = None,
         funder_ids: Annotated[
@@ -116,7 +125,10 @@ def create_works_command(app):
             typer.Option(
                 "--limit",
                 "-l",
-                help="Maximum number of results to return (mutually exclusive with --all)",
+                help=(
+                    "Maximum number of results to return (mutually exclusive "
+                    "with --all)"
+                ),
             ),
         ] = None,
         json_flag: Annotated[
@@ -139,8 +151,11 @@ def create_works_command(app):
             str | None,
             typer.Option(
                 "--sort-by",
-                help="Sort results by field (e.g. 'cited_by_count:desc', 'publication_year', "
-                "'display_name:asc'). Multiple sorts: 'year:desc,cited_by_count:desc'",
+                help=(
+                    "Sort results by field (e.g. 'cited_by_count:desc', "
+                    "'publication_year', 'display_name:asc'). Multiple sorts: "
+                    "'year:desc,cited_by_count:desc'"
+                ),
             ),
         ] = None,
         sample: Annotated[
@@ -315,6 +330,8 @@ def create_works_command(app):
                 )
 
             # Apply common options (sort, sample, select)
+            cli_selected_fields = parse_select_fields(select)
+
             query = _validate_and_apply_common_options(
                 query, all_results, limit, sample, seed, sort_by, select
             )
@@ -325,7 +342,13 @@ def create_works_command(app):
 
             # Check for and handle large ID lists (batch processing)
             results = handle_large_id_list_if_needed(
-                query, Works, all_results, limit, effective_json_path, group_by
+                query,
+                Works,
+                all_results,
+                limit,
+                effective_json_path,
+                group_by,
+                selected_fields=cli_selected_fields,
             )
             if results is not None:
                 return  # Large ID list was handled, we're done
@@ -349,7 +372,12 @@ def create_works_command(app):
                 return
 
             # Abstract conversion now happens automatically in _output_results
-            _output_results(results, effective_json_path, effective_parquet_path)
+            _output_results(
+                results,
+                effective_json_path,
+                effective_parquet_path,
+                selected_fields=cli_selected_fields,
+            )
 
         except Exception as e:
             _handle_cli_exception(e)
