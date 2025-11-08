@@ -91,13 +91,14 @@ def _load_entity_class_from_prefix(openalex_id: str) -> tuple[type, str]:
 
 
 def from_ids(
-    json_flag: Annotated[
-        bool, typer.Option("--json", help="Output JSON to stdout")
+    jsonl_flag: Annotated[
+        bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
     ] = False,
-    json_path: Annotated[
+    jsonl_path: Annotated[
         str | None,
         typer.Option(
-            "--json-file", help="Save results to JSON file at specified path"
+            "--jsonl-file",
+            help="Save results to JSON Lines file at specified path",
         ),
     ] = None,
     parquet_path: Annotated[
@@ -111,8 +112,8 @@ def from_ids(
     """Retrieve entities by their OpenAlex IDs from stdin."""
 
     try:
-        effective_json_path, effective_parquet_path = validate_output_format_options(
-            json_flag, json_path, parquet_path
+        effective_jsonl_path, effective_parquet_path = validate_output_format_options(
+            jsonl_flag, jsonl_path, parquet_path
         )
 
         payload = sys.stdin.read()
@@ -142,7 +143,7 @@ def from_ids(
 
         _output_results(
             results,
-            json_path=effective_json_path,
+            jsonl_path=effective_jsonl_path,
             parquet_path=effective_parquet_path,
         )
 

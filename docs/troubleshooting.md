@@ -209,25 +209,25 @@ which pyalex
 python -m pyalex works --help
 ```
 
-### JSON Output Issues
+### JSON Lines Output Issues
 
-**Problem**: JSON file not created
+**Problem**: JSONL file not created
 
 **Solution**:
 
 1. Check file path:
 ```bash
 # Relative path
-pyalex works --search "AI" --json results.json
+pyalex works --search "AI" --jsonl-file results.jsonl
 
 # Absolute path
-pyalex works --search "AI" --json /full/path/results.json
+pyalex works --search "AI" --jsonl-file /full/path/results.jsonl
 ```
 
 2. Check permissions:
 ```bash
 # Ensure write permissions
-ls -la results.json
+ls -la results.jsonl
 ```
 
 ## Performance Issues

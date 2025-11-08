@@ -16,8 +16,8 @@ pyalex works --search "AI" --year 2023 --limit 20
 # Get all results (uses pagination)
 pyalex works --search "deep learning" --all
 
-# Save results to JSON
-pyalex works --search "neural networks" --limit 100 --json results.json
+# Save results to JSON Lines
+pyalex works --search "neural networks" --limit 100 --jsonl-file results.jsonl
 ```
 
 ### Filter by Date Range
@@ -119,7 +119,7 @@ pyalex institutions --search "Stanford" --limit 5
 pyalex institutions --country-code "US" --limit 20
 
 # Get institution details
-pyalex institutions --search "MIT" --limit 1 --json mit.json
+pyalex institutions --search "MIT" --limit 1 --jsonl-file mit.jsonl
 ```
 
 ## Advanced Usage
@@ -128,11 +128,11 @@ pyalex institutions --search "MIT" --limit 1 --json mit.json
 
 ```bash
 # Process a list of IDs from a file
-cat work_ids.txt | pyalex from-ids --json batch_results.json
+cat work_ids.txt | pyalex from-ids --jsonl-file batch_results.jsonl
 
 # Chain commands
-pyalex works --search "climate change" --limit 100 --json - | \
-  jq '.[] | select(.cited_by_count > 50) | .title'
+pyalex works --search "climate change" --limit 100 --jsonl | \
+  jq 'select(.cited_by_count > 50) | .title'
 ```
 
 ### Combining Filters
@@ -144,7 +144,7 @@ pyalex works \
   --year "2022:2023" \
   --cited-by-count "10-" \
   --limit 50 \
-  --json ai_recent_cited.json
+  --jsonl-file ai_recent_cited.jsonl
 ```
 
 ### Display Options
@@ -153,11 +153,11 @@ pyalex works \
 # Table output (default)
 pyalex works --search "python" --limit 10
 
-# JSON output to file
-pyalex works --search "python" --limit 10 --json python_works.json
+# JSON Lines output to file
+pyalex works --search "python" --limit 10 --jsonl-file python_works.jsonl
 
-# JSON to stdout (for piping)
-pyalex works --search "python" --limit 10 --json -
+# JSON Lines to stdout (for piping)
+pyalex works --search "python" --limit 10 --jsonl
 ```
 
 ## Configuration
@@ -196,13 +196,13 @@ Then run PyAlex commands normally - settings will be loaded automatically!
 
 ```bash
 # Use --all flag for pagination
-pyalex works --search "machine learning" --all --json ml_all.json
+pyalex works --search "machine learning" --all --jsonl-file ml_all.jsonl
 
 # Increase batch size for bulk operations
 OPENALEX_CLI_BATCH_SIZE=200 pyalex from-ids < large_id_list.txt
 
 # Use --limit to cap results
-pyalex works --search "broad query" --limit 1000 --json results.json
+pyalex works --search "broad query" --limit 1000 --jsonl-file results.jsonl
 ```
 
 ### Debugging
@@ -224,18 +224,18 @@ pyalex works --search "transformers NLP" \
   --year 2023 \
   --cited-by-count "20-" \
   --limit 50 \
-  --json transformers_2023.json
+  --jsonl-file transformers_2023.jsonl
 ```
 
 ### 2. Get Author Bibliography
 
 ```bash
 # Find author
-pyalex authors --search "Andrew Ng" --limit 1 --json author.json
+pyalex authors --search "Andrew Ng" --limit 1 --jsonl-file author.jsonl
 
 # Extract author ID and get their works
-AUTHOR_ID=$(jq -r '.[0].id' author.json)
-pyalex works --author "$AUTHOR_ID" --all --json author_works.json
+AUTHOR_ID=$(jq -r '.id' author.jsonl)
+pyalex works --author "$AUTHOR_ID" --all --jsonl-file author_works.jsonl
 ```
 
 ### 3. Institution Research Output
@@ -244,7 +244,7 @@ pyalex works --author "$AUTHOR_ID" --all --json author_works.json
 pyalex works --institution "Stanford University" \
   --year 2023 \
   --limit 500 \
-  --json stanford_2023.json
+  --jsonl-file stanford_2023.jsonl
 ```
 
 ### 4. Citation Analysis
@@ -255,11 +255,11 @@ pyalex works --search "deep learning" \
   --cited-by-count "500-" \
   --sort cited_by_count:desc \
   --limit 100 \
-  --json highly_cited_dl.json
+  --jsonl-file highly_cited_dl.jsonl
 
 # Analyze with jq
-jq '[.[] | {title: .title, citations: .cited_by_count}] | sort_by(.citations) | reverse | .[0:10]' \
-  highly_cited_dl.json
+jq -s '[.[] | {title: .title, citations: .cited_by_count}] | sort_by(.citations) | reverse | .[0:10]' \
+  highly_cited_dl.jsonl
 ```
 
 ## Error Handling

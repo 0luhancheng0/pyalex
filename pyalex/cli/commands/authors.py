@@ -193,13 +193,14 @@ def create_authors_command(app):
                 ),
             ),
         ] = None,
-        json_flag: Annotated[
-            bool, typer.Option("--json", help="Output JSON to stdout")
+        jsonl_flag: Annotated[
+            bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
         ] = False,
-        json_path: Annotated[
+        jsonl_path: Annotated[
             str | None,
             typer.Option(
-                "--json-file", help="Save results to JSON file at specified path"
+                "--jsonl-file",
+                help="Save results to JSON Lines file at specified path",
             ),
         ] = None,
         parquet_path: Annotated[
@@ -256,7 +257,7 @@ def create_authors_command(app):
           pyalex authors --institution-ids "I1234567890" --all
           pyalex authors --works-count "100:" --cited-by-count "1000:" --limit 50
           pyalex authors --last-known-institution-country US --h-index "25:" \
-                         --json results.json
+                         --jsonl-file results.jsonl
           pyalex authors --i10-index "50:" --two-year-mean-citedness "2.0:" \
                          --sort-by "cited_by_count:desc"
           pyalex authors --group-by "has_orcid"
@@ -268,8 +269,10 @@ def create_authors_command(app):
         try:
             # Validate options
             validate_pagination_options(all_results, limit)
-            effective_json_path, effective_parquet_path = (
-                validate_output_format_options(json_flag, json_path, parquet_path)
+            effective_jsonl_path, effective_parquet_path = (
+                validate_output_format_options(
+                    jsonl_flag, jsonl_path, parquet_path
+                )
             )
 
             institution_ids = resolve_ids_option(
@@ -363,7 +366,7 @@ def create_authors_command(app):
                 Authors,
                 all_results,
                 limit,
-                effective_json_path,
+                effective_jsonl_path,
                 group_by,
                 selected_fields=cli_selected_fields,
             )
@@ -376,7 +379,7 @@ def create_authors_command(app):
 
             if group_by:
                 _output_grouped_results(
-                    results, effective_json_path, effective_parquet_path
+                    results, effective_jsonl_path, effective_parquet_path
                 )
                 return
 
@@ -386,7 +389,7 @@ def create_authors_command(app):
 
             _output_results(
                 results,
-                effective_json_path,
+                effective_jsonl_path,
                 effective_parquet_path,
                 selected_fields=cli_selected_fields,
             )

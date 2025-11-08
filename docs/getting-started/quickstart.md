@@ -102,8 +102,8 @@ pyalex works --search "machine learning" --limit 10
 # Filter by year
 pyalex works --search "AI" --year 2023 --limit 20
 
-# Export to JSON
-pyalex works --search "quantum" --limit 100 --json results.json
+# Export to JSON Lines
+pyalex works --search "quantum" --limit 100 --jsonl-file results.jsonl
 
 # Get help
 pyalex --help

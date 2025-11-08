@@ -445,7 +445,25 @@ def _parse_ids_from_json_input(input_text: str, id_field: str = "id") -> list[st
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON input: {exc}") from exc
+        # Fallback to newline-delimited JSON (NDJSON) parsing
+        records: list[Any] = []
+        for _line_number, line in enumerate(input_text.splitlines(), start=1):
+            trimmed = line.strip()
+            if not trimmed:
+                continue
+
+            try:
+                records.append(json.loads(trimmed))
+            except json.JSONDecodeError as line_exc:
+                raise ValueError(
+                    "Invalid JSON input: expected a JSON object/array or "
+                    "newline-delimited JSON records"
+                ) from line_exc
+
+        if not records:
+            raise ValueError(f"Invalid JSON input: {exc}") from exc
+
+        data = records
 
     return _extract_ids_from_data(data, id_field=id_field)
 
@@ -997,7 +1015,7 @@ def _apply_title_abstract_template(
 
 def _output_results(
     results,
-    json_path: str | None = None,
+    jsonl_path: str | None = None,
     parquet_path: str | None = None,
     single: bool = False,
     grouped: bool = False,
@@ -1021,15 +1039,11 @@ def _output_results(
 
     # Handle None or empty results
     if results is None:
-        if json_path:
-            data = []
-            if json_path == "-":
-                # Output JSON to stdout
-                typer.echo(json.dumps(data, indent=2))
-            else:
-                # Save JSON to file
-                with open(json_path, "w") as f:
-                    json.dump(data, f, indent=2)
+        if jsonl_path:
+            if jsonl_path == "-":
+                return
+            with open(jsonl_path, "w", encoding="utf-8"):
+                pass
         elif parquet_path:
             # Create empty DataFrame and save to parquet
             import pandas as pd
@@ -1099,15 +1113,11 @@ def _output_results(
                 results_df = pd.DataFrame(results)
 
     if not single and not grouped and (not results or len(results) == 0):
-        if json_path:
-            data = []
-            if json_path == "-":
-                # Output JSON to stdout
-                typer.echo(json.dumps(data, indent=2))
-            else:
-                # Save JSON to file
-                with open(json_path, "w") as f:
-                    json.dump(data, f, indent=2)
+        if jsonl_path:
+            if jsonl_path == "-":
+                return
+            with open(jsonl_path, "w", encoding="utf-8"):
+                pass
         elif parquet_path:
             # Create empty DataFrame and save to parquet
             import pandas as pd
@@ -1142,23 +1152,26 @@ def _output_results(
         df.to_parquet(parquet_path, index=False)
         typer.echo(f"Results saved to {parquet_path}")
 
-    elif json_path:
-        # Prepare JSON data
+    elif jsonl_path:
+        # Prepare iterable of JSON records
         if single:
-            data = dict(results)
+            records = [dict(results)]
         elif grouped:
-            # For grouped data, preserve the original structure
-            data = [dict(r) for r in results]
+            records = [dict(r) for r in results]
         else:
-            data = [dict(r) for r in results]
+            records = [dict(r) for r in results]
 
-        if json_path == "-":
-            # Output JSON to stdout
-            typer.echo(json.dumps(data, indent=2))
+        def _emit_json_lines(iterable):
+            for record in iterable:
+                yield json.dumps(record, ensure_ascii=False)
+
+        if jsonl_path == "-":
+            for line in _emit_json_lines(records):
+                typer.echo(line)
         else:
-            # Save JSON to file
-            with open(json_path, "w") as f:
-                json.dump(data, f, indent=2)
+            with open(jsonl_path, "w", encoding="utf-8") as f:
+                for line in _emit_json_lines(records):
+                    f.write(line + "\n")
 
     else:
         # Display table format to stdout
@@ -1307,21 +1320,17 @@ def _output_table(
 
 
 def _output_grouped_results(
-    results, json_path: str | None = None, parquet_path: str | None = None
+    results, jsonl_path: str | None = None, parquet_path: str | None = None
 ):
     """Output grouped results in table, JSON, or Parquet format."""
     import pandas as pd
 
     if results is None:
-        if json_path:
-            data = []
-            if json_path == "-":
-                # Output JSON to stdout
-                typer.echo(json.dumps(data, indent=2))
-            else:
-                # Save JSON to file
-                with open(json_path, "w") as f:
-                    json.dump(data, f, indent=2)
+        if jsonl_path:
+            if jsonl_path == "-":
+                return
+            with open(jsonl_path, "w", encoding="utf-8"):
+                pass
         elif parquet_path:
             # Create empty DataFrame and save to parquet
             df = pd.DataFrame()
@@ -1349,15 +1358,11 @@ def _output_grouped_results(
         is_empty = not bool(grouped_data)
 
     if is_empty:
-        if json_path:
-            data = []
-            if json_path == "-":
-                # Output JSON to stdout
-                typer.echo(json.dumps(data, indent=2))
-            else:
-                # Save JSON to file
-                with open(json_path, "w") as f:
-                    json.dump(data, f, indent=2)
+        if jsonl_path:
+            if jsonl_path == "-":
+                return
+            with open(jsonl_path, "w", encoding="utf-8"):
+                pass
         elif parquet_path:
             # Create empty DataFrame and save to parquet
             df = pd.DataFrame()
@@ -1381,18 +1386,17 @@ def _output_grouped_results(
         df.to_parquet(parquet_path, index=False)
         typer.echo(f"Grouped results saved to {parquet_path}")
 
-    elif json_path:
-        # Prepare JSON data
-        data = [dict(item) for item in grouped_data]
+    elif jsonl_path:
+        lines = [json.dumps(dict(item), ensure_ascii=False) for item in grouped_data]
 
-        if json_path == "-":
-            # Output JSON to stdout
-            typer.echo(json.dumps(data, indent=2))
+        if jsonl_path == "-":
+            for line in lines:
+                typer.echo(line)
         else:
-            # Save JSON to file
-            with open(json_path, "w") as f:
-                json.dump(data, f, indent=2)
-            typer.echo(f"Grouped results saved to {json_path}")
+            with open(jsonl_path, "w", encoding="utf-8") as f:
+                for line in lines:
+                    f.write(line + "\n")
+            typer.echo(f"Grouped results saved to {jsonl_path}")
     else:
         # Display table format to stdout
         table = PrettyTable()

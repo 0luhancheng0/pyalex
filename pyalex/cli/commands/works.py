@@ -39,7 +39,6 @@ class _WorksCommand(StdinSentinelCommand):
         "--source-issn": STDIN_SENTINEL,
         "--source-host-org-ids": STDIN_SENTINEL,
         "--cited-by": STDIN_SENTINEL,
-        "--cites": STDIN_SENTINEL,
     }
 
 
@@ -202,17 +201,7 @@ def create_works_command(app):
             typer.Option(
                 "--cited-by",
                 help=(
-                    "Filter works that are cited by the provided work ID(s). Use "
-                    "comma-separated IDs or omit the value to read JSON from stdin."
-                ),
-            ),
-        ] = None,
-        cites_ids: Annotated[
-            str | None,
-            typer.Option(
-                "--cites",
-                help=(
-                    "Filter works that cite the provided work ID(s). Use "
+                    "Filter works cited by the provided work ID(s). Use "
                     "comma-separated IDs or omit the value to read JSON from stdin."
                 ),
             ),
@@ -277,13 +266,14 @@ def create_works_command(app):
                 ),
             ),
         ] = None,
-        json_flag: Annotated[
-            bool, typer.Option("--json", help="Output JSON to stdout")
+        jsonl_flag: Annotated[
+            bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
         ] = False,
-        json_path: Annotated[
+        jsonl_path: Annotated[
             str | None,
             typer.Option(
-                "--json-file", help="Save results to JSON file at specified path"
+                "--jsonl-file",
+                help="Save results to JSON Lines file at specified path",
             ),
         ] = None,
         parquet_path: Annotated[
@@ -364,8 +354,10 @@ def create_works_command(app):
         try:
             # Validate options
             validate_pagination_options(all_results, limit)
-            effective_json_path, effective_parquet_path = (
-                validate_output_format_options(json_flag, json_path, parquet_path)
+            effective_jsonl_path, effective_parquet_path = (
+                validate_output_format_options(
+                    jsonl_flag, jsonl_path, parquet_path
+                )
             )
 
             author_ids = resolve_ids_option(author_ids, "--author-ids")
@@ -387,7 +379,6 @@ def create_works_command(app):
                 source_host_org_ids, "--source-host-org-ids"
             )
             cited_by_ids = resolve_ids_option(cited_by_ids, "--cited-by")
-            cites_ids = resolve_ids_option(cites_ids, "--cites")
 
             # Build query
             query = Works()
@@ -517,12 +508,7 @@ def create_works_command(app):
 
             if cited_by_ids:
                 query = add_id_list_option_to_command(
-                    query, cited_by_ids, "works_cited_by", Works
-                )
-
-            if cites_ids:
-                query = add_id_list_option_to_command(
-                    query, cites_ids, "works_cites", Works
+                    query, cited_by_ids, "works_cites", Works
                 )
 
             if funder_ids:
@@ -599,7 +585,7 @@ def create_works_command(app):
                 Works,
                 all_results,
                 limit,
-                effective_json_path,
+                effective_jsonl_path,
                 group_by,
                 selected_fields=cli_selected_fields,
             )
@@ -615,7 +601,7 @@ def create_works_command(app):
             if group_by:
                 # Grouped results - use specialized output function
                 _output_grouped_results(
-                    results, effective_json_path, effective_parquet_path
+                    results, effective_jsonl_path, effective_parquet_path
                 )
                 return
 
@@ -627,7 +613,7 @@ def create_works_command(app):
             # Abstract conversion now happens automatically in _output_results
             _output_results(
                 results,
-                effective_json_path,
+                effective_jsonl_path,
                 effective_parquet_path,
                 selected_fields=cli_selected_fields,
             )

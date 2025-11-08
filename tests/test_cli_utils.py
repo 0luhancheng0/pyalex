@@ -307,6 +307,16 @@ class TestParseIdsFromJsonInput:
         payload = '["F1", "F2"]'
         assert _parse_ids_from_json_input(payload) == ["F1", "F2"]
 
+    def test_parse_ndjson_objects(self):
+        """Newline-delimited JSON objects should be supported."""
+        payload = '{"id": "F1"}\n{"id": "F2"}'
+        assert _parse_ids_from_json_input(payload) == ["F1", "F2"]
+
+    def test_parse_ndjson_with_blank_lines(self):
+        """Blank lines should be ignored when parsing NDJSON input."""
+        payload = '\n{"id": "F1"}\n\n{"id": "F2"}\n'
+        assert _parse_ids_from_json_input(payload) == ["F1", "F2"]
+
     def test_missing_id_field_raises(self):
         """Missing id field should raise ValueError."""
         payload = '[{"name": "Example"}]'

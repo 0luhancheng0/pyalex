@@ -59,13 +59,14 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 ),
             ),
         ] = None,
-        json_flag: Annotated[
-            bool, typer.Option("--json", help="Output JSON to stdout")
+        jsonl_flag: Annotated[
+            bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
         ] = False,
-        json_path: Annotated[
+        jsonl_path: Annotated[
             str | None,
             typer.Option(
-                "--json-file", help="Save results to JSON file at specified path"
+                "--jsonl-file",
+                help="Save results to JSON Lines file at specified path",
             ),
         ] = None,
         parquet_path: Annotated[
@@ -101,7 +102,7 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
         Examples:
           pyalex {entity_name_lower} --search "example"
           pyalex {entity_name_lower} --all
-          pyalex {entity_name_lower} --limit 50 --json results.json
+          pyalex {entity_name_lower} --limit 50 --jsonl-file results.jsonl
         """
         try:
             # Check for mutually exclusive options
@@ -111,23 +112,23 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
 
             # Handle output format options - check mutual exclusivity
             options_provided = sum(
-                [json_flag, json_path is not None, parquet_path is not None]
+                [jsonl_flag, jsonl_path is not None, parquet_path is not None]
             )
 
             if options_provided > 1:
                 typer.echo(
-                    "Error: --json, --json-file, and --parquet-file "
+                    "Error: --jsonl, --jsonl-file, and --parquet-file "
                     "are mutually exclusive",
                     err=True,
                 )
                 raise typer.Exit(1)
 
             # Resolve JSON path
-            effective_json_path = None
-            if json_flag:
-                effective_json_path = "-"  # stdout
-            elif json_path:
-                effective_json_path = json_path
+            effective_jsonl_path = None
+            if jsonl_flag:
+                effective_jsonl_path = "-"  # stdout
+            elif jsonl_path:
+                effective_jsonl_path = jsonl_path
 
             effective_parquet_path = parquet_path
 
@@ -153,7 +154,7 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 results = asyncio.run(query.get(per_page=200))
                 _print_debug_results(results)
                 _output_grouped_results(
-                    results, effective_json_path, effective_parquet_path
+                    results, effective_jsonl_path, effective_parquet_path
                 )
                 return
 
@@ -174,7 +175,7 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
             _print_debug_results(results)
             _output_results(
                 results,
-                effective_json_path,
+                effective_jsonl_path,
                 effective_parquet_path,
                 selected_fields=cli_selected_fields,
             )

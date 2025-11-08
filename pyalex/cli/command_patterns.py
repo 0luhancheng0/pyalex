@@ -24,55 +24,43 @@ from .state import is_dry_run
 # ============================================================================
 
 
-def validate_json_output_options(json_flag: bool, json_path: str | None) -> str | None:
-    """Validate and resolve JSON output options.
+def validate_jsonl_output_options(
+    jsonl_flag: bool, jsonl_path: str | None
+) -> str | None:
+    """Validate and resolve JSON Lines output options."""
 
-    Parameters
-    ----------
-    json_flag : bool
-        Whether --json flag was provided
-    json_path : Optional[str]
-        Path provided via --json-file option
-
-    Returns
-    -------
-    Optional[str]
-        Effective JSON path: "-" for stdout, path string for file, or None
-
-    Raises
-    ------
-    typer.Exit
-        If both json_flag and json_path are provided (mutually exclusive)
-    """
-    if json_flag and json_path:
-        typer.echo("Error: --json and --json-file are mutually exclusive", err=True)
+    if jsonl_flag and jsonl_path:
+        typer.echo(
+            "Error: --jsonl and --jsonl-file are mutually exclusive",
+            err=True,
+        )
         raise typer.Exit(1)
-    elif json_flag:
+    if jsonl_flag:
         return "-"  # stdout
-    elif json_path:
-        return json_path
+    if jsonl_path:
+        return jsonl_path
     return None
 
 
 def validate_output_format_options(
-    json_flag: bool, json_path: str | None, parquet_path: str | None
+    jsonl_flag: bool, jsonl_path: str | None, parquet_path: str | None
 ) -> tuple[str | None, str | None]:
     """Validate and resolve output format options.
 
     Parameters
     ----------
-    json_flag : bool
-        Whether --json flag was provided
-    json_path : Optional[str]
-        Path provided via --json-file option
+    jsonl_flag : bool
+        Whether --jsonl flag was provided
+    jsonl_path : Optional[str]
+        Path provided via --jsonl-file option
     parquet_path : Optional[str]
         Path provided via --parquet-file option
 
     Returns
     -------
     tuple[Optional[str], Optional[str]]
-        Tuple of (effective_json_path, parquet_path)
-        - effective_json_path: "-" for stdout, path string for file, or None
+    Tuple of (effective_jsonl_path, parquet_path)
+    - effective_jsonl_path: "-" for stdout, path string for file, or None
         - parquet_path: path string for file or None
 
     Raises
@@ -81,24 +69,26 @@ def validate_output_format_options(
         If multiple output format options are provided (mutually exclusive)
     """
     # Count how many output options are provided
-    options_provided = sum([json_flag, json_path is not None, parquet_path is not None])
+    options_provided = sum(
+        [jsonl_flag, jsonl_path is not None, parquet_path is not None]
+    )
 
     if options_provided > 1:
         typer.echo(
-            "Error: --json, --json-file, and --parquet-file are mutually exclusive",
+            "Error: --jsonl, --jsonl-file, and --parquet-file are mutually exclusive",
             err=True,
         )
         raise typer.Exit(1)
 
     # Resolve JSON path
-    if json_flag:
-        effective_json_path = "-"  # stdout
-    elif json_path:
-        effective_json_path = json_path
+    if jsonl_flag:
+        effective_jsonl_path = "-"  # stdout
+    elif jsonl_path:
+        effective_jsonl_path = jsonl_path
     else:
-        effective_json_path = None
+        effective_jsonl_path = None
 
-    return effective_json_path, parquet_path
+    return effective_jsonl_path, parquet_path
 
 
 def validate_pagination_options(all_results: bool, limit: int | None) -> None:
@@ -193,7 +183,7 @@ def handle_large_id_list_if_needed(
     entity_class,
     all_results: bool,
     limit: int | None,
-    json_path: str | None,
+    jsonl_path: str | None,
     group_by: str | None = None,
     selected_fields: list[str] | None = None,
 ):
@@ -212,8 +202,8 @@ def handle_large_id_list_if_needed(
         Whether to fetch all results
     limit : Optional[int]
         Maximum number of results
-    json_path : Optional[str]
-        Path for JSON output (or "-" for stdout)
+    jsonl_path : Optional[str]
+        Path for JSON Lines output (or "-" for stdout)
     group_by : Optional[str], optional
         Field to group by (if any)
 
@@ -252,7 +242,7 @@ def handle_large_id_list_if_needed(
         filter_config_key.split("_")[1] + " IDs",  # e.g., "funder IDs"
         all_results,
         limit,
-        json_path=json_path,
+        jsonl_path=jsonl_path,
     )
 
     # Check if results is None or empty
@@ -262,7 +252,7 @@ def handle_large_id_list_if_needed(
 
     # Output results based on type
     if group_by:
-        _output_grouped_results(results, json_path)
+        _output_grouped_results(results, jsonl_path)
     else:
         # Convert DataFrame to list of dicts for processing
         import pandas as pd
@@ -282,7 +272,7 @@ def handle_large_id_list_if_needed(
 
         _output_results(
             results_list,
-            json_path,
+            jsonl_path,
             selected_fields=selected_fields,
         )
 
@@ -301,8 +291,8 @@ class CommandContext:
         search: str | None = None,
         all_results: bool = False,
         limit: int | None = None,
-        json_flag: bool = False,
-        json_path: str | None = None,
+        jsonl_flag: bool = False,
+        jsonl_path: str | None = None,
         sort_by: str | None = None,
         group_by: str | None = None,
         **filters,
@@ -310,8 +300,8 @@ class CommandContext:
         self.search = search
         self.all_results = all_results
         self.limit = limit
-        self.json_flag = json_flag
-        self.json_path = json_path
+        self.jsonl_flag = jsonl_flag
+        self.jsonl_path = jsonl_path
         self.sort_by = sort_by
         self.group_by = group_by
         self.filters = filters
@@ -330,7 +320,7 @@ class CommandContext:
 
     def should_output_json(self) -> bool:
         """Check if JSON output is requested."""
-        return self.json_flag or self.json_path is not None
+        return self.jsonl_flag or self.jsonl_path is not None
 
 
 def apply_common_filters(query: Any, ctx: CommandContext) -> Any:
@@ -422,12 +412,12 @@ def handle_output(
     from .utils import _output_results
 
     if ctx.has_grouping():
-        _output_grouped_results(results, ctx.group_by, ctx.json_flag, ctx.json_path)
+        _output_grouped_results(results, ctx.jsonl_path)
     else:
         if output_formatter:
-            output_formatter(results, ctx.json_flag, ctx.json_path)
+            output_formatter(results, ctx.jsonl_flag, ctx.jsonl_path)
         else:
-            _output_results(results, ctx.json_flag, ctx.json_path)
+            _output_results(results, ctx.jsonl_flag, ctx.jsonl_path)
 
 
 def create_entity_command_handler(

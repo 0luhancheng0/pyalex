@@ -284,6 +284,97 @@ def test_works_select_title_abstract_template(monkeypatch):
     )
 
 
+def test_works_json_outputs_jsonl(monkeypatch, tmp_path):
+    """--jsonl and --jsonl-file should emit newline-delimited JSON records."""
+
+    from pyalex.cli import main as cli_main
+    from pyalex.cli.commands import works as works_module
+
+    monkeypatch.setattr(
+        works_module,
+        "handle_large_id_list_if_needed",
+        lambda *_args, **_kwargs: None,
+    )
+
+    sample_results = [
+        {
+            "id": "https://openalex.org/W1",
+            "title": "First Work",
+            "abstract_inverted_index": None,
+        },
+        {
+            "id": "https://openalex.org/W2",
+            "title": "Second Work",
+            "abstract_inverted_index": None,
+        },
+    ]
+
+    monkeypatch.setattr(
+        works_module,
+        "execute_standard_query",
+        lambda *_args, **_kwargs: sample_results,
+    )
+
+    class DummyWorks:
+        def __init__(self):
+            self.selected_fields: list[str] | None = None
+
+        def search(self, *_args, **_kwargs):
+            return self
+
+        def filter(self, **_kwargs):
+            return self
+
+        def sort(self, **_kwargs):
+            return self
+
+        def select(self, fields):
+            self.selected_fields = fields
+            return self
+
+        def sample(self, *_args, **_kwargs):
+            return self
+
+    monkeypatch.setattr(works_module, "Works", DummyWorks)
+
+    from typer.main import get_command
+
+    output_path = tmp_path / "works.jsonl"
+    runner = CliRunner()
+
+    # File output
+    result_file = runner.invoke(
+        get_command(cli_main.app),
+        [
+            "works",
+            "--limit",
+            "2",
+            "--jsonl-file",
+            str(output_path),
+        ],
+    )
+
+    assert result_file.exit_code == 0, result_file.stdout or result_file.stderr
+    file_lines = output_path.read_text(encoding="utf-8").splitlines()
+    assert len(file_lines) == 2
+    parsed_file = [json.loads(line) for line in file_lines]
+    assert parsed_file[0]["id"].endswith("W1")
+    assert parsed_file[1]["id"].endswith("W2")
+
+    # Stdout output
+    result_stdout = runner.invoke(
+        get_command(cli_main.app),
+        ["works", "--limit", "2", "--jsonl"],
+    )
+
+    assert result_stdout.exit_code == 0, result_stdout.stdout or result_stdout.stderr
+    stdout_lines = [line for line in result_stdout.stdout.splitlines() if line]
+    assert len(stdout_lines) == 2
+    parsed_stdout = [json.loads(line) for line in stdout_lines]
+    assert parsed_stdout[0]["id"].endswith("W1")
+    assert parsed_stdout[1]["id"].endswith("W2")
+
+
 def test_institutions_select_fields_table_header():
     """Institutions select should replace default columns with requested ones."""
     result = subprocess.run(

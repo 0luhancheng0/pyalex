@@ -79,14 +79,14 @@ pyalex institutions --search "Australia" --limit 10
 pyalex funders --search "National Science Foundation"
 ```
 
-### Export to JSON
+### Export to JSON Lines
 
 ```bash
 # Save COVID-19 research to file
-pyalex works --search "COVID-19" --year "2020:2022" --json covid_research.json
+pyalex works --search "COVID-19" --year "2020:2022" --jsonl-file covid_research.jsonl
 
 # Export all works by specific authors
-pyalex works --author-ids "A1234567890,A0987654321" --all --json author_works.json
+pyalex works --author-ids "A1234567890,A0987654321" --all --jsonl-file author_works.jsonl
 ```
 
 ### Advanced Filtering
