@@ -127,6 +127,13 @@ class BatchFilterRegistry:
                     "authorships.institutions", "id"
                 ),
                 "works_source": BatchFilterConfig("primary_location.source", "id"),
+                "works_source_issn": BatchFilterConfig(
+                    "primary_location.source", "issn"
+                ),
+                "works_host_venue": BatchFilterConfig("host_venue", "id"),
+                "works_source_host_org": BatchFilterConfig(
+                    "primary_location.source", "host_organization"
+                ),
                 "works_topic": BatchFilterConfig("primary_topic", "id"),
                 "works_topics": BatchFilterConfig("topics", "id"),
                 "works_subfield": BatchFilterConfig("primary_topic.subfield", "id"),
@@ -135,6 +142,9 @@ class BatchFilterRegistry:
                 # Authors filters
                 "authors_institution": BatchFilterConfig(
                     "last_known_institutions", "id"
+                ),
+                "authors_institution_ror": BatchFilterConfig(
+                    "last_known_institution", "ror"
                 ),
                 # Topics filters
                 "topics_domain": BatchFilterConfig("domain", "id"),

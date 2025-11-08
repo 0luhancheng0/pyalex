@@ -24,6 +24,7 @@ PyAlex provides a powerful command-line interface to interact with the [OpenAlex
 - **Grouping & Aggregation**: Group results by various fields for analysis
 - **Pagination Control**: Retrieve specific pages or all results
 - **Embeddings Visualization**: Interactive visualization of research embeddings with Embedding Atlas
+- **LLM Integration**: Model Context Protocol server exposing PyAlex queries as agent tools
 
 ## 🛠️ CLI Reference
 
@@ -114,7 +115,38 @@ pyalex works --search "climate change" --group-by "oa_status"
 pyalex works --author-ids "A1234567890" --group-by "type"
 ```
 
-## 📚 Examples & Documentation
+## �️ Textual TUI
+
+Prefer a keyboard-driven experience? Launch the Textual interface and explore OpenAlex data with live tables, detail panes, and keyboard shortcuts:
+
+```bash
+pyalex-tui
+```
+
+Key bindings:
+
+- `Ctrl+C` – Quit
+- `F5` – Refresh the current query
+- `d` – Toggle the detail panel
+
+The left sidebar lets you pick the entity type (works/authors), set the query and limit, and provide optional `select` fields. Results appear in the main table; select a row to inspect full JSON in the detail panel.
+
+## 🤖 MCP Server
+
+Integrate PyAlex with Model Context Protocol-compatible agents by running the bundled server:
+
+```bash
+pyalex-mcp  # defaults to stdio transport
+```
+
+Tools currently exposed:
+
+- `search_works(query?, limit=25, select?, filters?, sort?)`
+- `search_authors(query?, limit=25, select?, filters?, sort?)`
+
+Each tool accepts optional filters (mapping of field names to values) and respects OpenAlex rate limits. See the [MCP documentation](https://modelcontextprotocol.io/) for instructions on wiring the server into your agent runtime.
+
+## �📚 Examples & Documentation
 
 ### Python API Examples
 

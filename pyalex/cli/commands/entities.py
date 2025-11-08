@@ -1,7 +1,8 @@
 """
 Simple entity commands template for PyAlex CLI.
 
-This module contains basic implementations for entity commands that follow a common pattern.
+This module contains basic implementations for entity commands
+that follow a common pattern.
 """
 
 import asyncio
@@ -9,6 +10,7 @@ from typing import Annotated
 
 import typer
 
+from pyalex import Concepts
 from pyalex import Domains
 from pyalex import Fields
 from pyalex import Keywords
@@ -26,6 +28,7 @@ from ..utils import _print_debug_results
 from ..utils import _print_debug_url
 from ..utils import _print_dry_run_query
 from ..utils import _validate_and_apply_common_options
+from ..utils import parse_select_fields
 
 
 def create_simple_entity_command(app, entity_class, entity_name, entity_name_lower):
@@ -50,7 +53,10 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
             typer.Option(
                 "--limit",
                 "-l",
-                help="Maximum number of results to return (mutually exclusive with --all)",
+                help=(
+                    "Maximum number of results to return "
+                    "(mutually exclusive with --all)"
+                ),
             ),
         ] = None,
         json_flag: Annotated[
@@ -110,7 +116,8 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
 
             if options_provided > 1:
                 typer.echo(
-                    "Error: --json, --json-file, and --parquet-file are mutually exclusive",
+                    "Error: --json, --json-file, and --parquet-file "
+                    "are mutually exclusive",
                     err=True,
                 )
                 raise typer.Exit(1)
@@ -129,6 +136,8 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
 
             if search:
                 query = query.search(search)
+
+            cli_selected_fields = parse_select_fields(select)
 
             # Apply common options
             query = _validate_and_apply_common_options(
@@ -163,7 +172,12 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                 results = asyncio.run(query.get())  # Default first page
 
             _print_debug_results(results)
-            _output_results(results, effective_json_path, effective_parquet_path)
+            _output_results(
+                results,
+                effective_json_path,
+                effective_parquet_path,
+                selected_fields=cli_selected_fields,
+            )
 
         except Exception as e:
             _handle_cli_exception(e)
@@ -175,6 +189,12 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
 
 def create_entity_commands(app):
     """Create and register all simple entity commands."""
+
+    # Concepts
+    concepts_func = create_simple_entity_command(
+        app, Concepts, "Concepts", "concepts"
+    )
+    app.command(help="Search and retrieve concepts from OpenAlex")(concepts_func)
 
     # Topics
     topics_func = create_simple_entity_command(app, Topics, "Topics", "topics")

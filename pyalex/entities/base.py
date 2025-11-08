@@ -8,6 +8,7 @@ from urllib.parse import urlunparse
 from pyalex.core.config import MAX_PER_PAGE
 from pyalex.core.config import MAX_RECORD_IDS
 from pyalex.core.config import MIN_PER_PAGE
+from pyalex.core.config import config
 from pyalex.core.expressions import gt_
 from pyalex.core.expressions import lt_
 from pyalex.core.expressions import not_
@@ -45,7 +46,7 @@ def _run_async_safely(coro):
     """
     try:
         # Check if we're already in an event loop
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
         # We're in an async context (e.g., Jupyter notebook with ipykernel)
         # We can't use asyncio.run() here, so we need to handle it differently
 
@@ -78,7 +79,7 @@ def _run_async_safely(coro):
             thread.join()
 
             if "exception" in exception_container:
-                raise exception_container["exception"]
+                raise exception_container["exception"] from None
             return result_container["result"]
 
     except RuntimeError as e:
@@ -413,6 +414,8 @@ class BaseOpenAlex:
             path = base_path
             query = self._url_query()
 
+        query = self._apply_default_query_params(query)
+
         return urlunparse(("https", "api.openalex.org", path, "", query, ""))
 
     def count(self):
@@ -466,7 +469,7 @@ class BaseOpenAlex:
             raise ImportError(
                 "pandas is required for DataFrame output. "
                 "Install it with: pip install pandas"
-            )
+            ) from None
 
         # Convert results to resource class
         converted_results = [self.resource_class(ent) for ent in results]
@@ -573,11 +576,13 @@ class BaseOpenAlex:
     async def _get_async_parallel_paging(self, limit, return_meta=False):
         """Async parallel pagination for medium-sized result sets (up to 10k).
 
-        Uses parallel async requests to fetch multiple pages concurrently for maximum speed.
-        Much faster than sequential cursor pagination for moderate limits.
+        Uses parallel async requests to fetch multiple pages concurrently
+        for maximum speed. Much faster than sequential cursor pagination
+        for moderate limits.
 
-        **Important:** OpenAlex API limits page-based pagination to 10,000 results maximum.
-        For larger queries, use cursor-based pagination instead.
+        **Important:** OpenAlex API limits page-based pagination to 10,000
+        results maximum. For larger queries, use cursor-based pagination
+        instead.
 
         Parameters
         ----------
@@ -680,6 +685,7 @@ class BaseOpenAlex:
         cursor = "*"
         per_page = MAX_PER_PAGE
 
+        from rich.console import Console
         from rich.progress import BarColumn
         from rich.progress import MofNCompleteColumn
         from rich.progress import Progress
@@ -687,6 +693,8 @@ class BaseOpenAlex:
         from rich.progress import TextColumn
         from rich.progress import TimeElapsedColumn
         from rich.progress import TimeRemainingColumn
+
+        console = Console(stderr=True)
 
         with Progress(
             SpinnerColumn(),
@@ -697,6 +705,8 @@ class BaseOpenAlex:
             TimeElapsedColumn(),
             TextColumn("•"),
             TimeRemainingColumn(),
+            console=console,
+            transient=True,
         ) as progress:
             task = progress.add_task("[cyan]Fetching results...", total=limit)
 
@@ -724,10 +734,14 @@ class BaseOpenAlex:
 
                         # Update progress with current page info
                         current_count = min(len(all_results), limit)
+                        description = (
+                            f"[cyan]Fetching results (page {page_count}, "
+                            f"{current_count:,}/{limit:,})..."
+                        )
                         progress.update(
                             task,
                             completed=current_count,
-                            description=f"[cyan]Fetching results (page {page_count}, {current_count:,}/{limit:,})...",
+                            description=description,
                         )
 
                         # Check if we have more pages
@@ -751,7 +765,7 @@ class BaseOpenAlex:
             raise ImportError(
                 "pandas is required for DataFrame output. "
                 "Install it with: pip install pandas"
-            )
+            ) from None
 
         # Convert results to resource class
         converted_results = [self.resource_class(ent) for ent in all_results]
@@ -1056,13 +1070,15 @@ class BaseOpenAlex:
         """
         self._add_params("q", s)
 
+        query = self._apply_default_query_params(self._url_query())
+
         url = urlunparse(
             (
                 "https",
                 "api.openalex.org",
                 f"autocomplete/{self.__class__.__name__.lower()}",
                 "",
-                self._url_query(),
+                query,
                 "",
             )
         )
@@ -1082,3 +1098,25 @@ class BaseOpenAlex:
             return resp_list, meta
         else:
             return resp_list
+
+    def _apply_default_query_params(self, query: str | None) -> str:
+        """Ensure required default query parameters are present in the URL."""
+
+        data_version = getattr(config, "data_version", None)
+
+        if query is None:
+            query = ""
+
+        if not data_version:
+            return query
+
+        segments = [
+            segment
+            for segment in query.split("&")
+            if segment and not segment.startswith("data-version=")
+        ]
+
+        data_version_str = str(data_version)
+        segments.append(f"data-version={data_version_str}")
+
+        return "&".join(segments)

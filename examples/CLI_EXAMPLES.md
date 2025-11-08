@@ -11,7 +11,7 @@ This guide provides practical examples of using PyAlex from the command line.
 pyalex works --search "machine learning" --limit 10
 
 # Search with filters
-pyalex works --search "AI" --publication-year 2023 --limit 20
+pyalex works --search "AI" --year 2023 --limit 20
 
 # Get all results (uses pagination)
 pyalex works --search "deep learning" --all
@@ -24,20 +24,49 @@ pyalex works --search "neural networks" --limit 100 --json results.json
 
 ```bash
 # Works from a specific year
-pyalex works --publication-year 2023 --limit 50
+pyalex works --year 2023 --limit 50
 
 # Date range (CLI supports year ranges)
-pyalex works --search "quantum" --publication-year "2020-2023" --limit 30
+pyalex works --search "quantum" --year "2020:2023" --limit 30
 ```
 
 ### Filter by Citations
 
 ```bash
 # Highly cited works
-pyalex works --search "transformer" --cited-by-count "100-" --limit 20
+pyalex works --search "transformer" --cited-by-count "100:" --limit 20
 
 # Recent highly cited works
-pyalex works --publication-year 2023 --cited-by-count "50-" --limit 10
+pyalex works --year 2023 --cited-by-count "50:" --limit 10
+```
+
+### Citation and Venue Filters
+
+```bash
+# Works that cite a given OpenAlex work ID
+pyalex works --cites "W2741809807" --limit 10
+
+# Works that are cited by a specific work
+pyalex works --cited-by "W2147561236" --limit 10
+
+# Filter by venue metadata
+pyalex works --source-issn "2167-8359" --limit 20
+pyalex works --source-host-org-ids "P4310320104" --limit 20
+pyalex works --host-venue-ids "S1983995261" --limit 20
+```
+
+### Open Access and Fulltext Filters
+
+```bash
+# Gold open access works
+pyalex works --oa-status gold --limit 20
+
+# Require any OA plus fulltext and search abstracts
+pyalex works --is-oa --has-fulltext --has-abstract \
+  --abstract-search "graphene oxide" --limit 20
+
+# Explicitly request closed-access items without fulltext
+pyalex works --not-oa --no-fulltext --limit 10
 ```
 
 ## Author Commands
@@ -51,8 +80,31 @@ pyalex authors --search "Geoffrey Hinton" --limit 5
 # Get author's works
 pyalex authors --search "Yann LeCun" --limit 1
 
-# Filter by institution
-pyalex authors --last-known-institution "MIT" --limit 20
+# Filter by affiliated institution OpenAlex ID
+pyalex authors --institution-ids "I136200762" --limit 20
+
+# Filter by institution ROR
+pyalex authors --institution-rors "https://ror.org/01an7q238" --limit 20
+```
+
+### Presence Flags
+
+```bash
+# Require authors with ORCID and Twitter profiles
+pyalex authors --has-orcid --has-twitter --limit 20
+
+# Exclude authors with Wikipedia pages
+pyalex authors --no-wikipedia --limit 20
+```
+
+## Concept Commands
+
+```bash
+# Explore concept taxonomy
+pyalex concepts --search "computer vision" --limit 20
+
+# Retrieve all concepts grouped by level
+pyalex concepts --group-by level --limit 200
 ```
 
 ## Institution Commands
@@ -89,7 +141,7 @@ pyalex works --search "climate change" --limit 100 --json - | \
 # Complex query
 pyalex works \
   --search "artificial intelligence" \
-  --publication-year "2022-2023" \
+  --year "2022:2023" \
   --cited-by-count "10-" \
   --limit 50 \
   --json ai_recent_cited.json
@@ -169,7 +221,7 @@ pyalex --help
 
 ```bash
 pyalex works --search "transformers NLP" \
-  --publication-year 2023 \
+  --year 2023 \
   --cited-by-count "20-" \
   --limit 50 \
   --json transformers_2023.json
@@ -190,7 +242,7 @@ pyalex works --author "$AUTHOR_ID" --all --json author_works.json
 
 ```bash
 pyalex works --institution "Stanford University" \
-  --publication-year 2023 \
+  --year 2023 \
   --limit 500 \
   --json stanford_2023.json
 ```

@@ -199,6 +199,13 @@ Here's how API methods map to CLI options:
 | `.filter_by_publication_year()` | `--year` | `--year "2020:2021"` |
 | `.filter_by_publication_date()` | `--date` | `--date "2020-01-01:2020-12-31"` |
 | `.filter_by_type()` | `--type` | `--type "article"` |
+| `.filter_by_cited_by_count()` | `--cited-by-count` | `--cited-by-count "100:"` |
+| `.filter_by_open_access()` | `--is-oa`, `--oa-status` | `--oa-status gold` |
+| `.filter_by_source()` | `--source-ids` | `--source-ids "S1983995261"` |
+| `.filter_by_source_issn()` | `--source-issn` | `--source-issn "2167-8359"` |
+| `.filter_by_host_venue()` | `--host-venue-ids` | `--host-venue-ids "S1983995261"` |
+| `.filter_by_source_host_organization()` | `--source-host-org-ids` | `--source-host-org-ids "P4310320104"` |
+| `.filter_by_abstract_search()` | `--abstract-search` | `--abstract-search "graphene"` |
 
 ### Example Comparison
 
@@ -222,6 +229,10 @@ results = asyncio.run(works.get(per_page=10))
 ```
 
 Both produce identical queries to the OpenAlex API!
+
+The authors CLI convenience flags follow the same pattern. For example, `--has-orcid`
+maps to `Authors().filter(has_orcid=True)`, while `--institution-rors` maps to
+`Authors().filter(last_known_institution={"ror": "https://ror.org/..."})`.
 
 ## Benefits
 

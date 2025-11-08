@@ -258,6 +258,42 @@ class Works(BaseOpenAlex):
             return self.filter(grants={"award_id": id_filter}, **kwargs)
         return self.filter(grants={"award_id": award_id}, **kwargs)
 
+    def filter_by_source_issn(self, issn_values, **kwargs):
+        """Filter works by source ISSN values."""
+
+        if isinstance(issn_values, list):
+            issn_filter = "|".join(issn_values)
+        else:
+            issn_filter = issn_values
+        return self.filter(primary_location={"source": {"issn": issn_filter}}, **kwargs)
+
+    def filter_by_host_venue(self, host_venue_id, **kwargs):
+        """Filter works by host venue OpenAlex ID."""
+
+        if isinstance(host_venue_id, list):
+            id_filter = "|".join(host_venue_id)
+            return self.filter(host_venue={"id": id_filter}, **kwargs)
+        return self.filter(host_venue={"id": host_venue_id}, **kwargs)
+
+    def filter_by_source_host_organization(self, host_org_id, **kwargs):
+        """Filter works by source host organization (publisher) ID."""
+
+        if isinstance(host_org_id, list):
+            id_filter = "|".join(host_org_id)
+            return self.filter(
+                primary_location={"source": {"host_organization": id_filter}},
+                **kwargs,
+            )
+        return self.filter(
+            primary_location={"source": {"host_organization": host_org_id}},
+            **kwargs,
+        )
+
+    def filter_by_abstract_search(self, term, **kwargs):
+        """Filter works by searching the inverted abstract."""
+
+        return self.filter(abstract={"search": term}, **kwargs)
+
     def filter_by_publication_year(
         self, year=None, start_year=None, end_year=None, **kwargs
     ):
@@ -318,7 +354,9 @@ class Works(BaseOpenAlex):
         Examples
         --------
         >>> Works().filter_by_publication_date(date="2020-06-15")
-        >>> Works().filter_by_publication_date(start_date="2019-01-01", end_date="2020-12-31")
+    >>> Works().filter_by_publication_date(
+    ...     start_date="2019-01-01", end_date="2020-12-31"
+    ... )
         """
         if date is not None:
             return self.filter(publication_date=date, **kwargs)

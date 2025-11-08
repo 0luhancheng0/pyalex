@@ -17,6 +17,7 @@ from ..utils import _output_results
 from ..utils import _validate_and_apply_common_options
 from ..utils import apply_range_filter
 from ..utils import parse_range_filter
+from ..utils import parse_select_fields
 
 
 def create_funders_command(app):
@@ -51,8 +52,11 @@ def create_funders_command(app):
             str | None,
             typer.Option(
                 "--h-index",
-                help="Filter by h-index from summary stats. Use single value (e.g., '50') "
-                "or range (e.g., '10:100', ':50', '25:')",
+                help=(
+                    "Filter by h-index from summary stats. "
+                    "Use single value (e.g., '50') "
+                    "or range (e.g., '10:100', ':50', '25:')"
+                ),
             ),
         ] = None,
         i10_index: Annotated[
@@ -67,8 +71,11 @@ def create_funders_command(app):
             str | None,
             typer.Option(
                 "--two-year-mean-citedness",
-                help="Filter by 2-year mean citedness from summary stats. Use single value "
-                "(e.g., '2.5') or range (e.g., '1.0:5.0', ':3.0', '2.0:')",
+                help=(
+                    "Filter by 2-year mean citedness from summary stats. "
+                    "Use single value (e.g., '2.5') "
+                    "or range (e.g., '1.0:5.0', ':3.0', '2.0:')"
+                ),
             ),
         ] = None,
         group_by: Annotated[
@@ -89,7 +96,10 @@ def create_funders_command(app):
             typer.Option(
                 "--limit",
                 "-l",
-                help="Maximum number of results to return (mutually exclusive with --all)",
+                help=(
+                    "Maximum number of results to return "
+                    "(mutually exclusive with --all)"
+                ),
             ),
         ] = None,
         json_flag: Annotated[
@@ -112,8 +122,10 @@ def create_funders_command(app):
             str | None,
             typer.Option(
                 "--sort-by",
-                help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
-                "'display_name:asc')",
+                help=(
+                    "Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+                    "'display_name:asc')"
+                ),
             ),
         ] = None,
         sample: Annotated[
@@ -195,6 +207,8 @@ def create_funders_command(app):
                     query, "summary_stats.2yr_mean_citedness", parsed_citedness
                 )
 
+            cli_selected_fields = parse_select_fields(select)
+
             # Apply common options (sort, sample, select)
             query = _validate_and_apply_common_options(
                 query, all_results, limit, sample, seed, sort_by, select
@@ -222,7 +236,12 @@ def create_funders_command(app):
                 typer.echo("No results returned from API", err=True)
                 return
 
-            _output_results(results, effective_json_path, effective_parquet_path)
+            _output_results(
+                results,
+                effective_json_path,
+                effective_parquet_path,
+                selected_fields=cli_selected_fields,
+            )
 
         except Exception as e:
             _handle_cli_exception(e)

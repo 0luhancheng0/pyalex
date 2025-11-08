@@ -1,6 +1,8 @@
 # Repository Guidelines
 
 
+IF YOU CANT FIND SOME COMMAND IT MAY BE INSTALLED IN THE LOCAL VIRTUAL ENVIRONMENT TRY PREFIX THE COMMAND WITH `uv run`
+
 ## Coding Principles 
 
 - Prioritise simplicity over comprehensiveness
@@ -21,3 +23,5 @@ The suite runs on `pytest` with warnings treated as errors (see `[tool.pytest.in
 
 ## Commit & Pull Request Guidelines
 Recent history favors short imperative summaries (for example, `bug fix`, `update --json option`); keep that tone but aim for clarity under 50 characters. Reference related issues in the body and note any CLI or API changes. Before opening a PR, run lint + tests, include reproduction or demo commands, update docs when behavior shifts, and attach screenshots for CLI output tweaks that affect formatting. Mark PRs as draft until automated checks pass or known gaps are documented, and confirm that pre-commit hooks (`pre-commit run --all-files`) are clean.
+
+

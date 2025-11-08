@@ -5,9 +5,109 @@ This module tests CLI-specific utilities like range parsing, formatting,
 and output handling.
 """
 
-import pytest
+import pyalex.cli.utils as cli_utils
+from pyalex import Works
+from pyalex.cli.commands.utils import _parse_ids_from_json_input
 
-from pyalex.cli.utils import parse_range_filter
+try:  # pragma: no cover - ensure pytest required for test execution
+    import pytest  # type: ignore[import-not-found]
+except ImportError as exc:  # pragma: no cover
+    raise ImportError("pytest is required to run tests") from exc
+
+
+class DummyQuery:
+    """Minimal query stub for testing CLI option helpers."""
+
+    def __init__(self):
+        self.sort_kwargs = None
+
+    def sort(self, **kwargs):
+        self.sort_kwargs = kwargs
+        return self
+
+    def select(self, *_args, **_kwargs):
+        return self
+
+    def sample(self, *_args, **_kwargs):
+        return self
+
+
+class TestSortOptionHandling:
+    """Test behaviour of sort option parsing."""
+
+    def test_sort_defaults_to_desc(self):
+        """Unqualified sort fields should default to descending order."""
+        query = DummyQuery()
+        result = cli_utils._validate_and_apply_common_options(
+            query,
+            all_results=False,
+            limit=None,
+            sample=None,
+            seed=0,
+            sort_by="works_count",
+            select=None,
+        )
+
+        assert result is query
+        assert query.sort_kwargs == {"works_count": "desc"}
+
+    def test_sort_respects_explicit_direction(self):
+        """Explicit directions should override the default descending order."""
+        query = DummyQuery()
+        cli_utils._validate_and_apply_common_options(
+            query,
+            all_results=False,
+            limit=None,
+            sample=None,
+            seed=0,
+            sort_by="works_count:asc",
+            select=None,
+        )
+
+        assert query.sort_kwargs == {"works_count": "asc"}
+
+    def test_sort_handles_mixed_fields(self):
+        """Multiple fields should honour per-field defaults and overrides."""
+        query = DummyQuery()
+        cli_utils._validate_and_apply_common_options(
+            query,
+            all_results=False,
+            limit=None,
+            sample=None,
+            seed=0,
+            sort_by="works_count,display_name:asc",
+            select=None,
+        )
+
+        assert query.sort_kwargs == {
+            "works_count": "desc",
+            "display_name": "asc",
+        }
+
+
+class TestDataVersionPropagation:
+    """Ensure helper functions include the default data version."""
+
+    @pytest.mark.asyncio
+    async def test_async_retrieve_single_includes_data_version(self, monkeypatch):
+        """Single-entity retrieval URLs should include the data-version flag."""
+
+        captured_urls: list[str] = []
+
+        async def mock_batch_requests(urls, max_concurrent=None):
+            captured_urls.extend(urls)
+            return [{"id": "W123"}]
+
+        monkeypatch.setattr(
+            "pyalex.client.httpx_session.async_batch_requests",
+            mock_batch_requests,
+        )
+
+        results = await cli_utils._async_retrieve_entities(Works, ["W123"], "Works")
+
+        assert results  # Should yield at least one result
+        assert captured_urls
+        assert captured_urls[0].endswith("data-version=2")
 
 
 class TestRangeFilterParsing:
@@ -15,67 +115,67 @@ class TestRangeFilterParsing:
 
     def test_parse_single_value(self):
         """Test parsing single value."""
-        result = parse_range_filter("100")
+        result = cli_utils.parse_range_filter("100")
         assert result == "100"
 
     def test_parse_range_both_values(self):
         """Test parsing range with both min and max."""
-        result = parse_range_filter("100:1000")
+        result = cli_utils.parse_range_filter("100:1000")
         assert result == ">99,<1001"
 
     def test_parse_range_min_only(self):
         """Test parsing range with minimum only."""
-        result = parse_range_filter("100:")
+        result = cli_utils.parse_range_filter("100:")
         assert result == ">99"
 
     def test_parse_range_max_only(self):
         """Test parsing range with maximum only."""
-        result = parse_range_filter(":1000")
+        result = cli_utils.parse_range_filter(":1000")
         assert result == "<1001"
 
     def test_parse_range_empty_string(self):
         """Test parsing empty string."""
-        result = parse_range_filter("")
+        result = cli_utils.parse_range_filter("")
         assert result is None
 
     def test_parse_range_none(self):
         """Test parsing None value."""
-        result = parse_range_filter(None)
+        result = cli_utils.parse_range_filter(None)
         assert result is None
 
     def test_parse_range_invalid_empty_range(self):
         """Test that empty range raises ValueError."""
         with pytest.raises(ValueError, match="Invalid range format"):
-            parse_range_filter(":")
+            cli_utils.parse_range_filter(":")
 
     def test_parse_range_invalid_non_numeric(self):
         """Test that non-numeric value raises ValueError."""
         with pytest.raises(ValueError, match="Invalid number format"):
-            parse_range_filter("abc")
+            cli_utils.parse_range_filter("abc")
 
     def test_parse_range_invalid_non_numeric_in_range(self):
         """Test that non-numeric value in range raises ValueError."""
         with pytest.raises(ValueError, match="Invalid number format"):
-            parse_range_filter("abc:100")
+            cli_utils.parse_range_filter("abc:100")
 
     def test_parse_range_with_whitespace(self):
         """Test parsing range with whitespace."""
-        result = parse_range_filter(" 100 : 1000 ")
+        result = cli_utils.parse_range_filter(" 100 : 1000 ")
         assert result == ">99,<1001"
 
     def test_parse_range_large_numbers(self):
         """Test parsing range with large numbers."""
-        result = parse_range_filter("1000000:9999999")
+        result = cli_utils.parse_range_filter("1000000:9999999")
         assert result == ">999999,<10000000"
 
     def test_parse_range_zero_values(self):
         """Test parsing range with zero values."""
-        result = parse_range_filter("0:100")
+        result = cli_utils.parse_range_filter("0:100")
         assert result == ">-1,<101"
 
     def test_parse_range_single_zero(self):
         """Test parsing single zero value."""
-        result = parse_range_filter("0")
+        result = cli_utils.parse_range_filter("0")
         assert result == "0"
 
 
@@ -187,6 +287,31 @@ class TestSimplePaginateAll:
         from pyalex.cli.utils import _simple_paginate_all
 
         assert callable(_simple_paginate_all)
+
+
+class TestParseIdsFromJsonInput:
+    """Test helper for parsing ID inputs."""
+
+    def test_parse_single_object(self):
+        """Single object with id returns single-item list."""
+        payload = '{"id": "F1"}'
+        assert _parse_ids_from_json_input(payload) == ["F1"]
+
+    def test_parse_list_of_objects(self):
+        """List of objects produces list of ids."""
+        payload = '[{"id": "F1"}, {"id": "F2"}]'
+        assert _parse_ids_from_json_input(payload) == ["F1", "F2"]
+
+    def test_parse_list_of_strings(self):
+        """List of strings is returned unchanged."""
+        payload = '["F1", "F2"]'
+        assert _parse_ids_from_json_input(payload) == ["F1", "F2"]
+
+    def test_missing_id_field_raises(self):
+        """Missing id field should raise ValueError."""
+        payload = '[{"name": "Example"}]'
+        with pytest.raises(ValueError, match="Missing 'id' field"):
+            _parse_ids_from_json_input(payload)
 
 
 class TestMaxWidth:

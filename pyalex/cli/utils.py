@@ -1,12 +1,8 @@
-"""
-Common utilities for PyAlex CLI commands.
-
-This module contains shared utility functions for debugging, data processing,
-output formatting, and query execution.
-"""
+"""Common utilities for PyAlex CLI commands."""
 
 import asyncio
 import json
+import sys
 from typing import Any
 
 import typer
@@ -16,6 +12,8 @@ from pyalex import config
 from pyalex import invert_abstract
 from pyalex.core.config import MAX_PER_PAGE
 from pyalex.logger import get_logger
+
+from .constants import STDIN_SENTINEL
 
 # Initialize logger
 logger = get_logger()
@@ -400,6 +398,92 @@ def _clean_ids(id_list, url_prefix="https://openalex.org/"):
     return cleaned_ids
 
 
+def _extract_ids_from_data(data, id_field: str = "id") -> list[str]:
+    """Extract ID values from parsed JSON input."""
+
+    if isinstance(data, dict):
+        if id_field in data:
+            return [data[id_field]]
+        raise ValueError(f"No '{id_field}' field found in input object")
+
+    if isinstance(data, list):
+        if not data:
+            raise ValueError("Empty list provided")
+
+        first_item = data[0]
+
+        if isinstance(first_item, str):
+            if not all(isinstance(item, str) for item in data):
+                raise ValueError("Invalid list format")
+            return list(data)
+
+        if isinstance(first_item, dict):
+            ids: list[str] = []
+            for item in data:
+                if not isinstance(item, dict):
+                    raise ValueError("Invalid list format")
+                if id_field not in item:
+                    raise ValueError(f"Missing '{id_field}' field in list item")
+                ids.append(item[id_field])
+            return ids
+
+        raise ValueError("Invalid list format")
+
+    raise ValueError("Input must be a JSON object or array")
+
+
+def _parse_ids_from_json_input(input_text: str, id_field: str = "id") -> list[str]:
+    """Parse a JSON payload and extract ID values."""
+
+    stripped = input_text.strip()
+    if not stripped:
+        raise ValueError("No input provided")
+
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON input: {exc}") from exc
+
+    return _extract_ids_from_data(data, id_field=id_field)
+
+
+def resolve_ids_option(
+    option_value: str | None,
+    option_name: str,
+    *,
+    id_field: str = "id",
+) -> str | None:
+    """Resolve CLI ID options that may read values from stdin."""
+
+    if option_value is None or option_value != STDIN_SENTINEL:
+        return option_value
+
+    if sys.stdin.isatty():
+        typer.echo(
+            (
+                f"Error: {option_name} expects JSON input from stdin when no "
+                "value is provided"
+            ),
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    payload = sys.stdin.read()
+
+    try:
+        ids = _parse_ids_from_json_input(payload, id_field=id_field)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from None
+
+    if not ids:
+        typer.echo("Error: No IDs found in input", err=True)
+        raise typer.Exit(1)
+
+    cleaned_ids = _clean_ids(ids)
+    return ",".join(cleaned_ids)
+
+
 async def _async_retrieve_entities(entity_class, ids, class_name):
     """Async function to retrieve entities by IDs using batch requests.
 
@@ -420,11 +504,14 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
 
         if len(batch_ids) == 1:
             # Single ID - use direct retrieval URL
-            single_url = (
+            base_url = (
                 f"https://api.openalex.org/"
                 f"{entity_class.__name__.lower()}/{batch_ids[0]}"
             )
-            urls.append(single_url)
+            data_version = getattr(config, "data_version", None)
+            if data_version:
+                base_url = f"{base_url}?data-version={data_version}"
+            urls.append(base_url)
         else:
             # Multiple IDs - use OR operator for batch retrieval
             id_filter = "|".join(batch_ids)
@@ -435,10 +522,13 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
     if num_batches > 1 and not _debug_mode:
         # Try to use rich progress
         try:
+            from rich.console import Console
             from rich.progress import BarColumn
             from rich.progress import Progress
             from rich.progress import SpinnerColumn
             from rich.progress import TextColumn
+
+            console = Console(stderr=True)
 
             with Progress(
                 SpinnerColumn(),
@@ -446,6 +536,8 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
                 BarColumn(),
                 TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                 TextColumn("({task.completed}/{task.total})"),
+                console=console,
+                transient=True,
             ) as progress:
                 task_id = progress.add_task(
                     (
@@ -533,18 +625,21 @@ def _validate_and_apply_common_options(
         sort_params = {}
         for sort_item in sort_by.split(","):
             sort_item = sort_item.strip()
+            if not sort_item:
+                continue
             if ":" in sort_item:
                 field, direction = sort_item.split(":", 1)
                 sort_params[field.strip()] = direction.strip()
             else:
-                sort_params[sort_item] = "asc"  # Default direction
-        query = query.sort(**sort_params)
+                sort_params[sort_item] = "desc"  # Default direction
+        if sort_params:
+            query = query.sort(**sort_params)
 
     # Apply select options
     if select:
-        # Parse select string - comma-separated field list
-        fields = [field.strip() for field in select.split(",")]
-        query = query.select(fields)
+        fields = parse_select_fields(select)
+        if fields:
+            query = query.select(fields)
 
     # Apply sample options
     if sample is not None:
@@ -565,8 +660,22 @@ def parse_select_fields(select: str | None) -> list[str] | None:
     if not select:
         return None
 
-    fields = [field.strip() for field in select.split(",") if field.strip()]
-    return fields or None
+    raw_fields = [field.strip() for field in select.split(",") if field.strip()]
+    if not raw_fields:
+        return None
+
+    seen: set[str] = set()
+    ordered_fields: list[str] = []
+    for field in raw_fields:
+        if field not in seen:
+            ordered_fields.append(field)
+            seen.add(field)
+
+    if "id" in seen:
+        # Ensure id column appears first but do not duplicate it
+        return ["id"] + [field for field in ordered_fields if field != "id"]
+
+    return ["id"] + ordered_fields
 
 
 def _execute_query_with_progress(
@@ -667,12 +776,18 @@ def _show_simple_progress(description, current, total):
         return
 
     try:
+        from rich.console import Console
         from rich.progress import Progress
         from rich.progress import SpinnerColumn
         from rich.progress import TextColumn
 
+        console = Console(stderr=True)
+
         with Progress(
-            SpinnerColumn(), TextColumn(f"[bold blue]{description}...")
+            SpinnerColumn(),
+            TextColumn(f"[bold blue]{description}..."),
+            console=console,
+            transient=True,
         ) as progress:
             progress.add_task("", total=total)
             # Brief pause to show the progress
@@ -1053,8 +1168,24 @@ def _output_table(
             selected_fields = candidate_fields
 
     if selected_fields:
+        def _prepare_selected_fields(fields: list[str]) -> list[str]:
+            unique_fields: list[str] = []
+            seen: set[str] = set()
+
+            for field in fields:
+                if field not in seen:
+                    unique_fields.append(field)
+                    seen.add(field)
+
+            if "id" not in seen:
+                return ["id"] + unique_fields
+
+            return ["id"] + [field for field in unique_fields if field != "id"]
+
+        table_fields = _prepare_selected_fields(selected_fields)
+
         table = PrettyTable()
-        table.field_names = selected_fields
+        table.field_names = table_fields
         table.max_width = MAX_WIDTH
         table.align = "l"
 
@@ -1089,15 +1220,22 @@ def _output_table(
                 return current_items[0]
             return current_items
 
-        def _stringify_value(value: Any) -> Any:
+        def _stringify_value(value: Any, field_path: str) -> Any:
             if value is None:
                 return ""
             if isinstance(value, (int, float)):
                 return value
             if isinstance(value, str):
+                if field_path == "id":
+                    slug = value.rsplit("/", 1)[-1]
+                    return slug or value
                 return value
             if isinstance(value, list):
-                flattened = [str(_stringify_value(item)) for item in value if item]
+                flattened = [
+                    str(_stringify_value(item, field_path))
+                    for item in value
+                    if item
+                ]
                 return ", ".join(flattened)
             if isinstance(value, dict):
                 if "display_name" in value:
@@ -1107,9 +1245,9 @@ def _output_table(
 
         for result in results:
             row = []
-            for field in selected_fields:
+            for field in table_fields:
                 value = _extract_field_value(result, field)
-                row.append(_stringify_value(value))
+                row.append(_stringify_value(value, field))
             table.add_row(row)
 
         typer.echo(table)

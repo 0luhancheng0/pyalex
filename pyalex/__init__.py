@@ -11,6 +11,8 @@ from pyalex.core.response import OpenAlexResponseList
 from pyalex.core.utils import invert_abstract
 from pyalex.entities import Author
 from pyalex.entities import Authors
+from pyalex.entities import Concept
+from pyalex.entities import Concepts
 from pyalex.entities import Domain
 from pyalex.entities import Domains
 from pyalex.entities import Field
@@ -54,6 +56,8 @@ __all__ = [
     "Funders",
     "Keywords",
     "Keyword",
+    "Concepts",
+    "Concept",
     "Publishers",
     "Publisher",
     "Institutions",

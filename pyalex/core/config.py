@@ -53,6 +53,9 @@ DEFAULT_MAX_CONCURRENT = 10
 # CLI Display Defaults
 CLI_NAME_TRUNCATE_LENGTH = 50
 
+# Data version defaults
+DEFAULT_DATA_VERSION = os.getenv("OPENALEX_DATA_VERSION", "2")
+
 
 class AlexConfig(dict):
     """Configuration class for OpenAlex API.
@@ -98,7 +101,10 @@ def _get_env_int(key: str, default: int) -> int:
     except ValueError:
         import warnings
 
-        warnings.warn(f"Invalid integer for {key}: {value}. Using default: {default}")
+        warnings.warn(
+            f"Invalid integer for {key}: {value}. Using default: {default}",
+            stacklevel=2,
+        )
         return default
 
 
@@ -112,7 +118,10 @@ def _get_env_float(key: str, default: float) -> float:
     except ValueError:
         import warnings
 
-        warnings.warn(f"Invalid float for {key}: {value}. Using default: {default}")
+        warnings.warn(
+            f"Invalid float for {key}: {value}. Using default: {default}",
+            stacklevel=2,
+        )
         return default
 
 
@@ -151,4 +160,5 @@ config = AlexConfig(
         "OPENALEX_CONNECTION_LIMIT_PER_HOST", DEFAULT_CONNECTION_LIMIT_PER_HOST
     ),
     max_concurrent=_get_env_int("OPENALEX_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT),
+    data_version=DEFAULT_DATA_VERSION,
 )

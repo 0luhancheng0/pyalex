@@ -5,6 +5,7 @@ from urllib.parse import urlunparse
 
 from pyalex.core.response import OpenAlexResponseList
 from pyalex.entities.base import BaseOpenAlex
+from pyalex.entities.base import _run_async_safely
 
 
 class Autocomplete(dict):
@@ -19,18 +20,18 @@ class AutocompleteCollection(BaseOpenAlex):
     resource_class = Autocomplete
 
     def __getitem__(self, key: str) -> OpenAlexResponseList:
-        return self._get_from_url(
-            urlunparse(
-                (
-                    "https",
-                    "api.openalex.org",
-                    "autocomplete",
-                    "",
-                    f"q={quote_plus(key)}",
-                    "",
-                )
+        query = self._apply_default_query_params(f"q={quote_plus(key)}")
+        url = urlunparse(
+            (
+                "https",
+                "api.openalex.org",
+                "autocomplete",
+                "",
+                query,
+                "",
             )
         )
+        return _run_async_safely(self._get_from_url_async(url))
 
 
 def autocomplete(s: str) -> OpenAlexResponseList:

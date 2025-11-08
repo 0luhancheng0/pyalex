@@ -8,7 +8,10 @@ filters, pagination, and query building.
 from unittest.mock import Mock
 from unittest.mock import patch
 
-import pytest
+try:  # pragma: no cover - ensure pytest required for test execution
+    import pytest  # type: ignore[import-not-found]
+except ImportError as exc:  # pragma: no cover
+    raise ImportError("pytest is required to run tests") from exc
 
 from pyalex import Authors
 from pyalex import Institutions
@@ -130,18 +133,21 @@ class TestURLGeneration:
         url = works.url
         assert "https://api.openalex.org" in url
         assert "works" in url
+        assert "data-version=2" in url
 
     def test_filtered_url(self):
         """Test URL with filters."""
         works = Works().filter(publication_year=2020)
         url = works.url
         assert "filter" in url
+        assert "data-version=2" in url
 
     def test_search_url(self):
         """Test URL with search parameter."""
         works = Works().search("test")
         url = works.url
         assert "search" in url
+        assert "data-version=2" in url
 
 
 class TestEntityIndexing:
@@ -152,7 +158,10 @@ class TestEntityIndexing:
         works = Works()
 
         # Mock the _get_from_url_async to avoid actual API calls
+        captured_url: dict[str, str] = {}
+
         async def mock_get_from_url_async(url):
+            captured_url["value"] = url
             return {"id": "W123"}
 
         with patch.object(
@@ -160,6 +169,7 @@ class TestEntityIndexing:
         ):
             works["W123"]
             assert works.params == "W123"
+            assert "data-version=2" in captured_url.get("value", "")
 
     def test_list_id_format(self):
         """Test list of IDs creates filter_or query."""

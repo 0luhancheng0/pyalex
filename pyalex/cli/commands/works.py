@@ -1,6 +1,4 @@
-"""
-Works command for PyAlex CLI.
-"""
+"""Works command for PyAlex CLI."""
 
 import datetime
 from typing import Annotated
@@ -14,17 +12,41 @@ from ..command_patterns import execute_standard_query
 from ..command_patterns import handle_large_id_list_if_needed
 from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
+from ..constants import STDIN_SENTINEL
 from ..utils import _handle_cli_exception
 from ..utils import _output_grouped_results
 from ..utils import _output_results
 from ..utils import _validate_and_apply_common_options
+from ..utils import apply_range_filter
+from ..utils import parse_range_filter
 from ..utils import parse_select_fields
+from ..utils import resolve_ids_option
+from .utils import StdinSentinelCommand
+
+
+class _WorksCommand(StdinSentinelCommand):
+    """Custom command that injects stdin sentinels for ID options."""
+
+    _stdin_options = {
+        "--author-ids": STDIN_SENTINEL,
+        "--institution-ids": STDIN_SENTINEL,
+        "--topic-ids": STDIN_SENTINEL,
+        "--subfield-ids": STDIN_SENTINEL,
+        "--funder-ids": STDIN_SENTINEL,
+        "--award-ids": STDIN_SENTINEL,
+        "--source-ids": STDIN_SENTINEL,
+        "--host-venue-ids": STDIN_SENTINEL,
+        "--source-issn": STDIN_SENTINEL,
+        "--source-host-org-ids": STDIN_SENTINEL,
+        "--cited-by": STDIN_SENTINEL,
+        "--cites": STDIN_SENTINEL,
+    }
 
 
 def create_works_command(app):
     """Create and register the works command."""
 
-    @app.command()
+    @app.command(cls=_WorksCommand)
     def works(
         search: Annotated[
             str | None, typer.Option("--search", "-s", help="Search term for works")
@@ -33,8 +55,11 @@ def create_works_command(app):
             str | None,
             typer.Option(
                 "--author-ids",
-                help="Filter by author OpenAlex ID(s). Use comma-separated values for "
-                "OR logic (e.g., --author-ids 'A123,A456,A789')",
+                help=(
+                    "Filter by author OpenAlex ID(s). Use comma-separated values for "
+                    "OR logic (e.g., --author-ids 'A123,A456,A789'). Omit the value "
+                    "to read JSON input from stdin (same formats as pyalex from-ids)"
+                ),
             ),
         ] = None,
         institution_ids: Annotated[
@@ -43,7 +68,9 @@ def create_works_command(app):
                 "--institution-ids",
                 help=(
                     "Filter by institution OpenAlex ID(s). Use comma-separated values "
-                    "for OR logic (e.g., --institution-ids 'I123,I456,I789')"
+                    "for OR logic (e.g., --institution-ids 'I123,I456,I789'). Omit "
+                    "the value to read JSON input from stdin (same formats as pyalex "
+                    "from-ids)"
                 ),
             ),
         ] = None,
@@ -75,7 +102,8 @@ def create_works_command(app):
                 help=(
                     "Filter by primary topic OpenAlex ID(s). "
                     "Use comma-separated values for OR logic "
-                    "(e.g., --topic-ids 'T123,T456,T789')"
+                    "(e.g., --topic-ids 'T123,T456,T789'). Omit the value to read "
+                    "JSON input from stdin (same formats as pyalex from-ids)"
                 ),
             ),
         ] = None,
@@ -86,7 +114,8 @@ def create_works_command(app):
                 help=(
                     "Filter by primary topic subfield OpenAlex ID(s). Use "
                     "comma-separated values for OR logic (e.g., --subfield-ids "
-                    "'SF123,SF456,SF789')"
+                    "'SF123,SF456,SF789'). Omit the value to read JSON input from "
+                    "stdin (same formats as pyalex from-ids)"
                 ),
             ),
         ] = None,
@@ -95,15 +124,132 @@ def create_works_command(app):
             typer.Option(
                 "--funder-ids",
                 help="Filter by funder OpenAlex ID(s). Use comma-separated values for "
-                "OR logic (e.g., --funder-ids 'F123,F456,F789')",
+                "OR logic (e.g., --funder-ids 'F123,F456,F789'). Omit the value to "
+                "read JSON input from stdin (same formats as pyalex from-ids)",
+                metavar="ID[,ID...]",
             ),
         ] = None,
         award_ids: Annotated[
             str | None,
             typer.Option(
                 "--award-ids",
-                help="Filter by grant award ID(s). Use comma-separated values for "
-                "OR logic (e.g., --award-ids 'AWARD123,AWARD456')",
+                help=(
+                    "Filter by grant award ID(s). Use comma-separated values for "
+                    "OR logic (e.g., --award-ids 'AWARD123,AWARD456'). Omit the "
+                    "value to read JSON input from stdin (same formats as pyalex "
+                    "from-ids)"
+                ),
+            ),
+        ] = None,
+        source_ids: Annotated[
+            str | None,
+            typer.Option(
+                "--source-ids",
+                help=(
+                    "Filter by primary source OpenAlex ID(s). Use comma-separated "
+                    "values for OR logic (e.g., --source-ids 'S123,S456'). Omit "
+                    "the value to read JSON input from stdin."
+                ),
+                metavar="ID[,ID...]",
+            ),
+        ] = None,
+        host_venue_ids: Annotated[
+            str | None,
+            typer.Option(
+                "--host-venue-ids",
+                help=(
+                    "Filter by host venue OpenAlex ID(s). Use comma-separated "
+                    "values for OR logic (e.g., --host-venue-ids 'S123,S456'). "
+                    "Omit the value to read JSON input from stdin."
+                ),
+                metavar="ID[,ID...]",
+            ),
+        ] = None,
+        source_issn: Annotated[
+            str | None,
+            typer.Option(
+                "--source-issn",
+                help=(
+                    "Filter by source ISSN. Accepts comma-separated values or "
+                    "JSON input from stdin with an 'issn' field."
+                ),
+                metavar="ISSN[,ISSN...]",
+            ),
+        ] = None,
+        source_host_org_ids: Annotated[
+            str | None,
+            typer.Option(
+                "--source-host-org-ids",
+                help=(
+                    "Filter by source host organization (publisher) OpenAlex ID(s). "
+                    "Use comma-separated values for OR logic or supply JSON via stdin."
+                ),
+                metavar="ID[,ID...]",
+            ),
+        ] = None,
+        cited_by_count: Annotated[
+            str | None,
+            typer.Option(
+                "--cited-by-count",
+                help=(
+                    "Filter by total citation count. Use single value (e.g., '1000') "
+                    "or range (e.g., '500:5000', ':1000', '1000:')"
+                ),
+            ),
+        ] = None,
+        cited_by_ids: Annotated[
+            str | None,
+            typer.Option(
+                "--cited-by",
+                help=(
+                    "Filter works that are cited by the provided work ID(s). Use "
+                    "comma-separated IDs or omit the value to read JSON from stdin."
+                ),
+            ),
+        ] = None,
+        cites_ids: Annotated[
+            str | None,
+            typer.Option(
+                "--cites",
+                help=(
+                    "Filter works that cite the provided work ID(s). Use "
+                    "comma-separated IDs or omit the value to read JSON from stdin."
+                ),
+            ),
+        ] = None,
+        is_oa: Annotated[
+            bool | None,
+            typer.Option(
+                "--is-oa/--not-oa",
+                help="Filter by open access availability (default: no filter)",
+            ),
+        ] = None,
+        oa_status: Annotated[
+            str | None,
+            typer.Option(
+                "--oa-status",
+                help="Filter by specific OA status (e.g., gold, green, hybrid, bronze)",
+            ),
+        ] = None,
+        has_abstract: Annotated[
+            bool | None,
+            typer.Option(
+                "--has-abstract/--no-abstract",
+                help="Filter by presence of an abstract",
+            ),
+        ] = None,
+        has_fulltext: Annotated[
+            bool | None,
+            typer.Option(
+                "--has-fulltext/--no-fulltext",
+                help="Filter by availability of any fulltext link",
+            ),
+        ] = None,
+        abstract_search: Annotated[
+            str | None,
+            typer.Option(
+                "--abstract-search",
+                help="Search within the inverted abstract (maps to abstract.search)",
             ),
         ] = None,
         group_by: Annotated[
@@ -201,7 +347,12 @@ def create_works_command(app):
           pyalex works --institution-ids "I123,I456,I789" --all
           pyalex works --funder-ids "F4320332161"
           pyalex works --funder-ids "F123,F456,F789" --all
+          cat funders.json | pyalex works --funder-ids --limit 10
           pyalex works --award-ids "AWARD123,AWARD456"
+          pyalex works --cites "W123,W456" --limit 10
+          pyalex works --source-issn "2167-8359"
+          pyalex works --host-venue-ids "S1983995261"
+          pyalex works --is-oa --has-fulltext --abstract-search "machine vision"
           pyalex works --search "AI" --json ai_works.json
           pyalex works --group-by "oa_status"
           pyalex works --group-by "publication_year" --search "COVID-19"
@@ -216,6 +367,27 @@ def create_works_command(app):
             effective_json_path, effective_parquet_path = (
                 validate_output_format_options(json_flag, json_path, parquet_path)
             )
+
+            author_ids = resolve_ids_option(author_ids, "--author-ids")
+            institution_ids = resolve_ids_option(
+                institution_ids, "--institution-ids"
+            )
+            topic_ids = resolve_ids_option(topic_ids, "--topic-ids")
+            subfield_ids = resolve_ids_option(subfield_ids, "--subfield-ids")
+            funder_ids = resolve_ids_option(funder_ids, "--funder-ids")
+            award_ids = resolve_ids_option(award_ids, "--award-ids")
+            source_ids = resolve_ids_option(source_ids, "--source-ids")
+            host_venue_ids = resolve_ids_option(
+                host_venue_ids, "--host-venue-ids"
+            )
+            source_issn = resolve_ids_option(
+                source_issn, "--source-issn", id_field="issn"
+            )
+            source_host_org_ids = resolve_ids_option(
+                source_host_org_ids, "--source-host-org-ids"
+            )
+            cited_by_ids = resolve_ids_option(cited_by_ids, "--cited-by")
+            cites_ids = resolve_ids_option(cites_ids, "--cites")
 
             # Build query
             query = Works()
@@ -317,6 +489,42 @@ def create_works_command(app):
                     query, subfield_ids, "works_subfield", Works
                 )
 
+            if source_ids:
+                query = add_id_list_option_to_command(
+                    query, source_ids, "works_source", Works
+                )
+
+            if host_venue_ids:
+                query = add_id_list_option_to_command(
+                    query, host_venue_ids, "works_host_venue", Works
+                )
+
+            if source_issn:
+                query = add_id_list_option_to_command(
+                    query, source_issn, "works_source_issn", Works
+                )
+
+            if source_host_org_ids:
+                query = add_id_list_option_to_command(
+                    query, source_host_org_ids, "works_source_host_org", Works
+                )
+
+            if cited_by_count:
+                parsed_cited_by_count = parse_range_filter(cited_by_count)
+                query = apply_range_filter(
+                    query, "cited_by_count", parsed_cited_by_count
+                )
+
+            if cited_by_ids:
+                query = add_id_list_option_to_command(
+                    query, cited_by_ids, "works_cited_by", Works
+                )
+
+            if cites_ids:
+                query = add_id_list_option_to_command(
+                    query, cites_ids, "works_cites", Works
+                )
+
             if funder_ids:
                 # Use the generalized helper for ID list handling
                 query = add_id_list_option_to_command(
@@ -328,6 +536,20 @@ def create_works_command(app):
                 query = add_id_list_option_to_command(
                     query, award_ids, "works_award", Works
                 )
+
+            if oa_status:
+                query = query.filter_by_open_access(oa_status=oa_status)
+            elif is_oa is not None:
+                query = query.filter_by_open_access(is_oa=is_oa)
+
+            if has_abstract is not None:
+                query = query.filter(has_abstract=has_abstract)
+
+            if has_fulltext is not None:
+                query = query.filter(has_fulltext=has_fulltext)
+
+            if abstract_search:
+                query = query.filter_by_abstract_search(abstract_search)
 
             # Apply common options (sort, sample, select)
             cli_selected_fields = parse_select_fields(select)
@@ -379,5 +601,7 @@ def create_works_command(app):
                 selected_fields=cli_selected_fields,
             )
 
+        except typer.Exit as exc:
+            raise exc
         except Exception as e:
             _handle_cli_exception(e)

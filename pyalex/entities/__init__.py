@@ -4,6 +4,8 @@ from .authors import Author
 from .authors import Authors
 from .autocomplete import Autocomplete
 from .autocomplete import autocomplete
+from .concepts import Concept
+from .concepts import Concepts
 from .domains import Domain
 from .domains import Domains
 from .fields import Field
@@ -46,6 +48,8 @@ __all__ = [
     "Funders",
     "Keyword",
     "Keywords",
+    "Concept",
+    "Concepts",
     "Domain",
     "Domains",
     "Field",

@@ -1,0 +1,6 @@
+- [x] Works CLI: add citation relationship filters (`cited_by`, `cites`) with CLI flags that accept stdin-driven ID lists.
+- [x] Works CLI: surface open-access and fulltext filters (`is_oa`, `oa_status`, `has_abstract`, `has_fulltext`).
+- [x] Works CLI: expose venue/location filters (`primary_location.source.id`, `host_venue.id`, ISSN/ROR helpers).
+- [x] Works CLI: add abstract-level search support (maps to `abstract.search`).
+- [x] Authors CLI: provide convenience flags for `has_orcid`, `has_twitter`, `has_wikipedia`, and ROR-based institution filters.
+- [x] CLI coverage: add commands for remaining OpenAlex entities (concepts, sources, publishers, topics, keywords).

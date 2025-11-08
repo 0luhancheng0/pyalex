@@ -11,6 +11,7 @@ from ..command_patterns import execute_standard_query
 from ..command_patterns import handle_large_id_list_if_needed
 from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
+from ..constants import STDIN_SENTINEL
 from ..utils import _handle_cli_exception
 from ..utils import _output_grouped_results
 from ..utils import _output_results
@@ -18,12 +19,38 @@ from ..utils import _validate_and_apply_common_options
 from ..utils import apply_range_filter
 from ..utils import parse_range_filter
 from ..utils import parse_select_fields
+from ..utils import resolve_ids_option
+from .utils import StdinSentinelCommand
+
+
+def _normalize_ror_value(ror_value: str) -> str:
+    """Ensure ROR identifiers include the canonical https prefix."""
+
+    ror_value = ror_value.strip()
+    if not ror_value:
+        return ror_value
+    if ror_value.startswith("https://ror.org/"):
+        return ror_value
+    if ror_value.startswith("http://ror.org/"):
+        return ror_value.replace("http://", "https://", 1)
+    if ror_value.startswith("ror.org/"):
+        return f"https://{ror_value}"
+    return f"https://ror.org/{ror_value}"
+
+
+class _AuthorsCommand(StdinSentinelCommand):
+    """Custom command that injects stdin sentinel for institution IDs."""
+
+    _stdin_options = {
+        "--institution-ids": STDIN_SENTINEL,
+        "--institution-rors": STDIN_SENTINEL,
+    }
 
 
 def create_authors_command(app):
     """Create and register the authors command."""
 
-    @app.command()
+    @app.command(cls=_AuthorsCommand)
     def authors(
         search: Annotated[
             str | None, typer.Option("--search", "-s", help="Search term for authors")
@@ -35,7 +62,20 @@ def create_authors_command(app):
                 help=(
                     "Filter by institution OpenAlex ID(s). "
                     "Use comma-separated values for OR logic "
-                    "(e.g., --institution-ids 'I123,I456,I789')"
+                    "(e.g., --institution-ids 'I123,I456,I789'). Omit the value "
+                    "to read JSON input from stdin (same formats as pyalex "
+                    "from-ids)"
+                ),
+            ),
+        ] = None,
+        institution_rors: Annotated[
+            str | None,
+            typer.Option(
+                "--institution-rors",
+                help=(
+                    "Filter by last known institution ROR(s). Use comma-separated "
+                    "values or omit the value to read JSON input from stdin with "
+                    "a 'ror' field."
                 ),
             ),
         ] = None,
@@ -43,6 +83,27 @@ def create_authors_command(app):
             str | None,
             typer.Option(
                 "--orcid", help="Filter by ORCID (e.g., '0000-0002-3748-6564')"
+            ),
+        ] = None,
+        has_orcid: Annotated[
+            bool | None,
+            typer.Option(
+                "--has-orcid/--no-orcid",
+                help="Filter by presence of an ORCID identifier",
+            ),
+        ] = None,
+        has_twitter: Annotated[
+            bool | None,
+            typer.Option(
+                "--has-twitter/--no-twitter",
+                help="Filter by presence of a Twitter handle",
+            ),
+        ] = None,
+        has_wikipedia: Annotated[
+            bool | None,
+            typer.Option(
+                "--has-wikipedia/--no-wikipedia",
+                help="Filter by presence of a Wikipedia page",
             ),
         ] = None,
         works_count: Annotated[
@@ -201,12 +262,21 @@ def create_authors_command(app):
           pyalex authors --group-by "has_orcid"
           pyalex authors --sample 25 --seed 456
           pyalex authors --orcid "0000-0002-3748-6564"
+                    pyalex authors --institution-rors "https://ror.org/01an7q238"
+                    pyalex authors --has-orcid --group-by has_orcid --limit 10
         """
         try:
             # Validate options
             validate_pagination_options(all_results, limit)
             effective_json_path, effective_parquet_path = (
                 validate_output_format_options(json_flag, json_path, parquet_path)
+            )
+
+            institution_ids = resolve_ids_option(
+                institution_ids, "--institution-ids"
+            )
+            institution_rors = resolve_ids_option(
+                institution_rors, "--institution-rors", id_field="ror"
             )
 
             # Build query
@@ -220,8 +290,32 @@ def create_authors_command(app):
                     query, institution_ids, "authors_institution", Authors
                 )
 
+            if institution_rors:
+                ror_values = [
+                    _normalize_ror_value(value)
+                    for value in institution_rors.split(",")
+                    if value.strip()
+                ]
+                if ror_values:
+                    normalized_rors = ",".join(ror_values)
+                    query = add_id_list_option_to_command(
+                        query,
+                        normalized_rors,
+                        "authors_institution_ror",
+                        Authors,
+                    )
+
             if orcid:
                 query = query.filter(orcid=orcid)
+
+            if has_orcid is not None:
+                query = query.filter(has_orcid=has_orcid)
+
+            if has_twitter is not None:
+                query = query.filter(has_twitter=has_twitter)
+
+            if has_wikipedia is not None:
+                query = query.filter(has_wikipedia=has_wikipedia)
 
             if works_count:
                 parsed_works_count = parse_range_filter(works_count)
@@ -297,5 +391,7 @@ def create_authors_command(app):
                 selected_fields=cli_selected_fields,
             )
 
+        except typer.Exit as exc:
+            raise exc
         except Exception as e:
             _handle_cli_exception(e)

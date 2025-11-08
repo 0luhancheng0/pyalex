@@ -28,6 +28,7 @@ dependencies = [
     "anywidget>=0.9.18",
     "pydantic>=2.0.0",
     "fastmcp>=2.12.5",
+    "ruff>=0.14.1",
 ]
 dynamic = ["version"]
 requires-python = ">=3.10"
@@ -38,7 +39,7 @@ pyalex = "pyalex.cli:app"
 [project.optional-dependencies]
 dataframe = ["pandas>=1.0.0"]
 lint = ["ruff"]
-test = ["pytest", "pytest-xdist", "dotenv"]
+test = ["pytest", "pytest-xdist", "pytest-asyncio", "dotenv"]
 docs = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.4.0",
@@ -66,6 +67,9 @@ force-single-line = true
 [tool.pytest.ini_options]
 pythonpath = ["."]
 addopts = "-v -W error --ignore=tests/slow"
+markers = [
+    "asyncio: mark async tests that should run with an event loop",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "mcp_server.py" = ["E501"]  # Allow longer lines in MCP server

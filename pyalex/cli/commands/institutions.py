@@ -17,6 +17,7 @@ from ..utils import _output_results
 from ..utils import _validate_and_apply_common_options
 from ..utils import apply_range_filter
 from ..utils import parse_range_filter
+from ..utils import parse_select_fields
 
 
 def create_institutions_command(app):
@@ -52,40 +53,53 @@ def create_institutions_command(app):
             str | None,
             typer.Option(
                 "--h-index",
-                help="Filter by h-index from summary stats. Use single value (e.g., '50') "
-                "or range (e.g., '10:100', ':50', '25:')",
+                help=(
+                    "Filter by h-index from summary stats. "
+                    "Use single value (e.g., '50') "
+                    "or range (e.g., '10:100', ':50', '25:')"
+                ),
             ),
         ] = None,
         i10_index: Annotated[
             str | None,
             typer.Option(
                 "--i10-index",
-                help="Filter by i10-index from summary stats. Use single value "
-                "(e.g., '100') or range (e.g., '50:500', ':200', '100:')",
+                help=(
+                    "Filter by i10-index from summary stats. Use single value "
+                    "(e.g., '100') or range (e.g., '50:500', ':200', '100:')"
+                ),
             ),
         ] = None,
         two_year_mean_citedness: Annotated[
             str | None,
             typer.Option(
                 "--two-year-mean-citedness",
-                help="Filter by 2-year mean citedness from summary stats. Use single value "
-                "(e.g., '2.5') or range (e.g., '1.0:5.0', ':3.0', '2.0:')",
+                help=(
+                    "Filter by 2-year mean citedness from summary stats. "
+                    "Use single value (e.g., '2.5') "
+                    "or range (e.g., '1.0:5.0', ':3.0', '2.0:')"
+                ),
             ),
         ] = None,
         cited_by_count: Annotated[
             str | None,
             typer.Option(
                 "--cited-by-count",
-                help="Filter by total citation count. Use single value (e.g., '1000') or "
-                "range (e.g., '500:5000', ':1000', '1000:')",
+                help=(
+                    "Filter by total citation count. "
+                    "Use single value (e.g., '1000') "
+                    "or range (e.g., '500:5000', ':1000', '1000:')"
+                ),
             ),
         ] = None,
         group_by: Annotated[
             str | None,
             typer.Option(
                 "--group-by",
-                help="Group results by field (e.g. 'country_code', 'continent', 'type', "
-                "'cited_by_count', 'works_count')",
+                help=(
+                    "Group results by field (e.g. 'country_code', 'continent', 'type', "
+                    "'cited_by_count', 'works_count')"
+                ),
             ),
         ] = None,
         all_results: Annotated[
@@ -99,7 +113,10 @@ def create_institutions_command(app):
             typer.Option(
                 "--limit",
                 "-l",
-                help="Maximum number of results to return (mutually exclusive with --all)",
+                help=(
+                    "Maximum number of results to return "
+                    "(mutually exclusive with --all)"
+                ),
             ),
         ] = None,
         json_flag: Annotated[
@@ -122,8 +139,10 @@ def create_institutions_command(app):
             str | None,
             typer.Option(
                 "--sort-by",
-                help="Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
-                "'display_name:asc')",
+                help=(
+                    "Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
+                    "'display_name:asc')"
+                ),
             ),
         ] = None,
         sample: Annotated[
@@ -211,6 +230,8 @@ def create_institutions_command(app):
                     query, "cited_by_count", parsed_cited_by_count
                 )
 
+            cli_selected_fields = parse_select_fields(select)
+
             # Apply common options (sort, sample, select)
             query = _validate_and_apply_common_options(
                 query, all_results, limit, sample, seed, sort_by, select
@@ -238,7 +259,12 @@ def create_institutions_command(app):
                 typer.echo("No results returned from API", err=True)
                 return
 
-            _output_results(results, effective_json_path, effective_parquet_path)
+            _output_results(
+                results,
+                effective_json_path,
+                effective_parquet_path,
+                selected_fields=cli_selected_fields,
+            )
 
         except Exception as e:
             _handle_cli_exception(e)

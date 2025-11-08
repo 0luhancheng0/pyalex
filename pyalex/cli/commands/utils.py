@@ -1,200 +1,157 @@
-"""
-Utility commands for PyAlex CLI.
-"""
+"""Utility commands for PyAlex CLI."""
 
 import json
 import sys
+from importlib import import_module
 from typing import Annotated
 
 import typer
+from typer.core import TyperCommand
 
 from pyalex.exceptions import CLIError
 from pyalex.exceptions import DataError
 from pyalex.exceptions import ValidationError
 
+from ..command_patterns import validate_output_format_options
 from ..utils import _async_retrieve_entities
 from ..utils import _clean_ids
 from ..utils import _handle_cli_exception
 from ..utils import _output_results
+from ..utils import _parse_ids_from_json_input
+
+
+class StdinSentinelCommand(TyperCommand):
+    """Command class that injects stdin sentinels for specified options."""
+
+    _stdin_options: dict[str, str] = {}
+
+    def parse_args(self, ctx, args):  # type: ignore[override]
+        processed: list[str] = []
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            processed.append(arg)
+
+            sentinel = self._stdin_options.get(arg)
+            if sentinel:
+                next_index = i + 1
+                if next_index >= len(args) or args[next_index].startswith("-"):
+                    processed.append(sentinel)
+
+            i += 1
+
+        return super().parse_args(ctx, processed)
+
+_ENTITY_PREFIX_MAP: dict[str, str] = {
+    "SF": "Subfields",
+    "FI": "Fields",
+    "W": "Works",
+    "A": "Authors",
+    "I": "Institutions",
+    "S": "Sources",
+    "F": "Funders",
+    "P": "Publishers",
+    "T": "Topics",
+    "D": "Domains",
+    "K": "Keywords",
+}
+
+
+def _load_entity_class_from_prefix(openalex_id: str) -> tuple[type, str]:
+    """Resolve the entity class based on an OpenAlex ID prefix."""
+
+    identifier = openalex_id.strip().upper()
+    prefix = None
+
+    # Check two-character prefixes first (e.g., SF for subfields)
+    if len(identifier) >= 2:
+        candidate = identifier[:2]
+        if candidate in _ENTITY_PREFIX_MAP:
+            prefix = candidate
+
+    if prefix is None and identifier:
+        candidate = identifier[0]
+        if candidate in _ENTITY_PREFIX_MAP:
+            prefix = candidate
+
+    if prefix is None:
+        raise ValueError(f"Unknown ID prefix in '{openalex_id}'")
+
+    class_name = _ENTITY_PREFIX_MAP[prefix]
+
+    try:
+        module = import_module("pyalex")
+        entity_class = getattr(module, class_name)
+    except AttributeError as exc:  # pragma: no cover - defensive
+        raise ValueError(
+            f"Could not determine entity type for '{openalex_id}'"
+        ) from exc
+
+    return entity_class, class_name
 
 
 def from_ids(
+    json_flag: Annotated[
+        bool, typer.Option("--json", help="Output JSON to stdout")
+    ] = False,
     json_path: Annotated[
         str | None,
-        typer.Option("--json", help="Save results to JSON file at specified path"),
+        typer.Option(
+            "--json-file", help="Save results to JSON file at specified path"
+        ),
+    ] = None,
+    parquet_path: Annotated[
+        str | None,
+        typer.Option(
+            "--parquet-file",
+            help="Save results to Parquet file at specified path",
+        ),
     ] = None,
 ):
-    """
-    Retrieve entities by their OpenAlex IDs from stdin.
+    """Retrieve entities by their OpenAlex IDs from stdin."""
 
-    Expects JSON input containing either:
-    - A single entity with an 'id' field
-    - A list of entities, each with an 'id' field
-    - A list of ID strings
-
-    Examples:
-      echo '["W1234567890", "W0987654321"]' | pyalex from-ids
-      echo '{"id": "W1234567890"}' | pyalex from-ids --json results.json
-      cat work_ids.json | pyalex from-ids
-    """
     try:
-        # Read JSON from stdin
-        input_data = sys.stdin.read().strip()
-        if not input_data:
-            typer.echo("Error: No input provided", err=True)
-            raise typer.Exit(1)
+        effective_json_path, effective_parquet_path = validate_output_format_options(
+            json_flag, json_path, parquet_path
+        )
 
+        payload = sys.stdin.read()
         try:
-            data = json.loads(input_data)
-        except json.JSONDecodeError as e:
-            typer.echo(f"Error: Invalid JSON input: {e}", err=True)
-            raise typer.Exit(1) from e
+            ids = _parse_ids_from_json_input(payload)
+        except ValueError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1) from None
 
-        # Extract IDs from input
-        ids = []
-        entity_class = None
-
-        if isinstance(data, dict):
-            # Single entity object
-            if "id" in data:
-                ids = [data["id"]]
-            else:
-                typer.echo("Error: No 'id' field found in input object", err=True)
-                raise typer.Exit(1)
-        elif isinstance(data, list):
-            if not data:
-                typer.echo("Error: Empty list provided", err=True)
-                raise typer.Exit(1)
-
-            # Check if it's a list of strings (IDs) or objects
-            if isinstance(data[0], str):
-                # List of ID strings
-                ids = data
-            elif isinstance(data[0], dict):
-                # List of entity objects
-                for item in data:
-                    if "id" in item:
-                        ids.append(item["id"])
-                    else:
-                        typer.echo("Error: Missing 'id' field in list item", err=True)
-                        raise typer.Exit(1)
-            else:
-                typer.echo("Error: Invalid list format", err=True)
-                raise typer.Exit(1)
-        else:
-            typer.echo("Error: Input must be a JSON object or array", err=True)
-            raise typer.Exit(1)
-
-        if not ids:
+        cleaned_ids = _clean_ids(ids)
+        if not cleaned_ids:
             typer.echo("Error: No IDs found in input", err=True)
             raise typer.Exit(1)
 
-        # Clean IDs and determine entity type
-        cleaned_ids = _clean_ids(ids)
-
-        # Determine entity type from first ID
         first_id = cleaned_ids[0]
-        id_prefixes = {
-            "W": ("Works", "works"),
-            "A": ("Authors", "authors"),
-            "I": ("Institutions", "institutions"),
-            "S": ("Sources", "sources"),
-            "F": ("Funders", "funders"),
-            "P": ("Publishers", "publishers"),
-            "T": ("Topics", "topics"),
-            "D": ("Domains", "domains"),
-            "SF": ("Subfields", "subfields"),
-            "FI": ("Fields", "fields"),
-            "K": ("Keywords", "keywords"),
-        }
+        try:
+            entity_class, class_name = _load_entity_class_from_prefix(first_id)
+        except ValueError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1) from None
 
-        # Check for 2-letter prefixes first, then 1-letter
-        entity_info = None
-        for prefix in ["SF", "FI"]:  # Check 2-letter prefixes first
-            if first_id.startswith(prefix):
-                entity_info = id_prefixes[prefix]
-                break
-
-        if not entity_info:
-            # Check 1-letter prefixes
-            prefix = first_id[0]
-            if prefix in id_prefixes:
-                entity_info = id_prefixes[prefix]
-
-        if not entity_info:
-            typer.echo(f"Error: Unknown ID prefix in '{first_id}'", err=True)
-            raise typer.Exit(1)
-
-        class_name, entity_name = entity_info
-
-        # Import the appropriate entity class
-        if class_name == "Works":
-            from pyalex import Works
-
-            entity_class = Works
-        elif class_name == "Authors":
-            from pyalex import Authors
-
-            entity_class = Authors
-        elif class_name == "Institutions":
-            from pyalex import Institutions
-
-            entity_class = Institutions
-        elif class_name == "Sources":
-            from pyalex import Sources
-
-            entity_class = Sources
-        elif class_name == "Funders":
-            from pyalex import Funders
-
-            entity_class = Funders
-        elif class_name == "Publishers":
-            from pyalex import Publishers
-
-            entity_class = Publishers
-        elif class_name == "Topics":
-            from pyalex import Topics
-
-            entity_class = Topics
-        elif class_name == "Domains":
-            from pyalex import Domains
-
-            entity_class = Domains
-        elif class_name == "Subfields":
-            from pyalex import Subfields
-
-            entity_class = Subfields
-        elif class_name == "Fields":
-            from pyalex import Fields
-
-            entity_class = Fields
-        elif class_name == "Keywords":
-            from pyalex import Keywords
-
-            entity_class = Keywords
-
-        if not entity_class:
-            typer.echo(
-                f"Error: Could not determine entity type for '{first_id}'", err=True
-            )
-            raise typer.Exit(1)
-
-        # Retrieve entities using async requests only
         import asyncio
 
         results = asyncio.run(
             _async_retrieve_entities(entity_class, cleaned_ids, class_name)
         )
 
-        # Output results
-        _output_results(results, json_path)
+        _output_results(
+            results,
+            json_path=effective_json_path,
+            parquet_path=effective_parquet_path,
+        )
 
-    except (CLIError, DataError, ValidationError) as e:
-        _handle_cli_exception(e)
-        raise typer.Exit(1) from e
-    except Exception as e:
-        _handle_cli_exception(e)
-        raise typer.Exit(1) from e
+    except (CLIError, DataError, ValidationError) as exc:
+        _handle_cli_exception(exc)
+        raise typer.Exit(1) from exc
+    except Exception as exc:  # pragma: no cover - unexpected
+        _handle_cli_exception(exc)
+        raise typer.Exit(1) from exc
 
 
 def show(

@@ -312,7 +312,7 @@ async def async_batch_requests(
         async with semaphore:
             return await async_get_with_retry(client, url)
 
-    async with get_async_client() as client:
+    async with await get_async_client() as client:
         tasks = [fetch_with_semaphore(client, url) for url in urls]
         return await asyncio.gather(*tasks)
 
@@ -347,6 +347,7 @@ async def async_batch_requests_with_progress(
         max_concurrent = config.max_concurrent
 
     try:
+        from rich.console import Console
         from rich.progress import BarColumn
         from rich.progress import MofNCompleteColumn
         from rich.progress import Progress
@@ -365,12 +366,16 @@ async def async_batch_requests_with_progress(
                 return result
 
         async with await get_async_client() as client:
+            console = Console(stderr=True)
+
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
                 MofNCompleteColumn(),
                 TimeElapsedColumn(),
+                console=console,
+                transient=True,
             ) as progress:
                 task_id = progress.add_task(description, total=len(urls))
 
