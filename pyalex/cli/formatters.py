@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from prettytable import PrettyTable
+from rich.table import Table as RichTable
 
 from pyalex.core.config import config
 from pyalex.core.entity_detection import EntityTypeDetector
@@ -37,14 +38,14 @@ class TableFormatter(ABC):
         """Extract data from a single result dict for table row."""
         pass
 
-    def format_table(self, results: list[dict[str, Any]]) -> PrettyTable:
+    def format_table(self, results: list[dict[str, Any]]) -> Any:
         """Create and populate a PrettyTable from results.
 
         Args:
             results: List of result dictionaries
 
         Returns:
-            Populated PrettyTable instance
+            Populated table renderable
         """
         table = PrettyTable()
         table.field_names = self.get_field_names()
@@ -61,7 +62,7 @@ class WorksTableFormatter(TableFormatter):
     """Formatter for Works entities."""
 
     def get_field_names(self) -> list[str]:
-        return ["Name", "Year", "Journal", "Citations", "ID"]
+        return ["Name", "Year", "Journal", "OA", "Citations", "ID"]
 
     def extract_row_data(self, result: dict[str, Any]) -> list[Any]:
         title = (result.get("display_name") or result.get("title") or "Unknown")[
@@ -78,7 +79,75 @@ class WorksTableFormatter(TableFormatter):
         citations = result.get("cited_by_count", 0)
         openalex_id = result.get("id", "").split("/")[-1]
 
-        return [title, year, journal, citations, openalex_id]
+        open_access = result.get("open_access") or {}
+        oa_status = open_access.get("oa_status") or result.get("oa_status")
+
+        if oa_status:
+            oa_label = oa_status.upper()
+        else:
+            is_oa = open_access.get("is_oa")
+            if is_oa is None:
+                is_oa = result.get("is_oa")
+            oa_label = "OPEN" if is_oa else "CLOSED"
+
+        return [
+            title,
+            year,
+            journal,
+            oa_label,
+            f"{citations:,}",
+            openalex_id,
+        ]
+
+    def _get_row_style(self, result: dict[str, Any]) -> str | None:
+        open_access = result.get("open_access") or {}
+        raw_status = (
+            open_access.get("oa_status") or result.get("oa_status") or ""
+        )
+        oa_status = raw_status.lower()
+
+        style_map = {
+            "gold": "bold bright_yellow",
+            "diamond": "bold cyan",
+            "green": "bold green",
+            "hybrid": "bold magenta",
+            "bronze": "bold dark_orange3",
+            "platinum": "bold bright_white",
+        }
+
+        if oa_status in style_map:
+            return style_map[oa_status]
+
+        is_oa = open_access.get("is_oa")
+        if is_oa is None:
+            is_oa = result.get("is_oa")
+
+        if is_oa:
+            return "bold green"
+
+        return "dim"
+
+    def format_table(self, results: list[dict[str, Any]]) -> RichTable:
+        table = RichTable(
+            show_header=True,
+            header_style="bold cyan",
+            row_styles=None,
+            show_lines=False,
+        )
+
+        for field in self.get_field_names():
+            # Allow the Name column to wrap for long titles, keep others concise
+            overflow = "fold" if field == "Name" else "ellipsis"
+            justify = "left" if field != "Citations" else "right"
+            table.add_column(field, overflow=overflow, justify=justify)
+
+        for result in results:
+            row = self.extract_row_data(result)
+            style = self._get_row_style(result)
+            table.add_row(*[str(cell) for cell in row], style=style)
+
+        return table
+
 
 
 class AuthorsTableFormatter(TableFormatter):
@@ -254,7 +323,7 @@ class TableFormatterFactory:
         results: list[dict[str, Any]],
         grouped: bool = False,
         max_width: int = MAX_WIDTH,
-    ) -> PrettyTable:
+    ) -> Any:
         """Detect entity type and format results as table.
 
         Args:
@@ -263,7 +332,7 @@ class TableFormatterFactory:
             max_width: Maximum column width
 
         Returns:
-            Populated PrettyTable instance
+            Populated table renderable
         """
         if not results or len(results) == 0:
             # Return empty table for empty results

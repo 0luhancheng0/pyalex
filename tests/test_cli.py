@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
+from typing import Any
 
 import pytest  # type: ignore[import-not-found]
 from click.testing import CliRunner
@@ -120,6 +121,167 @@ def test_works_select_fields_table_header():
     assert "| title" in header_line
     assert "| fwci" in header_line
     assert "| Name" not in header_line
+
+
+def test_works_select_abstract_requests_inverted_index(monkeypatch):
+    """Selecting abstract should implicitly fetch the inverted index field."""
+
+    from pyalex.cli import main as cli_main
+    from pyalex.cli.commands import works as works_module
+    from pyalex.cli import utils as cli_utils
+
+    monkeypatch.setattr(
+        works_module,
+        "handle_large_id_list_if_needed",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        works_module,
+        "execute_standard_query",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        works_module,
+        "_output_results",
+        lambda *_args, **_kwargs: None,
+    )
+
+    class DummyWorks:
+        last_instance: "DummyWorks | None" = None
+
+        def __init__(self):
+            self.selected_fields: list[str] | None = None
+            type(self).last_instance = self
+
+        def search(self, *_args, **_kwargs):
+            return self
+
+        def filter(self, **_kwargs):
+            return self
+
+        def sort(self, **_kwargs):
+            return self
+
+        def select(self, fields):
+            self.selected_fields = fields
+            return self
+
+        def sample(self, *_args, **_kwargs):
+            return self
+
+    monkeypatch.setattr(works_module, "Works", DummyWorks)
+
+    from typer.main import get_command
+
+    runner = CliRunner()
+    result = runner.invoke(
+        get_command(cli_main.app),
+        ["works", "--select", "title,abstract", "--limit", "1"],
+    )
+
+    assert result.exit_code == 0, result.stdout or result.stderr
+    assert DummyWorks.last_instance is not None
+    assert DummyWorks.last_instance.selected_fields is not None
+    assert DummyWorks.last_instance.selected_fields == [
+        "id",
+        "title",
+        "abstract_inverted_index",
+    ]
+
+
+def test_works_select_title_abstract_template(monkeypatch):
+    """Selecting title_abstract should fetch dependencies and apply template."""
+
+    from pyalex import config as global_config
+    from pyalex.cli import main as cli_main
+    from pyalex.cli import utils as cli_utils
+    from pyalex.cli.commands import works as works_module
+
+    template = "Title: {title} | Abstract: {abstract}"
+    monkeypatch.setattr(global_config, "title_abstract_template", template)
+
+    captured_table: dict[str, Any] = {}
+
+    def capture_table(results, single=False, grouped=False, selected_fields=None):
+        captured_table["results"] = results
+        captured_table["single"] = single
+        captured_table["grouped"] = grouped
+        captured_table["selected_fields"] = selected_fields
+
+    monkeypatch.setattr(cli_utils, "_output_table", capture_table)
+    monkeypatch.setattr(
+        works_module,
+        "handle_large_id_list_if_needed",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fake_execute_standard_query(*_args, **_kwargs):
+        return [
+            {
+                "id": "https://openalex.org/W123",
+                "title": "Sample Title",
+                "abstract_inverted_index": {
+                    "sample": [0],
+                    "abstract": [1],
+                },
+            }
+        ]
+
+    monkeypatch.setattr(
+        works_module,
+        "execute_standard_query",
+        fake_execute_standard_query,
+    )
+
+    class DummyWorks:
+        last_instance: "DummyWorks | None" = None
+
+        def __init__(self):
+            self.selected_fields: list[str] | None = None
+            type(self).last_instance = self
+
+        def search(self, *_args, **_kwargs):
+            return self
+
+        def filter(self, **_kwargs):
+            return self
+
+        def sort(self, **_kwargs):
+            return self
+
+        def select(self, fields):
+            self.selected_fields = fields
+            return self
+
+        def sample(self, *_args, **_kwargs):
+            return self
+
+        def get(self, *_args, **_kwargs):
+            return []
+
+    monkeypatch.setattr(works_module, "Works", DummyWorks)
+
+    from typer.main import get_command
+
+    runner = CliRunner()
+    result = runner.invoke(
+        get_command(cli_main.app),
+        ["works", "--select", "title_abstract", "--limit", "1"],
+    )
+
+    assert result.exit_code == 0, result.stdout or result.stderr
+    assert DummyWorks.last_instance is not None
+    assert DummyWorks.last_instance.selected_fields == [
+        "id",
+        "title",
+        "abstract_inverted_index",
+    ]
+    assert captured_table["selected_fields"] == ["id", "title_abstract"]
+    assert captured_table["grouped"] is False
+    assert isinstance(captured_table["results"], list)
+    assert captured_table["results"][0]["title_abstract"] == (
+        "Title: Sample Title | Abstract: sample abstract"
+    )
 
 
 def test_institutions_select_fields_table_header():

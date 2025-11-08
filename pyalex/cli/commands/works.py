@@ -554,8 +554,39 @@ def create_works_command(app):
             # Apply common options (sort, sample, select)
             cli_selected_fields = parse_select_fields(select)
 
+            select_for_query = select
+            if cli_selected_fields:
+                normalized_fields = [
+                    field.lower() for field in cli_selected_fields if field != "id"
+                ]
+                needs_title_abstract = "title_abstract" in normalized_fields
+                needs_abstract_text = needs_title_abstract or any(
+                    field == "abstract" or field.startswith("abstract.")
+                    for field in normalized_fields
+                )
+
+                if (needs_abstract_text or needs_title_abstract) and select:
+                    raw_select_fields = [
+                        field.strip() for field in select.split(",") if field.strip()
+                    ]
+
+                    sanitized_fields = [
+                        field
+                        for field in raw_select_fields
+                        if field.lower() not in {"abstract", "title_abstract"}
+                    ]
+                    lower_sanitized = {
+                        field.lower() for field in sanitized_fields
+                    }
+                    if needs_title_abstract and "title" not in lower_sanitized:
+                        sanitized_fields.append("title")
+                        lower_sanitized.add("title")
+                    if "abstract_inverted_index" not in lower_sanitized:
+                        sanitized_fields.append("abstract_inverted_index")
+                    select_for_query = ",".join(sanitized_fields)
+
             query = _validate_and_apply_common_options(
-                query, all_results, limit, sample, seed, sort_by, select
+                query, all_results, limit, sample, seed, sort_by, select_for_query
             )
 
             # Apply group_by parameter

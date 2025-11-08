@@ -52,6 +52,7 @@ DEFAULT_MAX_CONCURRENT = 10
 
 # CLI Display Defaults
 CLI_NAME_TRUNCATE_LENGTH = 50
+DEFAULT_TITLE_ABSTRACT_TEMPLATE = "Title: {title}\nAbstract: {abstract}"
 
 # Data version defaults
 DEFAULT_DATA_VERSION = os.getenv("OPENALEX_DATA_VERSION", "2")
@@ -149,6 +150,9 @@ config = AlexConfig(
     cli_max_width=_get_env_int("OPENALEX_CLI_MAX_WIDTH", CLI_MAX_WIDTH),
     cli_name_truncate_length=_get_env_int(
         "OPENALEX_CLI_NAME_LENGTH", CLI_NAME_TRUNCATE_LENGTH
+    ),
+    title_abstract_template=os.getenv(
+        "OPENALEX_TITLE_ABSTRACT_TEMPLATE", DEFAULT_TITLE_ABSTRACT_TEMPLATE
     ),
     # HTTP client configurations
     total_timeout=_get_env_float("OPENALEX_TOTAL_TIMEOUT", DEFAULT_TOTAL_TIMEOUT),
