@@ -1020,9 +1020,10 @@ def _output_results(
     single: bool = False,
     grouped: bool = False,
     selected_fields: list[str] | None = None,
+    normalize: bool = False,
 ):
     """Output results in table, JSON, or Parquet format."""
-    # Debug: print type of results
+
     import sys
 
     if hasattr(sys, "_debug_output"):
@@ -1031,151 +1032,171 @@ def _output_results(
             f"hasattr to_dict={hasattr(results, 'to_dict')}",
             file=sys.stderr,
         )
-        if hasattr(results, "__iter__") and not isinstance(results, str | dict):
+        if hasattr(results, "__iter__") and not isinstance(results, (str, dict)):
             try:
                 print(f"DEBUG _output_results: len={len(results)}", file=sys.stderr)
             except Exception:
                 pass
 
-    # Handle None or empty results
+    normalization_requested = normalize or parquet_path is not None
+
+    def _coerce_record(item: Any) -> dict[str, Any]:
+        if isinstance(item, dict):
+            return dict(item)
+        if hasattr(item, "to_dict") and callable(item.to_dict):
+            converted = item.to_dict()
+            if isinstance(converted, dict):
+                return converted
+        try:
+            converted = dict(item)  # type: ignore[arg-type]
+        except Exception as exc:  # pragma: no cover - defensive
+            raise TypeError(
+                f"Expected mapping-compatible result, got {type(item).__name__}"
+            ) from exc
+        return converted
+
+    try:
+        import pandas as pd  # type: ignore[import-not-found]
+    except ImportError:
+        pd = None  # type: ignore[assignment]
+        if normalization_requested:
+            typer.echo(
+                "Error: pandas is required for --normalize or --parquet-file output",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+    else:
+        pd = pd  # type: ignore[assignment]
+
     if results is None:
         if jsonl_path:
-            if jsonl_path == "-":
-                return
-            with open(jsonl_path, "w", encoding="utf-8"):
-                pass
+            if jsonl_path != "-":
+                with open(jsonl_path, "w", encoding="utf-8"):
+                    pass
         elif parquet_path:
-            # Create empty DataFrame and save to parquet
-            import pandas as pd
-
-            df = pd.DataFrame()
-            df.to_parquet(parquet_path, index=False)
+            assert pd is not None
+            pd.DataFrame().to_parquet(parquet_path, index=False)
             typer.echo(f"Empty results saved to {parquet_path}")
         else:
             typer.echo("No results found.")
         return
 
-    # Convert DataFrame to list of dicts if needed
-    try:
-        import pandas as pd
+    results_df = None
+    records: list[dict[str, Any]]
 
-        if isinstance(results, pd.DataFrame):
-            results_df = results
-            results = results.to_dict("records")
-        elif hasattr(results, "to_dict") and callable(results.to_dict):
-            # It's a DataFrame or DataFrame-like object
-            results_df = results
-            results = results.to_dict("records")
-        elif not isinstance(results, list):
-            # Single item, wrap in list
-            results = [results]
-            results_df = None
+    if pd is not None and isinstance(results, pd.DataFrame):
+        results_df = results
+        records = results_df.to_dict(orient="records")
+    elif hasattr(results, "to_dict") and callable(results.to_dict):
+        records = results.to_dict("records")  # type: ignore[call-arg]
+    elif isinstance(results, list):
+        records = [_coerce_record(item) for item in results]
+    else:
+        try:
+            iterable = list(results)
+        except TypeError:
+            iterable = [results]
+        records = [_coerce_record(item) for item in iterable]
+
+    if not records:
+        if single or grouped:
+            pass
+        elif jsonl_path:
+            if jsonl_path != "-":
+                with open(jsonl_path, "w", encoding="utf-8"):
+                    pass
+        elif parquet_path:
+            assert pd is not None
+            pd.DataFrame().to_parquet(parquet_path, index=False)
+            typer.echo(f"Empty results saved to {parquet_path}")
         else:
-            results_df = None
-    except ImportError:
-        # pandas not installed, handle without DataFrame check
-        if hasattr(results, "to_dict") and callable(results.to_dict):
-            results = results.to_dict("records")
-        elif not isinstance(results, list):
-            results = [results]
-        results_df = None
+            typer.echo("No results found.")
+        return
 
-    # Process abstracts for works data (detect by presence of abstract_inverted_index)
-    # This needs to happen before normalization to ensure clean data
-    if results and isinstance(results, list) and len(results) > 0:
-        first_item = results[0] if not single else results
-        if isinstance(first_item, dict) and "abstract_inverted_index" in first_item:
-            # This is works data - convert abstracts and remove inverted index
-            if single:
-                results = _add_abstract_to_work(results)
+    # Convert works abstracts when present
+    first_item = records[0]
+    if isinstance(first_item, dict) and "abstract_inverted_index" in first_item:
+        updated: list[dict[str, Any]] = []
+        for item in records:
+            if isinstance(item, dict):
+                updated.append(_add_abstract_to_work(dict(item)))
             else:
-                results = [_add_abstract_to_work(work) for work in results]
-            # Update the DataFrame as well if it exists
-            if results_df is not None:
-                results_df = pd.DataFrame(results)
+                updated.append(item)
+        records = updated
+        if pd is not None:
+            results_df = pd.DataFrame(records)
 
-    # Inject combined title/abstract field when requested
     if selected_fields:
         selected_lower = {field.lower() for field in selected_fields}
         if "title_abstract" in selected_lower:
             template = config.title_abstract_template
+            records = [
+                _apply_title_abstract_template(dict(item), template)
+                if isinstance(item, dict)
+                else item
+                for item in records
+            ]
+            if pd is not None:
+                results_df = pd.DataFrame(records)
 
-            if single and isinstance(results, dict):
-                results = _apply_title_abstract_template(results, template)
-            else:
-                results = [
-                    _apply_title_abstract_template(dict(item), template)
-                    if isinstance(item, dict)
-                    else item
-                    for item in results
-                ]
-            if results_df is not None:
-                results_df = pd.DataFrame(results)
+    if normalization_requested:
+        assert pd is not None
+        normalized_df = pd.json_normalize(records)
+        records = normalized_df.to_dict(orient="records")
+        results_df = normalized_df
 
-    if not single and not grouped and (not results or len(results) == 0):
+    single_record = records[0] if records else {}
+
+    if not single and not grouped and not records:
         if jsonl_path:
-            if jsonl_path == "-":
-                return
-            with open(jsonl_path, "w", encoding="utf-8"):
-                pass
+            if jsonl_path != "-":
+                with open(jsonl_path, "w", encoding="utf-8"):
+                    pass
         elif parquet_path:
-            # Create empty DataFrame and save to parquet
-            import pandas as pd
-
-            df = pd.DataFrame()
-            df.to_parquet(parquet_path, index=False)
+            assert pd is not None
+            pd.DataFrame().to_parquet(parquet_path, index=False)
             typer.echo(f"Empty results saved to {parquet_path}")
         else:
             typer.echo("No results found.")
         return
 
     if parquet_path:
-        # Save to Parquet file with normalization
-        import pandas as pd
-
-        # Convert to DataFrame if needed
+        assert pd is not None
         if results_df is not None:
             df = results_df
         else:
-            if single:
-                df = pd.DataFrame([dict(results)])
-            elif grouped:
-                df = pd.DataFrame([dict(r) for r in results])
-            else:
-                df = pd.DataFrame([dict(r) for r in results])
-
-        # Normalize the DataFrame to flatten nested structures
-        # This exposes all attributes for downstream processing
+            df = pd.DataFrame(records)
         df = pd.json_normalize(df.to_dict(orient="records"))
-
-        # Save to parquet
         df.to_parquet(parquet_path, index=False)
         typer.echo(f"Results saved to {parquet_path}")
+        return
 
-    elif jsonl_path:
-        # Prepare iterable of JSON records
+    if jsonl_path:
         if single:
-            records = [dict(results)]
-        elif grouped:
-            records = [dict(r) for r in results]
+            records_to_emit = [dict(single_record)]
         else:
-            records = [dict(r) for r in results]
+            records_to_emit = [dict(item) for item in records]
 
         def _emit_json_lines(iterable):
             for record in iterable:
                 yield json.dumps(record, ensure_ascii=False)
 
         if jsonl_path == "-":
-            for line in _emit_json_lines(records):
+            for line in _emit_json_lines(records_to_emit):
                 typer.echo(line)
         else:
             with open(jsonl_path, "w", encoding="utf-8") as f:
-                for line in _emit_json_lines(records):
+                for line in _emit_json_lines(records_to_emit):
                     f.write(line + "\n")
+        return
 
-    else:
-        # Display table format to stdout
-        _output_table(results, single, grouped, selected_fields=selected_fields)
+    _output_table(
+        records,
+        single=single,
+        grouped=grouped,
+        selected_fields=selected_fields,
+        normalize=normalization_requested,
+    )
 
 
 def _output_table(
@@ -1183,6 +1204,7 @@ def _output_table(
     single: bool = False,
     grouped: bool = False,
     selected_fields: list[str] | None = None,
+    normalize: bool = False,
 ):
     """Output results in table format using PrettyTable.
 
@@ -1203,10 +1225,6 @@ def _output_table(
             raise ValueError(
                 f"Expected list of dicts, got list of {type(first_item).__name__}"
             )
-
-    # For single items, wrap in a list for consistent processing
-    if single:
-        results = [results]
 
     # Handle empty results
     if len(results) == 0:
@@ -1302,7 +1320,10 @@ def _output_table(
         for result in results:
             row = []
             for field in table_fields:
-                value = _extract_field_value(result, field)
+                if normalize and isinstance(result, dict) and field in result:
+                    value = result[field]
+                else:
+                    value = _extract_field_value(result, field)
                 row.append(_stringify_value(value, field))
             table.add_row(row)
 
@@ -1320,95 +1341,17 @@ def _output_table(
 
 
 def _output_grouped_results(
-    results, jsonl_path: str | None = None, parquet_path: str | None = None
+    results,
+    jsonl_path: str | None = None,
+    parquet_path: str | None = None,
+    normalize: bool = False,
 ):
     """Output grouped results in table, JSON, or Parquet format."""
-    import pandas as pd
 
-    if results is None:
-        if jsonl_path:
-            if jsonl_path == "-":
-                return
-            with open(jsonl_path, "w", encoding="utf-8"):
-                pass
-        elif parquet_path:
-            # Create empty DataFrame and save to parquet
-            df = pd.DataFrame()
-            df.to_parquet(parquet_path, index=False)
-            typer.echo(f"Empty grouped results saved to {parquet_path}")
-        else:
-            typer.echo("No grouped results found.")
-        return
-
-    # When group-by is used, the results list itself contains the grouped data
-    grouped_data = results
-
-    # Convert DataFrame to list of dicts if needed
-    if isinstance(grouped_data, pd.DataFrame):
-        grouped_df = grouped_data
-        grouped_data = grouped_data.to_dict("records")
-    else:
-        grouped_df = None
-
-    # Check for empty results
-    is_empty = False
-    if hasattr(grouped_data, "__len__"):
-        is_empty = len(grouped_data) == 0
-    else:
-        is_empty = not bool(grouped_data)
-
-    if is_empty:
-        if jsonl_path:
-            if jsonl_path == "-":
-                return
-            with open(jsonl_path, "w", encoding="utf-8"):
-                pass
-        elif parquet_path:
-            # Create empty DataFrame and save to parquet
-            df = pd.DataFrame()
-            df.to_parquet(parquet_path, index=False)
-            typer.echo(f"Empty grouped results saved to {parquet_path}")
-        else:
-            typer.echo("No grouped results found.")
-        return
-
-    if parquet_path:
-        # Save to Parquet file with normalization
-        if grouped_df is not None:
-            df = grouped_df
-        else:
-            df = pd.DataFrame([dict(item) for item in grouped_data])
-
-        # Normalize the DataFrame to flatten nested structures
-        # This exposes all attributes for downstream processing
-        df = pd.json_normalize(df.to_dict(orient="records"))
-
-        df.to_parquet(parquet_path, index=False)
-        typer.echo(f"Grouped results saved to {parquet_path}")
-
-    elif jsonl_path:
-        lines = [json.dumps(dict(item), ensure_ascii=False) for item in grouped_data]
-
-        if jsonl_path == "-":
-            for line in lines:
-                typer.echo(line)
-        else:
-            with open(jsonl_path, "w", encoding="utf-8") as f:
-                for line in lines:
-                    f.write(line + "\n")
-            typer.echo(f"Grouped results saved to {jsonl_path}")
-    else:
-        # Display table format to stdout
-        table = PrettyTable()
-        table.field_names = ["Key", "Display Name", "Count"]
-        table.max_width = MAX_WIDTH
-        table.align = "l"
-
-        for group in grouped_data:
-            key = group.get("key", "Unknown")
-            display_name = group.get("key_display_name", key)
-            count = group.get("count", 0)
-
-            table.add_row([key, display_name, f"{count:,}"])
-
-        typer.echo(table)
+    _output_results(
+        results,
+        jsonl_path=jsonl_path,
+        parquet_path=parquet_path,
+        grouped=True,
+        normalize=normalize,
+    )

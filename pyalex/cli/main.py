@@ -12,6 +12,13 @@ from pyalex import config
 
 from . import batch
 from . import utils
+from .commands.authors import create_authors_command
+from .commands.embedding import create_embedding_command
+from .commands.entities import create_entity_commands
+from .commands.funders import create_funders_command
+from .commands.institutions import create_institutions_command
+from .commands.utils import create_utils_commands
+from .commands.works import create_works_command
 
 # Create the main typer app
 app = typer.Typer(
@@ -70,19 +77,11 @@ def main(
     if dry_run:
         typer.echo(f"Dry run mode enabled - batch size: {batch_size}", err=True)
 
-
-# Import and register individual commands
-from .commands.authors import create_authors_command
-from .commands.entities import create_entity_commands
-from .commands.funders import create_funders_command
-from .commands.institutions import create_institutions_command
-from .commands.utils import create_utils_commands
-from .commands.works import create_works_command
-
 # Register all commands
 create_works_command(app)
 create_authors_command(app)
 create_institutions_command(app)
 create_funders_command(app)
 create_utils_commands(app)
+create_embedding_command(app)
 create_entity_commands(app)

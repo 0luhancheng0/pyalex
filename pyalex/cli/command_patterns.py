@@ -186,6 +186,7 @@ def handle_large_id_list_if_needed(
     jsonl_path: str | None,
     group_by: str | None = None,
     selected_fields: list[str] | None = None,
+    normalize: bool = False,
 ):
     """Check for and handle large ID lists attached to query.
 
@@ -214,7 +215,6 @@ def handle_large_id_list_if_needed(
         If not None, caller should return immediately (results already output).
     """
     from .batch import _handle_large_id_list
-    from .utils import _add_abstract_to_work
     from .utils import _output_grouped_results
     from .utils import _output_results
 
@@ -252,28 +252,17 @@ def handle_large_id_list_if_needed(
 
     # Output results based on type
     if group_by:
-        _output_grouped_results(results, jsonl_path)
+        _output_grouped_results(
+            results,
+            jsonl_path,
+            normalize=normalize,
+        )
     else:
-        # Convert DataFrame to list of dicts for processing
-        import pandas as pd
-
-        if isinstance(results, pd.DataFrame):
-            results_list = results.to_dict("records")
-        elif hasattr(results, "to_dict") and callable(results.to_dict):
-            results_list = results.to_dict("records")
-        elif isinstance(results, list):
-            results_list = results
-        else:
-            results_list = list(results) if results is not None else []
-
-        # Add abstracts for works (entity-specific processing)
-        if entity_class.__name__ == "Works" and len(results_list) > 0:
-            results_list = [_add_abstract_to_work(work) for work in results_list]
-
         _output_results(
-            results_list,
+            results,
             jsonl_path,
             selected_fields=selected_fields,
+            normalize=normalize,
         )
 
     return results  # Return results to signal they were handled
@@ -295,6 +284,7 @@ class CommandContext:
         jsonl_path: str | None = None,
         sort_by: str | None = None,
         group_by: str | None = None,
+        normalize: bool = False,
         **filters,
     ):
         self.search = search
@@ -304,6 +294,7 @@ class CommandContext:
         self.jsonl_path = jsonl_path
         self.sort_by = sort_by
         self.group_by = group_by
+        self.normalize = normalize
         self.filters = filters
 
     def has_search(self) -> bool:
@@ -411,13 +402,24 @@ def handle_output(
     from .utils import _output_grouped_results
     from .utils import _output_results
 
+    normalization = getattr(ctx, "normalize", False)
+
     if ctx.has_grouping():
-        _output_grouped_results(results, ctx.jsonl_path)
+        _output_grouped_results(
+            results,
+            ctx.jsonl_path,
+            normalize=normalization,
+        )
     else:
         if output_formatter:
             output_formatter(results, ctx.jsonl_flag, ctx.jsonl_path)
         else:
-            _output_results(results, ctx.jsonl_flag, ctx.jsonl_path)
+            _output_results(
+                results,
+                ctx.jsonl_flag,
+                ctx.jsonl_path,
+                normalize=normalization,
+            )
 
 
 def create_entity_command_handler(

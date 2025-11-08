@@ -5,6 +5,8 @@ This module tests CLI-specific utilities like range parsing, formatting,
 and output handling.
 """
 
+from typing import Any
+
 import pyalex.cli.utils as cli_utils
 from pyalex import Works
 from pyalex.cli.commands.utils import _parse_ids_from_json_input
@@ -333,6 +335,31 @@ class TestMaxWidth:
 
         assert MAX_WIDTH is not None
         assert isinstance(MAX_WIDTH, int)
+
+
+def test_output_results_normalize_flattens(monkeypatch):
+    """json_normalize should flatten nested dictionaries when requested."""
+
+    captured: dict[str, Any] = {}
+
+    def capture_table(
+        results,
+        single=False,
+        grouped=False,
+        selected_fields=None,
+        normalize=False,
+    ):
+        captured["results"] = results
+        captured["normalize"] = normalize
+
+    monkeypatch.setattr(cli_utils, "_output_table", capture_table)
+
+    nested = [{"id": "W1", "metadata": {"country": "US"}}]
+
+    cli_utils._output_results(nested, normalize=True)
+
+    assert captured["normalize"] is True
+    assert captured["results"][0]["metadata.country"] == "US"
 
 
 if __name__ == "__main__":

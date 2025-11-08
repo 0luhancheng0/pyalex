@@ -128,7 +128,6 @@ def test_works_select_abstract_requests_inverted_index(monkeypatch):
 
     from pyalex.cli import main as cli_main
     from pyalex.cli.commands import works as works_module
-    from pyalex.cli import utils as cli_utils
 
     monkeypatch.setattr(
         works_module,
@@ -373,6 +372,47 @@ def test_works_json_outputs_jsonl(monkeypatch, tmp_path):
     parsed_stdout = [json.loads(line) for line in stdout_lines]
     assert parsed_stdout[0]["id"].endswith("W1")
     assert parsed_stdout[1]["id"].endswith("W2")
+
+
+def test_works_normalize_option_sets_flag(monkeypatch):
+    """--normalize should request flattened output from the utilities layer."""
+
+    from pyalex.cli import main as cli_main
+    from pyalex.cli.commands import works as works_module
+
+    monkeypatch.setattr(
+        works_module,
+        "handle_large_id_list_if_needed",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        works_module,
+        "execute_standard_query",
+        lambda *_args, **_kwargs: [],
+    )
+
+    captured: dict[str, Any] = {}
+
+    def capture_output(
+        _results,
+        _jsonl_path=None,
+        _parquet_path=None,
+        **kwargs,
+    ):
+        captured["normalize"] = kwargs.get("normalize")
+
+    monkeypatch.setattr(works_module, "_output_results", capture_output)
+
+    from typer.main import get_command
+
+    runner = CliRunner()
+    result = runner.invoke(
+        get_command(cli_main.app),
+        ["works", "--limit", "1", "--normalize"],
+    )
+
+    assert result.exit_code == 0, result.stdout or result.stderr
+    assert captured.get("normalize") is True
 
 
 def test_institutions_select_fields_table_header():

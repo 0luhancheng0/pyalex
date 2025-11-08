@@ -119,6 +119,16 @@ def create_funders_command(app):
                 help="Save results to Parquet file at specified path",
             ),
         ] = None,
+        normalize: Annotated[
+            bool,
+            typer.Option(
+                "--normalize",
+                help=(
+                    "Flatten nested fields using pandas.json_normalize before "
+                    "emitting results"
+                ),
+            ),
+        ] = False,
         sort_by: Annotated[
             str | None,
             typer.Option(
@@ -231,7 +241,10 @@ def create_funders_command(app):
             if group_by:
                 # Grouped results - use specialized output function
                 _output_grouped_results(
-                    results, effective_jsonl_path, effective_parquet_path
+                    results,
+                    effective_jsonl_path,
+                    effective_parquet_path,
+                    normalize=normalize,
                 )
                 return
 
@@ -245,6 +258,7 @@ def create_funders_command(app):
                 effective_jsonl_path,
                 effective_parquet_path,
                 selected_fields=cli_selected_fields,
+                normalize=normalize,
             )
 
         except Exception as e:

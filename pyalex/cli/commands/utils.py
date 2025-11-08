@@ -42,6 +42,7 @@ class StdinSentinelCommand(TyperCommand):
 
         return super().parse_args(ctx, processed)
 
+
 _ENTITY_PREFIX_MAP: dict[str, str] = {
     "SF": "Subfields",
     "FI": "Fields",
@@ -108,6 +109,16 @@ def from_ids(
             help="Save results to Parquet file at specified path",
         ),
     ] = None,
+    normalize: Annotated[
+        bool,
+        typer.Option(
+            "--normalize",
+            help=(
+                "Flatten nested fields using pandas.json_normalize before "
+                "emitting results"
+            ),
+        ),
+    ] = False,
 ):
     """Retrieve entities by their OpenAlex IDs from stdin."""
 
@@ -145,6 +156,7 @@ def from_ids(
             results,
             jsonl_path=effective_jsonl_path,
             parquet_path=effective_parquet_path,
+            normalize=normalize,
         )
 
     except (CLIError, DataError, ValidationError) as exc:
