@@ -47,6 +47,99 @@ def test_topics_help():
     assert "Search and retrieve topics from OpenAlex" in result.stdout
 
 
+def test_topics_search_filters(monkeypatch):
+    """Topics CLI should map field-specific search filters."""
+
+    from pyalex.cli import main as cli_main
+    from pyalex.cli.commands import entities as entities_module
+
+    recorded: dict[str, list] = {"search_filters": []}
+
+    class DummyTopics:
+        def __init__(self):
+            self.params: dict[str, dict[str, str]] = {}
+
+        def search(self, *_args, **_kwargs):
+            return self
+
+        def search_filter(self, **kwargs):
+            recorded.setdefault("search_filters", []).append(kwargs)
+            return self
+
+        def group_by(self, *_args, **_kwargs):
+            return self
+
+        async def get(self, **_kwargs):
+            return []
+
+    monkeypatch.setattr(entities_module, "Topics", DummyTopics)
+    monkeypatch.setattr(
+        entities_module,
+        "parse_select_fields",
+        lambda _select: None,
+    )
+    monkeypatch.setattr(
+        entities_module,
+        "_validate_and_apply_common_options",
+        lambda query, *_args, **_kwargs: query,
+    )
+    monkeypatch.setattr(
+        entities_module,
+        "_paginate_with_progress",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        entities_module,
+        "_output_results",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        entities_module,
+        "_output_grouped_results",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        entities_module,
+        "_print_debug_url",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        entities_module,
+        "_print_debug_results",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        entities_module,
+        "_print_dry_run_query",
+        lambda *_args, **_kwargs: None,
+    )
+
+    from typer.main import get_command
+
+    runner = CliRunner()
+    result = runner.invoke(
+        get_command(cli_main.app),
+        [
+            "topics",
+            "--display-name-search",
+            "artificial intelligence",
+            "--description-search",
+            "machine learning",
+            "--keywords-search",
+            "deep learning",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout or result.stderr
+    expected_filters = [
+        {"display_name": "artificial intelligence"},
+        {"description": "machine learning"},
+        {"keywords": "deep learning"},
+    ]
+    for expected in expected_filters:
+        assert expected in recorded["search_filters"]
+
+
 def test_concepts_help():
     """Test that the concepts subcommand help works."""
     result = subprocess.run(
@@ -187,100 +280,6 @@ def test_works_select_abstract_requests_inverted_index(monkeypatch):
         "abstract_inverted_index",
     ]
 
-
-def test_works_select_title_abstract_template(monkeypatch):
-    """Selecting title_abstract should fetch dependencies and apply template."""
-
-    from pyalex import config as global_config
-    from pyalex.cli import main as cli_main
-    from pyalex.cli import utils as cli_utils
-    from pyalex.cli.commands import works as works_module
-
-    template = "Title: {title} | Abstract: {abstract}"
-    monkeypatch.setattr(global_config, "title_abstract_template", template)
-
-    captured_table: dict[str, Any] = {}
-
-    def capture_table(results, single=False, grouped=False, selected_fields=None):
-        captured_table["results"] = results
-        captured_table["single"] = single
-        captured_table["grouped"] = grouped
-        captured_table["selected_fields"] = selected_fields
-
-    monkeypatch.setattr(cli_utils, "_output_table", capture_table)
-    monkeypatch.setattr(
-        works_module,
-        "handle_large_id_list_if_needed",
-        lambda *_args, **_kwargs: None,
-    )
-
-    def fake_execute_standard_query(*_args, **_kwargs):
-        return [
-            {
-                "id": "https://openalex.org/W123",
-                "title": "Sample Title",
-                "abstract_inverted_index": {
-                    "sample": [0],
-                    "abstract": [1],
-                },
-            }
-        ]
-
-    monkeypatch.setattr(
-        works_module,
-        "execute_standard_query",
-        fake_execute_standard_query,
-    )
-
-    class DummyWorks:
-        last_instance: "DummyWorks | None" = None
-
-        def __init__(self):
-            self.selected_fields: list[str] | None = None
-            type(self).last_instance = self
-
-        def search(self, *_args, **_kwargs):
-            return self
-
-        def filter(self, **_kwargs):
-            return self
-
-        def sort(self, **_kwargs):
-            return self
-
-        def select(self, fields):
-            self.selected_fields = fields
-            return self
-
-        def sample(self, *_args, **_kwargs):
-            return self
-
-        def get(self, *_args, **_kwargs):
-            return []
-
-    monkeypatch.setattr(works_module, "Works", DummyWorks)
-
-    from typer.main import get_command
-
-    runner = CliRunner()
-    result = runner.invoke(
-        get_command(cli_main.app),
-        ["works", "--select", "title_abstract", "--limit", "1"],
-    )
-
-    assert result.exit_code == 0, result.stdout or result.stderr
-    assert DummyWorks.last_instance is not None
-    assert DummyWorks.last_instance.selected_fields == [
-        "id",
-        "title",
-        "abstract_inverted_index",
-    ]
-    assert captured_table["selected_fields"] == ["id", "title_abstract"]
-    assert captured_table["grouped"] is False
-    assert isinstance(captured_table["results"], list)
-    assert captured_table["results"][0]["title_abstract"] == (
-        "Title: Sample Title | Abstract: sample abstract"
-    )
 
 
 def test_works_json_outputs_jsonl(monkeypatch, tmp_path):
@@ -758,12 +757,12 @@ def test_works_open_access_flags(monkeypatch, option_args, expected_kwargs):
 
 
 def test_works_content_filters(monkeypatch):
-    """Works CLI should map abstract and fulltext flags to filters."""
+    """Works CLI should map fulltext, retraction, and abstract search options."""
 
     from pyalex.cli import main as cli_main
     from pyalex.cli.commands import works as works_module
 
-    recorded: dict[str, list] = {"filters": []}
+    recorded: dict[str, list] = {"filters": [], "search_filters": []}
 
     class DummyWorks:
         def __init__(self):
@@ -779,8 +778,8 @@ def test_works_content_filters(monkeypatch):
         def filter_by_open_access(self, **_kwargs):
             return self
 
-        def filter_by_abstract_search(self, term, **_kwargs):
-            recorded["abstract"] = term
+        def search_filter(self, **kwargs):
+            recorded.setdefault("search_filters", []).append(kwargs)
             return self
 
     monkeypatch.setattr(works_module, "Works", DummyWorks)
@@ -822,19 +821,35 @@ def test_works_content_filters(monkeypatch):
         get_command(cli_main.app),
         [
             "works",
-            "--has-abstract",
             "--no-fulltext",
+            "--is-retracted",
             "--abstract-search",
             "graphene",
+            "--title-search",
+            "vaccine",
+            "--title-and-abstract-search",
+            "climate",
+            "--fulltext-search",
+            "open science",
+            "--raw-affiliation-search",
+            "mit",
             "--limit",
             "1",
         ],
     )
 
     assert result.exit_code == 0, result.stdout or result.stderr
-    assert {"has_abstract": True} in recorded["filters"]
     assert {"has_fulltext": False} in recorded["filters"]
-    assert recorded["abstract"] == "graphene"
+    assert {"is_retracted": True} in recorded["filters"]
+    expected_search_filters = [
+        {"title": "vaccine"},
+        {"abstract": "graphene"},
+        {"title_and_abstract": "climate"},
+        {"fulltext": "open science"},
+        {"raw_affiliation_strings": "mit"},
+    ]
+    for expected in expected_search_filters:
+        assert expected in recorded["search_filters"]
 
 def test_authors_institution_ids_from_stdin(monkeypatch):
     """Authors command should read institution IDs from stdin when omitted."""

@@ -13,7 +13,6 @@ from pyalex import config
 from . import batch
 from . import utils
 from .commands.authors import create_authors_command
-from .commands.embedding import create_embedding_command
 from .commands.entities import create_entity_commands
 from .commands.funders import create_funders_command
 from .commands.institutions import create_institutions_command
@@ -83,5 +82,4 @@ create_authors_command(app)
 create_institutions_command(app)
 create_funders_command(app)
 create_utils_commands(app)
-create_embedding_command(app)
 create_entity_commands(app)

@@ -29,6 +29,113 @@ from ..utils import _print_debug_url
 from ..utils import _print_dry_run_query
 from ..utils import _validate_and_apply_common_options
 from ..utils import parse_select_fields
+from .help_panels import AGGREGATION_PANEL
+from .help_panels import OUTPUT_PANEL
+from .help_panels import PAGINATION_PANEL
+from .help_panels import RESULT_PANEL
+from .help_panels import SEARCH_PANEL
+
+
+def _execute_simple_entity_command(
+    entity_class,
+    entity_name,
+    entity_name_lower,
+    *,
+    search: str | None,
+    search_filters: dict[str, str | None] | None,
+    group_by: str | None,
+    all_results: bool,
+    limit: int | None,
+    jsonl_flag: bool,
+    jsonl_path: str | None,
+    parquet_path: str | None,
+    normalize: bool,
+    sort_by: str | None,
+    sample: int | None,
+    seed: int | None,
+    select: str | None,
+):
+    """Shared execution path for simple entity commands."""
+
+    try:
+        if all_results and limit is not None:
+            typer.echo("Error: --all and --limit are mutually exclusive", err=True)
+            raise typer.Exit(1)
+
+        options_provided = sum(
+            [jsonl_flag, jsonl_path is not None, parquet_path is not None]
+        )
+
+        if options_provided > 1:
+            typer.echo(
+                "Error: --jsonl, --jsonl-file, and --parquet-file "
+                "are mutually exclusive",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        effective_jsonl_path = None
+        if jsonl_flag:
+            effective_jsonl_path = "-"
+        elif jsonl_path:
+            effective_jsonl_path = jsonl_path
+
+        effective_parquet_path = parquet_path
+
+        query = entity_class()
+
+        if search:
+            query = query.search(search)
+
+        search_filters = search_filters or {}
+        for field, value in search_filters.items():
+            if value:
+                query = query.search_filter(**{field: value})
+
+        cli_selected_fields = parse_select_fields(select)
+
+        query = _validate_and_apply_common_options(
+            query, all_results, limit, sample, seed, sort_by, select
+        )
+
+        if group_by:
+            query = query.group_by(group_by)
+            _print_debug_url(query)
+
+            results = asyncio.run(query.get(per_page=200))
+            _print_debug_results(results)
+            _output_grouped_results(
+                results,
+                effective_jsonl_path,
+                effective_parquet_path,
+                normalize=normalize,
+            )
+            return
+
+        _print_debug_url(query)
+
+        if _dry_run_mode:
+            _print_dry_run_query(f"{entity_name} query", url=query.url)
+            return
+
+        if all_results:
+            results = _paginate_with_progress(query, entity_name_lower)
+        elif limit is not None:
+            results = asyncio.run(query.get(limit=limit))
+        else:
+            results = asyncio.run(query.get())
+
+        _print_debug_results(results)
+        _output_results(
+            results,
+            effective_jsonl_path,
+            effective_parquet_path,
+            selected_fields=cli_selected_fields,
+            normalize=normalize,
+        )
+
+    except Exception as e:
+        _handle_cli_exception(e)
 
 
 def create_simple_entity_command(app, entity_class, entity_name, entity_name_lower):
@@ -37,15 +144,27 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
     def command_func(
         search: Annotated[
             str | None,
-            typer.Option("--search", "-s", help=f"Search term for {entity_name_lower}"),
+            typer.Option(
+                "--search",
+                "-s",
+                help=f"Search term for {entity_name_lower}",
+                rich_help_panel=SEARCH_PANEL,
+            ),
         ] = None,
         group_by: Annotated[
-            str | None, typer.Option("--group-by", help="Group results by field")
+            str | None,
+            typer.Option(
+                "--group-by",
+                help="Group results by field",
+                rich_help_panel=AGGREGATION_PANEL,
+            ),
         ] = None,
         all_results: Annotated[
             bool,
             typer.Option(
-                "--all", help="Retrieve all results (default: first page only)"
+                "--all",
+                help="Retrieve all results (default: first page only)",
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = False,
         limit: Annotated[
@@ -57,16 +176,23 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
                     "Maximum number of results to return "
                     "(mutually exclusive with --all)"
                 ),
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = None,
         jsonl_flag: Annotated[
-            bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
+            bool,
+            typer.Option(
+                "--jsonl",
+                help="Output JSON Lines to stdout",
+                rich_help_panel=OUTPUT_PANEL,
+            )
         ] = False,
         jsonl_path: Annotated[
             str | None,
             typer.Option(
                 "--jsonl-file",
                 help="Save results to JSON Lines file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
         parquet_path: Annotated[
@@ -74,35 +200,50 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
             typer.Option(
                 "--parquet-file",
                 help="Save results to Parquet file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
-            normalize: Annotated[
-                bool,
-                typer.Option(
-                    "--normalize",
-                    help=(
-                        "Flatten nested fields using pandas.json_normalize before "
-                        "emitting results"
-                    ),
+        normalize: Annotated[
+            bool,
+            typer.Option(
+                "--normalize",
+                help=(
+                    "Flatten nested fields using pandas.json_normalize before "
+                    "emitting results"
                 ),
-            ] = False,
+                rich_help_panel=OUTPUT_PANEL,
+            ),
+        ] = False,
         sort_by: Annotated[
-            str | None, typer.Option("--sort-by", help="Sort results by field")
+            str | None,
+            typer.Option(
+                "--sort-by",
+                help="Sort results by field",
+                rich_help_panel=RESULT_PANEL,
+            ),
         ] = None,
         sample: Annotated[
             int | None,
-            typer.Option("--sample", help="Get random sample of results (max 10,000)"),
+            typer.Option(
+                "--sample",
+                help="Get random sample of results (max 10,000)",
+                rich_help_panel=RESULT_PANEL,
+            ),
         ] = None,
         seed: Annotated[
             int | None,
             typer.Option(
-                "--seed", help="Seed for random sampling (used with --sample)"
+                "--seed",
+                help="Seed for random sampling (used with --sample)",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = 0,
         select: Annotated[
             str | None,
             typer.Option(
-                "--select", help="Select specific fields to return (comma-separated)"
+                "--select",
+                help="Select specific fields to return (comma-separated)",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
     ):
@@ -114,92 +255,197 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
           pyalex {entity_name_lower} --all
           pyalex {entity_name_lower} --limit 50 --jsonl-file results.jsonl
         """
-        try:
-            # Check for mutually exclusive options
-            if all_results and limit is not None:
-                typer.echo("Error: --all and --limit are mutually exclusive", err=True)
-                raise typer.Exit(1)
 
-            # Handle output format options - check mutual exclusivity
-            options_provided = sum(
-                [jsonl_flag, jsonl_path is not None, parquet_path is not None]
-            )
+        _execute_simple_entity_command(
+            entity_class,
+            entity_name,
+            entity_name_lower,
+            search=search,
+            search_filters={},
+            group_by=group_by,
+            all_results=all_results,
+            limit=limit,
+            jsonl_flag=jsonl_flag,
+            jsonl_path=jsonl_path,
+            parquet_path=parquet_path,
+            normalize=normalize,
+            sort_by=sort_by,
+            sample=sample,
+            seed=seed,
+            select=select,
+        )
 
-            if options_provided > 1:
-                typer.echo(
-                    "Error: --jsonl, --jsonl-file, and --parquet-file "
-                    "are mutually exclusive",
-                    err=True,
-                )
-                raise typer.Exit(1)
-
-            # Resolve JSON path
-            effective_jsonl_path = None
-            if jsonl_flag:
-                effective_jsonl_path = "-"  # stdout
-            elif jsonl_path:
-                effective_jsonl_path = jsonl_path
-
-            effective_parquet_path = parquet_path
-
-            # Create query
-            query = entity_class()
-
-            if search:
-                query = query.search(search)
-
-            cli_selected_fields = parse_select_fields(select)
-
-            # Apply common options
-            query = _validate_and_apply_common_options(
-                query, all_results, limit, sample, seed, sort_by, select
-            )
-
-            # Handle group_by parameter
-            if group_by:
-                query = query.group_by(group_by)
-                _print_debug_url(query)
-
-                # For group-by operations, only page 1 is supported (max 200 results)
-                results = asyncio.run(query.get(per_page=200))
-                _print_debug_results(results)
-                _output_grouped_results(
-                    results,
-                    effective_jsonl_path,
-                    effective_parquet_path,
-                    normalize=normalize,
-                )
-                return
-
-            _print_debug_url(query)
-
-            if _dry_run_mode:
-                _print_dry_run_query(f"{entity_name} query", url=query.url)
-                return
-
-            if all_results:
-                # Get all results using pagination with progress bar
-                results = _paginate_with_progress(query, entity_name_lower)
-            elif limit is not None:
-                results = asyncio.run(query.get(limit=limit))
-            else:
-                results = asyncio.run(query.get())  # Default first page
-
-            _print_debug_results(results)
-            _output_results(
-                results,
-                effective_jsonl_path,
-                effective_parquet_path,
-                    selected_fields=cli_selected_fields,
-                    normalize=normalize,
-            )
-
-        except Exception as e:
-            _handle_cli_exception(e)
-
-    # Set proper function name and docstring
     command_func.__name__ = entity_name_lower
     return command_func
+
+
+def create_topics_command(app):
+    """Create the topics command with field-specific search filters."""
+
+    def topics(
+        search: Annotated[
+            str | None,
+            typer.Option(
+                "--search",
+                "-s",
+                help="Search topics by display name, description, or keywords",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        display_name_search: Annotated[
+            str | None,
+            typer.Option(
+                "--display-name-search",
+                help="Search topic display names (maps to display_name.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        description_search: Annotated[
+            str | None,
+            typer.Option(
+                "--description-search",
+                help="Search topic descriptions (maps to description.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        keywords_search: Annotated[
+            str | None,
+            typer.Option(
+                "--keywords-search",
+                help="Search topic keywords (maps to keywords.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        group_by: Annotated[
+            str | None,
+            typer.Option(
+                "--group-by",
+                help="Group results by field",
+                rich_help_panel=AGGREGATION_PANEL,
+            ),
+        ] = None,
+        all_results: Annotated[
+            bool,
+            typer.Option(
+                "--all",
+                help="Retrieve all results (default: first page only)",
+                rich_help_panel=PAGINATION_PANEL,
+            ),
+        ] = False,
+        limit: Annotated[
+            int | None,
+            typer.Option(
+                "--limit",
+                "-l",
+                help=(
+                    "Maximum number of results to return "
+                    "(mutually exclusive with --all)"
+                ),
+                rich_help_panel=PAGINATION_PANEL,
+            ),
+        ] = None,
+        jsonl_flag: Annotated[
+            bool,
+            typer.Option(
+                "--jsonl",
+                help="Output JSON Lines to stdout",
+                rich_help_panel=OUTPUT_PANEL,
+            )
+        ] = False,
+        jsonl_path: Annotated[
+            str | None,
+            typer.Option(
+                "--jsonl-file",
+                help="Save results to JSON Lines file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
+            ),
+        ] = None,
+        parquet_path: Annotated[
+            str | None,
+            typer.Option(
+                "--parquet-file",
+                help="Save results to Parquet file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
+            ),
+        ] = None,
+        normalize: Annotated[
+            bool,
+            typer.Option(
+                "--normalize",
+                help=(
+                    "Flatten nested fields using pandas.json_normalize before "
+                    "emitting results"
+                ),
+                rich_help_panel=OUTPUT_PANEL,
+            ),
+        ] = False,
+        sort_by: Annotated[
+            str | None,
+            typer.Option(
+                "--sort-by",
+                help="Sort results by field",
+                rich_help_panel=RESULT_PANEL,
+            ),
+        ] = None,
+        sample: Annotated[
+            int | None,
+            typer.Option(
+                "--sample",
+                help="Get random sample of results (max 10,000)",
+                rich_help_panel=RESULT_PANEL,
+            ),
+        ] = None,
+        seed: Annotated[
+            int | None,
+            typer.Option(
+                "--seed",
+                help="Seed for random sampling (used with --sample)",
+                rich_help_panel=RESULT_PANEL,
+            ),
+        ] = 0,
+        select: Annotated[
+            str | None,
+            typer.Option(
+                "--select",
+                help="Select specific fields to return (comma-separated)",
+                rich_help_panel=RESULT_PANEL,
+            ),
+        ] = None,
+    ):
+        """
+        Search and retrieve topics from OpenAlex.
+
+        Examples:
+          pyalex topics --search "artificial intelligence"
+          pyalex topics --display-name-search "computer vision"
+          pyalex topics --keywords-search "graph neural networks" --limit 25
+        """
+
+        _execute_simple_entity_command(
+            Topics,
+            "Topics",
+            "topics",
+            search=search,
+            search_filters={
+                "display_name": display_name_search,
+                "description": description_search,
+                "keywords": keywords_search,
+            },
+            group_by=group_by,
+            all_results=all_results,
+            limit=limit,
+            jsonl_flag=jsonl_flag,
+            jsonl_path=jsonl_path,
+            parquet_path=parquet_path,
+            normalize=normalize,
+            sort_by=sort_by,
+            sample=sample,
+            seed=seed,
+            select=select,
+        )
+
+    topics.__name__ = "topics"
+    return topics
 
 
 def create_entity_commands(app):
@@ -212,7 +458,7 @@ def create_entity_commands(app):
     app.command(help="Search and retrieve concepts from OpenAlex")(concepts_func)
 
     # Topics
-    topics_func = create_simple_entity_command(app, Topics, "Topics", "topics")
+    topics_func = create_topics_command(app)
     app.command(help="Search and retrieve topics from OpenAlex")(topics_func)
 
     # Sources

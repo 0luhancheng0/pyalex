@@ -1,0 +1,13 @@
+"""Shared Rich help panel labels for CLI options."""
+
+SEARCH_PANEL = "Search"
+ID_FILTERS_PANEL = "Entity & ID Filters"
+IDENTITY_PANEL = "Identity & Presence Filters"
+METADATA_PANEL = "Metadata Filters"
+METRICS_PANEL = "Metrics & Impact Filters"
+ACCESS_PANEL = "Access & Content Filters"
+AGGREGATION_PANEL = "Grouping & Aggregation"
+PAGINATION_PANEL = "Pagination & Limits"
+OUTPUT_PANEL = "Output & Formatting"
+RESULT_PANEL = "Sorting, Sampling & Fields"
+UTILITY_PANEL = "Utility Options"

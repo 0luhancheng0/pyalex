@@ -18,6 +18,13 @@ from ..utils import _validate_and_apply_common_options
 from ..utils import apply_range_filter
 from ..utils import parse_range_filter
 from ..utils import parse_select_fields
+from .help_panels import AGGREGATION_PANEL
+from .help_panels import METADATA_PANEL
+from .help_panels import METRICS_PANEL
+from .help_panels import OUTPUT_PANEL
+from .help_panels import PAGINATION_PANEL
+from .help_panels import RESULT_PANEL
+from .help_panels import SEARCH_PANEL
 
 
 def create_funders_command(app):
@@ -26,11 +33,21 @@ def create_funders_command(app):
     @app.command()
     def funders(
         search: Annotated[
-            str | None, typer.Option("--search", "-s", help="Search term for funders")
+            str | None,
+            typer.Option(
+                "--search",
+                "-s",
+                help="Search term for funders",
+                rich_help_panel=SEARCH_PANEL,
+            )
         ] = None,
         country_code: Annotated[
             str | None,
-            typer.Option("--country", help="Filter by country code (e.g. US, UK, CA)"),
+            typer.Option(
+                "--country",
+                help="Filter by country code (e.g. US, UK, CA)",
+                rich_help_panel=METADATA_PANEL,
+            ),
         ] = None,
         grants_count: Annotated[
             str | None,
@@ -38,6 +55,7 @@ def create_funders_command(app):
                 "--grants-count",
                 help="Filter by grants count. Use single value (e.g., '100') or "
                 "range (e.g., '50:500', ':200', '100:')",
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         works_count: Annotated[
@@ -46,6 +64,7 @@ def create_funders_command(app):
                 "--works-count",
                 help="Filter by works count. Use single value (e.g., '1000') or "
                 "range (e.g., '100:5000', ':1000', '500:')",
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         h_index: Annotated[
@@ -57,6 +76,7 @@ def create_funders_command(app):
                     "Use single value (e.g., '50') "
                     "or range (e.g., '10:100', ':50', '25:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         i10_index: Annotated[
@@ -65,6 +85,7 @@ def create_funders_command(app):
                 "--i10-index",
                 help="Filter by i10-index from summary stats. Use single value "
                 "(e.g., '100') or range (e.g., '50:500', ':200', '100:')",
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         two_year_mean_citedness: Annotated[
@@ -76,6 +97,7 @@ def create_funders_command(app):
                     "Use single value (e.g., '2.5') "
                     "or range (e.g., '1.0:5.0', ':3.0', '2.0:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         group_by: Annotated[
@@ -83,12 +105,15 @@ def create_funders_command(app):
             typer.Option(
                 "--group-by",
                 help="Group results by field (e.g. 'country_code', 'works_count')",
+                rich_help_panel=AGGREGATION_PANEL,
             ),
         ] = None,
         all_results: Annotated[
             bool,
             typer.Option(
-                "--all", help="Retrieve all results (default: first page only)"
+                "--all",
+                help="Retrieve all results (default: first page only)",
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = False,
         limit: Annotated[
@@ -100,16 +125,23 @@ def create_funders_command(app):
                     "Maximum number of results to return "
                     "(mutually exclusive with --all)"
                 ),
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = None,
         jsonl_flag: Annotated[
-            bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
+            bool,
+            typer.Option(
+                "--jsonl",
+                help="Output JSON Lines to stdout",
+                rich_help_panel=OUTPUT_PANEL,
+            )
         ] = False,
         jsonl_path: Annotated[
             str | None,
             typer.Option(
                 "--jsonl-file",
                 help="Save results to JSON Lines file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
         parquet_path: Annotated[
@@ -117,6 +149,7 @@ def create_funders_command(app):
             typer.Option(
                 "--parquet-file",
                 help="Save results to Parquet file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
         normalize: Annotated[
@@ -127,6 +160,7 @@ def create_funders_command(app):
                     "Flatten nested fields using pandas.json_normalize before "
                     "emitting results"
                 ),
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = False,
         sort_by: Annotated[
@@ -137,6 +171,7 @@ def create_funders_command(app):
                     "Sort results by field (e.g. 'cited_by_count:desc', 'works_count', "
                     "'display_name:asc')"
                 ),
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
         sample: Annotated[
@@ -145,12 +180,15 @@ def create_funders_command(app):
                 "--sample",
                 help="Get random sample of results (max 10,000). Use with --seed for "
                 "reproducible results",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
         seed: Annotated[
             int | None,
             typer.Option(
-                "--seed", help="Seed for random sampling (used with --sample)"
+                "--seed",
+                help="Seed for random sampling (used with --sample)",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
         select: Annotated[
@@ -160,6 +198,7 @@ def create_funders_command(app):
                 help="Select specific fields to return (comma-separated). "
                 "Example: 'id,display_name,country_code'. "
                 "If not specified, returns all fields.",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
     ):

@@ -21,6 +21,15 @@ from ..utils import apply_range_filter
 from ..utils import parse_range_filter
 from ..utils import parse_select_fields
 from ..utils import resolve_ids_option
+from .help_panels import ACCESS_PANEL
+from .help_panels import AGGREGATION_PANEL
+from .help_panels import ID_FILTERS_PANEL
+from .help_panels import METADATA_PANEL
+from .help_panels import METRICS_PANEL
+from .help_panels import OUTPUT_PANEL
+from .help_panels import PAGINATION_PANEL
+from .help_panels import RESULT_PANEL
+from .help_panels import SEARCH_PANEL
 from .utils import StdinSentinelCommand
 
 
@@ -42,13 +51,128 @@ class _WorksCommand(StdinSentinelCommand):
     }
 
 
+def _apply_citation_percentile_value_filter(query, raw_value: str):
+    """Apply citation_normalized_percentile.value filters to the query."""
+
+    value = (raw_value or "").strip()
+    if not value:
+        raise ValueError("Citation percentile value cannot be empty")
+
+    def _parse_numeric(fragment: str) -> float:
+        try:
+            return float(fragment)
+        except ValueError as exc:
+            raise ValueError(
+                "Invalid citation percentile value; provide a numeric input"
+            ) from exc
+
+    if ":" in value:
+        start_str, end_str = value.split(":", 1)
+        start_str = start_str.strip()
+        end_str = end_str.strip()
+
+        if not start_str and not end_str:
+            raise ValueError("Citation percentile range must include a bound")
+
+        if start_str:
+            start_val = _parse_numeric(start_str)
+            query = query.filter_gt(
+                citation_normalized_percentile={"value": start_val}
+            )
+
+        if end_str:
+            end_val = _parse_numeric(end_str)
+            if start_str and start_val > end_val:
+                raise ValueError(
+                    "Citation percentile start value must not exceed end value"
+                )
+            query = query.filter_lt(
+                citation_normalized_percentile={"value": end_val}
+            )
+
+        return query
+
+    if value.startswith((">", "<")):
+        operator = value[0]
+        remainder = value[1:].strip()
+        if not remainder:
+            raise ValueError(
+                "Comparison citation percentile value requires a numeric bound"
+            )
+        numeric_value = _parse_numeric(remainder)
+        if operator == ">":
+            return query.filter_gt(
+                citation_normalized_percentile={"value": numeric_value}
+            )
+
+        return query.filter_lt(
+            citation_normalized_percentile={"value": numeric_value}
+        )
+
+    exact_value = _parse_numeric(value)
+    return query.filter(citation_normalized_percentile={"value": exact_value})
+
+
 def create_works_command(app):
     """Create and register the works command."""
 
     @app.command(cls=_WorksCommand)
     def works(
         search: Annotated[
-            str | None, typer.Option("--search", "-s", help="Search term for works")
+            str | None,
+            typer.Option(
+                "--search",
+                "-s",
+                help="Search term for works",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        title_search: Annotated[
+            str | None,
+            typer.Option(
+                "--title-search",
+                "--display-name-search",
+                help="Search within work titles (maps to title.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        abstract_search: Annotated[
+            str | None,
+            typer.Option(
+                "--abstract-search",
+                help="Search within the inverted abstract (maps to abstract.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        title_and_abstract_search: Annotated[
+            str | None,
+            typer.Option(
+                "--title-and-abstract-search",
+                help=(
+                    "Search across titles and abstracts together "
+                    "(maps to title_and_abstract.search)"
+                ),
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        fulltext_search: Annotated[
+            str | None,
+            typer.Option(
+                "--fulltext-search",
+                help="Search fulltext n-grams (maps to fulltext.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        raw_affiliation_search: Annotated[
+            str | None,
+            typer.Option(
+                "--raw-affiliation-search",
+                help=(
+                    "Search raw affiliation strings from authorships "
+                    "(maps to raw_affiliation_strings.search)"
+                ),
+                rich_help_panel=SEARCH_PANEL,
+            ),
         ] = None,
         author_ids: Annotated[
             str | None,
@@ -59,6 +183,7 @@ def create_works_command(app):
                     "OR logic (e.g., --author-ids 'A123,A456,A789'). Omit the value "
                     "to read JSON input from stdin (same formats as pyalex from-ids)"
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         institution_ids: Annotated[
@@ -71,6 +196,7 @@ def create_works_command(app):
                     "the value to read JSON input from stdin (same formats as pyalex "
                     "from-ids)"
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         publication_year: Annotated[
@@ -78,6 +204,7 @@ def create_works_command(app):
             typer.Option(
                 "--year",
                 help="Filter by publication year (e.g. '2020' or range '2019:2021')",
+                rich_help_panel=METADATA_PANEL,
             ),
         ] = None,
         publication_date: Annotated[
@@ -86,12 +213,15 @@ def create_works_command(app):
                 "--date",
                 help="Filter by publication date (e.g. '2020-01-01' or "
                 "range '2019-01-01:2020-12-31')",
+                rich_help_panel=METADATA_PANEL,
             ),
         ] = None,
         work_type: Annotated[
             str | None,
             typer.Option(
-                "--type", help="Filter by work type (e.g. 'article', 'book', 'dataset')"
+                "--type",
+                help="Filter by work type (e.g. 'article', 'book', 'dataset')",
+                rich_help_panel=METADATA_PANEL,
             ),
         ] = None,
         topic_ids: Annotated[
@@ -104,6 +234,7 @@ def create_works_command(app):
                     "(e.g., --topic-ids 'T123,T456,T789'). Omit the value to read "
                     "JSON input from stdin (same formats as pyalex from-ids)"
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         subfield_ids: Annotated[
@@ -116,6 +247,7 @@ def create_works_command(app):
                     "'SF123,SF456,SF789'). Omit the value to read JSON input from "
                     "stdin (same formats as pyalex from-ids)"
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         funder_ids: Annotated[
@@ -126,6 +258,7 @@ def create_works_command(app):
                 "OR logic (e.g., --funder-ids 'F123,F456,F789'). Omit the value to "
                 "read JSON input from stdin (same formats as pyalex from-ids)",
                 metavar="ID[,ID...]",
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         award_ids: Annotated[
@@ -138,6 +271,7 @@ def create_works_command(app):
                     "value to read JSON input from stdin (same formats as pyalex "
                     "from-ids)"
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         source_ids: Annotated[
@@ -150,6 +284,7 @@ def create_works_command(app):
                     "the value to read JSON input from stdin."
                 ),
                 metavar="ID[,ID...]",
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         host_venue_ids: Annotated[
@@ -162,6 +297,7 @@ def create_works_command(app):
                     "Omit the value to read JSON input from stdin."
                 ),
                 metavar="ID[,ID...]",
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         source_issn: Annotated[
@@ -173,6 +309,7 @@ def create_works_command(app):
                     "JSON input from stdin with an 'issn' field."
                 ),
                 metavar="ISSN[,ISSN...]",
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         source_host_org_ids: Annotated[
@@ -184,6 +321,7 @@ def create_works_command(app):
                     "Use comma-separated values for OR logic or supply JSON via stdin."
                 ),
                 metavar="ID[,ID...]",
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         cited_by_count: Annotated[
@@ -194,16 +332,50 @@ def create_works_command(app):
                     "Filter by total citation count. Use single value (e.g., '1000') "
                     "or range (e.g., '500:5000', ':1000', '1000:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
+            ),
+        ] = None,
+        citation_percentile_top_1: Annotated[
+            bool | None,
+            typer.Option(
+                "--citation-percentile-top-1/--no-citation-percentile-top-1",
+                help=(
+                    "Filter by citation_normalized_percentile.is_in_top_1_percent"
+                ),
+                rich_help_panel=METRICS_PANEL,
+            ),
+        ] = None,
+        citation_percentile_top_10: Annotated[
+            bool | None,
+            typer.Option(
+                "--citation-percentile-top-10/--no-citation-percentile-top-10",
+                help=(
+                    "Filter by citation_normalized_percentile.is_in_top_10_percent"
+                ),
+                rich_help_panel=METRICS_PANEL,
+            ),
+        ] = None,
+        citation_percentile_value: Annotated[
+            str | None,
+            typer.Option(
+                "--citation-percentile-value",
+                help=(
+                    "Filter by citation_normalized_percentile.value. Accepts "
+                    "single values (e.g., '0.95'), ranges ('0.9:1.0'), or "
+                    "comparisons ('>0.9', '<0.5')."
+                ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         cited_by_ids: Annotated[
             str | None,
             typer.Option(
-                "--cited-by",
+                "--cites",
                 help=(
                     "Filter works cited by the provided work ID(s). Use "
                     "comma-separated IDs or omit the value to read JSON from stdin."
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         is_oa: Annotated[
@@ -211,6 +383,7 @@ def create_works_command(app):
             typer.Option(
                 "--is-oa/--not-oa",
                 help="Filter by open access availability (default: no filter)",
+                rich_help_panel=ACCESS_PANEL,
             ),
         ] = None,
         oa_status: Annotated[
@@ -218,13 +391,7 @@ def create_works_command(app):
             typer.Option(
                 "--oa-status",
                 help="Filter by specific OA status (e.g., gold, green, hybrid, bronze)",
-            ),
-        ] = None,
-        has_abstract: Annotated[
-            bool | None,
-            typer.Option(
-                "--has-abstract/--no-abstract",
-                help="Filter by presence of an abstract",
+                rich_help_panel=ACCESS_PANEL,
             ),
         ] = None,
         has_fulltext: Annotated[
@@ -232,13 +399,15 @@ def create_works_command(app):
             typer.Option(
                 "--has-fulltext/--no-fulltext",
                 help="Filter by availability of any fulltext link",
+                rich_help_panel=ACCESS_PANEL,
             ),
         ] = None,
-        abstract_search: Annotated[
-            str | None,
+        is_retracted: Annotated[
+            bool | None,
             typer.Option(
-                "--abstract-search",
-                help="Search within the inverted abstract (maps to abstract.search)",
+                "--is-retracted/--not-retracted",
+                help="Filter by retracted status",
+                rich_help_panel=ACCESS_PANEL,
             ),
         ] = None,
         group_by: Annotated[
@@ -247,12 +416,15 @@ def create_works_command(app):
                 "--group-by",
                 help="Group results by field (e.g. 'oa_status', 'publication_year', "
                 "'type', 'is_retracted', 'cited_by_count')",
+                rich_help_panel=AGGREGATION_PANEL,
             ),
         ] = None,
         all_results: Annotated[
             bool,
             typer.Option(
-                "--all", help="Retrieve all results (default: first page only)"
+                "--all",
+                help="Retrieve all results (default: first page only)",
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = False,
         limit: Annotated[
@@ -264,16 +436,23 @@ def create_works_command(app):
                     "Maximum number of results to return (mutually exclusive "
                     "with --all)"
                 ),
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = None,
         jsonl_flag: Annotated[
-            bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
+            bool,
+            typer.Option(
+                "--jsonl",
+                help="Output JSON Lines to stdout",
+                rich_help_panel=OUTPUT_PANEL,
+            ),
         ] = False,
         jsonl_path: Annotated[
             str | None,
             typer.Option(
                 "--jsonl-file",
                 help="Save results to JSON Lines file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
         parquet_path: Annotated[
@@ -281,6 +460,7 @@ def create_works_command(app):
             typer.Option(
                 "--parquet-file",
                 help="Save results to Parquet file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
         normalize: Annotated[
@@ -291,6 +471,7 @@ def create_works_command(app):
                     "Flatten nested fields using pandas.json_normalize before "
                     "emitting results"
                 ),
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = False,
         sort_by: Annotated[
@@ -302,6 +483,7 @@ def create_works_command(app):
                     "'publication_year', 'display_name:asc'). Multiple sorts: "
                     "'year:desc,cited_by_count:desc'"
                 ),
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
         sample: Annotated[
@@ -310,12 +492,15 @@ def create_works_command(app):
                 "--sample",
                 help="Get random sample of results (max 10,000). "
                 "Use with --seed for reproducible results",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
         seed: Annotated[
             int | None,
             typer.Option(
-                "--seed", help="Seed for random sampling (used with --sample)"
+                "--seed",
+                help="Seed for random sampling (used with --sample)",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = 0,
         select: Annotated[
@@ -325,6 +510,7 @@ def create_works_command(app):
                 help="Select specific fields to return (comma-separated). "
                 "Example: 'id,doi,title,display_name'. "
                 "If not specified, returns all fields.",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
     ):
@@ -347,12 +533,15 @@ def create_works_command(app):
           pyalex works --institution-ids "I123,I456,I789" --all
           pyalex works --funder-ids "F4320332161"
           pyalex works --funder-ids "F123,F456,F789" --all
+          pyalex works --citation-percentile-top-1
+          pyalex works --citation-percentile-value "0.95:1.0"
           cat funders.json | pyalex works --funder-ids --limit 10
           pyalex works --award-ids "AWARD123,AWARD456"
           pyalex works --cites "W123,W456" --limit 10
           pyalex works --source-issn "2167-8359"
           pyalex works --host-venue-ids "S1983995261"
           pyalex works --is-oa --has-fulltext --abstract-search "machine vision"
+          pyalex works --is-retracted --limit 20
           pyalex works --search "AI" --json ai_works.json
           pyalex works --group-by "oa_status"
           pyalex works --group-by "publication_year" --search "COVID-19"
@@ -360,6 +549,8 @@ def create_works_command(app):
           pyalex works --sample 50 --seed 123
           pyalex works --search "climate change" \\
             --sort-by "publication_year:desc,cited_by_count:desc"
+                        pyalex works --title-search "graphene" --limit 25
+                        pyalex works --fulltext-search "quantum computing"
         """
         try:
             # Validate options
@@ -395,6 +586,25 @@ def create_works_command(app):
 
             if search:
                 query = query.search(search)
+
+            if title_search:
+                query = query.search_filter(title=title_search)
+
+            if abstract_search:
+                query = query.search_filter(abstract=abstract_search)
+
+            if title_and_abstract_search:
+                query = query.search_filter(
+                    title_and_abstract=title_and_abstract_search
+                )
+
+            if fulltext_search:
+                query = query.search_filter(fulltext=fulltext_search)
+
+            if raw_affiliation_search:
+                query = query.search_filter(
+                    raw_affiliation_strings=raw_affiliation_search
+                )
 
             if author_ids:
                 # Use the generalized helper for ID list handling
@@ -516,6 +726,29 @@ def create_works_command(app):
                     query, "cited_by_count", parsed_cited_by_count
                 )
 
+            if citation_percentile_top_1 is not None:
+                query = query.filter(
+                    citation_normalized_percentile={
+                        "is_in_top_1_percent": citation_percentile_top_1
+                    }
+                )
+
+            if citation_percentile_top_10 is not None:
+                query = query.filter(
+                    citation_normalized_percentile={
+                        "is_in_top_10_percent": citation_percentile_top_10
+                    }
+                )
+
+            if citation_percentile_value:
+                try:
+                    query = _apply_citation_percentile_value_filter(
+                        query, citation_percentile_value
+                    )
+                except ValueError as exc:
+                    typer.echo(f"Error: {exc}", err=True)
+                    raise typer.Exit(1) from exc
+
             if cited_by_ids:
                 query = add_id_list_option_to_command(
                     query, cited_by_ids, "works_cites", Works
@@ -538,14 +771,11 @@ def create_works_command(app):
             elif is_oa is not None:
                 query = query.filter_by_open_access(is_oa=is_oa)
 
-            if has_abstract is not None:
-                query = query.filter(has_abstract=has_abstract)
-
             if has_fulltext is not None:
                 query = query.filter(has_fulltext=has_fulltext)
 
-            if abstract_search:
-                query = query.filter_by_abstract_search(abstract_search)
+            if is_retracted is not None:
+                query = query.filter(is_retracted=is_retracted)
 
             # Apply common options (sort, sample, select)
             cli_selected_fields = parse_select_fields(select)
@@ -555,13 +785,13 @@ def create_works_command(app):
                 normalized_fields = [
                     field.lower() for field in cli_selected_fields if field != "id"
                 ]
-                needs_title_abstract = "title_abstract" in normalized_fields
-                needs_abstract_text = needs_title_abstract or any(
+
+                needs_abstract_text = any(
                     field == "abstract" or field.startswith("abstract.")
                     for field in normalized_fields
                 )
 
-                if (needs_abstract_text or needs_title_abstract) and select:
+                if needs_abstract_text and select:
                     raw_select_fields = [
                         field.strip() for field in select.split(",") if field.strip()
                     ]
@@ -569,14 +799,11 @@ def create_works_command(app):
                     sanitized_fields = [
                         field
                         for field in raw_select_fields
-                        if field.lower() not in {"abstract", "title_abstract"}
+                        if field.lower() not in {"abstract"}
                     ]
                     lower_sanitized = {
                         field.lower() for field in sanitized_fields
                     }
-                    if needs_title_abstract and "title" not in lower_sanitized:
-                        sanitized_fields.append("title")
-                        lower_sanitized.add("title")
                     if "abstract_inverted_index" not in lower_sanitized:
                         sanitized_fields.append("abstract_inverted_index")
                     select_for_query = ",".join(sanitized_fields)

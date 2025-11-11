@@ -62,8 +62,11 @@ pyalex works --host-venue-ids "S1983995261" --limit 20
 pyalex works --oa-status gold --limit 20
 
 # Require any OA plus fulltext and search abstracts
-pyalex works --is-oa --has-fulltext --has-abstract \
+pyalex works --is-oa --has-fulltext \
   --abstract-search "graphene oxide" --limit 20
+
+# Works that have been retracted
+pyalex works --is-retracted --limit 20
 
 # Explicitly request closed-access items without fulltext
 pyalex works --not-oa --no-fulltext --limit 10

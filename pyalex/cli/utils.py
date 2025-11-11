@@ -991,27 +991,6 @@ def _add_abstract_to_work(work_dict):
     return work_dict
 
 
-def _apply_title_abstract_template(
-    work_dict: dict[str, Any], template: str
-) -> dict[str, Any]:
-    """Populate the combined title/abstract template field for a work."""
-
-    title_value = work_dict.get("title") or work_dict.get("display_name") or ""
-    abstract_value = work_dict.get("abstract") or ""
-
-    try:
-        work_dict["title_abstract"] = template.format(
-            title=title_value,
-            abstract=abstract_value,
-        )
-    except Exception:
-        # Fallback to default formatting to avoid raising in CLI output path
-        work_dict["title_abstract"] = (
-            f"Title: {title_value}\nAbstract: {abstract_value}"
-        )
-
-    return work_dict
-
 
 def _output_results(
     results,
@@ -1126,18 +1105,6 @@ def _output_results(
         if pd is not None:
             results_df = pd.DataFrame(records)
 
-    if selected_fields:
-        selected_lower = {field.lower() for field in selected_fields}
-        if "title_abstract" in selected_lower:
-            template = config.title_abstract_template
-            records = [
-                _apply_title_abstract_template(dict(item), template)
-                if isinstance(item, dict)
-                else item
-                for item in records
-            ]
-            if pd is not None:
-                results_df = pd.DataFrame(records)
 
     if normalization_requested:
         assert pd is not None

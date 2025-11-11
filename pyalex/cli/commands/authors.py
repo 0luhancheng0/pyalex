@@ -20,6 +20,15 @@ from ..utils import apply_range_filter
 from ..utils import parse_range_filter
 from ..utils import parse_select_fields
 from ..utils import resolve_ids_option
+from .help_panels import AGGREGATION_PANEL
+from .help_panels import ID_FILTERS_PANEL
+from .help_panels import IDENTITY_PANEL
+from .help_panels import METADATA_PANEL
+from .help_panels import METRICS_PANEL
+from .help_panels import OUTPUT_PANEL
+from .help_panels import PAGINATION_PANEL
+from .help_panels import RESULT_PANEL
+from .help_panels import SEARCH_PANEL
 from .utils import StdinSentinelCommand
 
 
@@ -53,7 +62,13 @@ def create_authors_command(app):
     @app.command(cls=_AuthorsCommand)
     def authors(
         search: Annotated[
-            str | None, typer.Option("--search", "-s", help="Search term for authors")
+            str | None,
+            typer.Option(
+                "--search",
+                "-s",
+                help="Search term for authors",
+                rich_help_panel=SEARCH_PANEL,
+            ),
         ] = None,
         institution_ids: Annotated[
             str | None,
@@ -66,6 +81,7 @@ def create_authors_command(app):
                     "to read JSON input from stdin (same formats as pyalex "
                     "from-ids)"
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         institution_rors: Annotated[
@@ -77,12 +93,15 @@ def create_authors_command(app):
                     "values or omit the value to read JSON input from stdin with "
                     "a 'ror' field."
                 ),
+                rich_help_panel=ID_FILTERS_PANEL,
             ),
         ] = None,
         orcid: Annotated[
             str | None,
             typer.Option(
-                "--orcid", help="Filter by ORCID (e.g., '0000-0002-3748-6564')"
+                "--orcid",
+                help="Filter by ORCID (e.g., '0000-0002-3748-6564')",
+                rich_help_panel=IDENTITY_PANEL,
             ),
         ] = None,
         has_orcid: Annotated[
@@ -90,6 +109,7 @@ def create_authors_command(app):
             typer.Option(
                 "--has-orcid/--no-orcid",
                 help="Filter by presence of an ORCID identifier",
+                rich_help_panel=IDENTITY_PANEL,
             ),
         ] = None,
         has_twitter: Annotated[
@@ -97,6 +117,7 @@ def create_authors_command(app):
             typer.Option(
                 "--has-twitter/--no-twitter",
                 help="Filter by presence of a Twitter handle",
+                rich_help_panel=IDENTITY_PANEL,
             ),
         ] = None,
         has_wikipedia: Annotated[
@@ -104,6 +125,7 @@ def create_authors_command(app):
             typer.Option(
                 "--has-wikipedia/--no-wikipedia",
                 help="Filter by presence of a Wikipedia page",
+                rich_help_panel=IDENTITY_PANEL,
             ),
         ] = None,
         works_count: Annotated[
@@ -114,6 +136,7 @@ def create_authors_command(app):
                     "Filter by works count. Use single value (e.g., '100') "
                     "or range (e.g., '50:500', ':200', '100:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         cited_by_count: Annotated[
@@ -124,6 +147,7 @@ def create_authors_command(app):
                     "Filter by total citation count. Use single value "
                     "(e.g., '1000') or range (e.g., '500:5000', ':1000', '1000:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         last_known_institution_country: Annotated[
@@ -134,6 +158,7 @@ def create_authors_command(app):
                     "Filter by country code of last known institution "
                     "(e.g. US, UK, CA)"
                 ),
+                rich_help_panel=METADATA_PANEL,
             ),
         ] = None,
         h_index: Annotated[
@@ -144,6 +169,7 @@ def create_authors_command(app):
                     "Filter by h-index from summary stats. Use single value "
                     "(e.g., '50') or range (e.g., '10:100', ':50', '25:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         i10_index: Annotated[
@@ -154,6 +180,7 @@ def create_authors_command(app):
                     "Filter by i10-index from summary stats. Use single value "
                     "(e.g., '100') or range (e.g., '50:500', ':200', '100:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         two_year_mean_citedness: Annotated[
@@ -164,6 +191,7 @@ def create_authors_command(app):
                     "Filter by 2-year mean citedness from summary stats. Use single "
                     "value (e.g., '2.5') or range (e.g., '1.0:5.0', ':3.0', '2.0:')"
                 ),
+                rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
         group_by: Annotated[
@@ -174,12 +202,15 @@ def create_authors_command(app):
                     "Group results by field (e.g. 'cited_by_count', 'has_orcid', "
                     "'works_count')"
                 ),
+                rich_help_panel=AGGREGATION_PANEL,
             ),
         ] = None,
         all_results: Annotated[
             bool,
             typer.Option(
-                "--all", help="Retrieve all results (default: first page only)"
+                "--all",
+                help="Retrieve all results (default: first page only)",
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = False,
         limit: Annotated[
@@ -191,16 +222,23 @@ def create_authors_command(app):
                     "Maximum number of results to return (mutually exclusive "
                     "with --all)"
                 ),
+                rich_help_panel=PAGINATION_PANEL,
             ),
         ] = None,
         jsonl_flag: Annotated[
-            bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
+            bool,
+            typer.Option(
+                "--jsonl",
+                help="Output JSON Lines to stdout",
+                rich_help_panel=OUTPUT_PANEL,
+            )
         ] = False,
         jsonl_path: Annotated[
             str | None,
             typer.Option(
                 "--jsonl-file",
                 help="Save results to JSON Lines file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
         parquet_path: Annotated[
@@ -208,6 +246,7 @@ def create_authors_command(app):
             typer.Option(
                 "--parquet-file",
                 help="Save results to Parquet file at specified path",
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
         normalize: Annotated[
@@ -218,6 +257,7 @@ def create_authors_command(app):
                     "Flatten nested fields using pandas.json_normalize before "
                     "emitting results"
                 ),
+                rich_help_panel=OUTPUT_PANEL,
             ),
         ] = False,
         sort_by: Annotated[
@@ -229,6 +269,7 @@ def create_authors_command(app):
                     "'display_name:asc'). Multiple sorts: "
                     "'works_count:desc,cited_by_count:desc'"
                 ),
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
         sample: Annotated[
@@ -239,12 +280,15 @@ def create_authors_command(app):
                     "Get random sample of results (max 10,000). "
                     "Use with --seed for reproducible results"
                 ),
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
         seed: Annotated[
             int | None,
             typer.Option(
-                "--seed", help="Seed for random sampling (used with --sample)"
+                "--seed",
+                help="Seed for random sampling (used with --sample)",
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = 0,
         select: Annotated[
@@ -256,6 +300,7 @@ def create_authors_command(app):
                     "Example: 'id,display_name,orcid'. "
                     "If not specified, returns all fields."
                 ),
+                rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
     ):
