@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import operator
+from itertools import count
 from pathlib import Path
 from textwrap import dedent
 from typing import Annotated
@@ -47,8 +48,7 @@ class State(BaseModel):
         default=None,
         description="A single taxonomy merged from the generated batches.",
     )
-    
-from itertools import count
+
 
 def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
     """Convert a `Taxonomy` into a `treelib` representation."""
@@ -80,10 +80,7 @@ def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
     return tree
 
 
-# llm = ChatOpenAI(model="gpt-5-mini")
-llm = ChatOpenAI(model="Qwen/Qwen3-4B-Instruct-2507", base_url="http://localhost:8000/v1")
-
-taxonomy_agent_system_prompt = dedent(
+TAXONOMY_AGENT_SYSTEM_PROMPT = dedent(
     f"""
     You are an expert engineer collaborating on a technology landscaping workflow.
 
@@ -103,14 +100,7 @@ taxonomy_agent_system_prompt = dedent(
 )
 
 
-taxonomy_agent = create_agent(
-    model=llm,
-    system_prompt=taxonomy_agent_system_prompt,
-    response_format=ProviderStrategy(Taxonomy),
-)
-
-
-taxonomy_merge_agent_system_prompt = dedent(
+TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT = dedent(
     f"""
     You merge multiple taxonomy batches into a single cohesive hierarchy.
 
@@ -129,75 +119,127 @@ taxonomy_merge_agent_system_prompt = dedent(
 )
 
 
-taxonomy_merge_agent = create_agent(
-    model=llm,
-    system_prompt=taxonomy_merge_agent_system_prompt,
-    response_format=ProviderStrategy(Taxonomy),
-)
-
-
-def generate_taxonomy(state: State, config: RunnableConfig | None = None) -> dict:
-    """Run the taxonomy agent across works converted into batched messages."""
-
-    default_batch_size = 20
-    batch_size = default_batch_size
-    if config and "metadata" in config:
-        batch_size = config["metadata"].get("batch_size", default_batch_size)
-
-    texts = [
-        f"Title: {work['title']}\nAbstract: {work['abstract']}"
-        for work in state.works
-    ]
-    batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
-    batch_texts = ["\n\n".join(batch) for batch in batches]
-    messages = [
-        ChatPromptValue(messages=[HumanMessage(content=batch_text)])
-        for batch_text in batch_texts
-    ]
-
-    if not messages:
-        return {"taxonomy_list": []}
-
-    taxonomy_list = taxonomy_agent.batch(messages)
-    structured_responses = [
-        response["structured_response"]
-        for response in taxonomy_list
-        if "structured_response" in response
-    ]
-    return {"taxonomy_list": structured_responses}
-
-
-def merge_taxonomies(state: State) -> dict:
-    """Merge multiple taxonomy batches into a single taxonomy."""
-
-    if not state.taxonomy_list:
-        return {"merged_taxonomy": None}
-
-    serialized_batches = [
-        f"Taxonomy {index}:\n{taxonomy.model_dump_json(indent=2)}"
-        for index, taxonomy in enumerate(state.taxonomy_list, start=1)
-    ]
-    prompt_value = ChatPromptValue(
-        messages=[
-            HumanMessage(
-                content="\n\n".join(serialized_batches),
-            )
-        ]
-    )
-    response = taxonomy_merge_agent.batch([prompt_value])[0]
-    return {"merged_taxonomy": response.get("structured_response")}
-
-
-graph_builder = StateGraph(State)
-graph_builder.add_node("generate_taxonomy", generate_taxonomy)
-graph_builder.add_node("merge_taxonomies", merge_taxonomies)
-graph_builder.add_edge(START, "generate_taxonomy")
-graph_builder.add_edge("generate_taxonomy", "merge_taxonomies")
-graph_builder.add_edge("merge_taxonomies", END)
-graph = graph_builder.compile()
-
-
+DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+DEFAULT_BASE_URL = "http://localhost:8000/v1"
+DEFAULT_BATCH_SIZE = 20
 DEFAULT_DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "2025.jsonl"
+
+
+class TaxonomyPipeline:
+    """High-level orchestration for generating and merging taxonomies."""
+
+    def __init__(
+        self,
+        llm: ChatOpenAI | None = None,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+    ) -> None:
+        self.llm = llm or ChatOpenAI(model=DEFAULT_MODEL, base_url=DEFAULT_BASE_URL)
+        self.batch_size = batch_size
+        self.taxonomy_agent = self._create_taxonomy_agent()
+        self.merge_agent = self._create_merge_agent()
+        self.graph = self._build_graph()
+
+    def _create_taxonomy_agent(self):
+        return create_agent(
+            model=self.llm,
+            system_prompt=TAXONOMY_AGENT_SYSTEM_PROMPT,
+            response_format=ProviderStrategy(Taxonomy),
+        )
+
+    def _create_merge_agent(self):
+        return create_agent(
+            model=self.llm,
+            system_prompt=TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT,
+            response_format=ProviderStrategy(Taxonomy),
+        )
+
+    def _build_graph(self):
+        graph_builder = StateGraph(State)
+        graph_builder.add_node("generate_taxonomy", self._generate_taxonomy)
+        graph_builder.add_node("merge_taxonomies", self._merge_taxonomies)
+        graph_builder.add_edge(START, "generate_taxonomy")
+        graph_builder.add_edge("generate_taxonomy", "merge_taxonomies")
+        graph_builder.add_edge("merge_taxonomies", END)
+        return graph_builder.compile()
+
+    def _resolve_batch_size(self, config: RunnableConfig | None) -> int:
+        if not config:
+            return self.batch_size
+        metadata = config.get("metadata") if isinstance(config, dict) else None
+        if not metadata:
+            return self.batch_size
+        return metadata.get("batch_size", self.batch_size)
+
+    def _generate_taxonomy(self, state: State, config: RunnableConfig | None = None) -> dict:
+        """Run the taxonomy agent across works converted into batched messages."""
+
+        batch_size = self._resolve_batch_size(config)
+        texts = [
+            f"Title: {work['title']}\nAbstract: {work['abstract']}"
+            for work in state.works
+        ]
+        batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
+        batch_texts = ["\n\n".join(batch) for batch in batches]
+        messages = [
+            ChatPromptValue(messages=[HumanMessage(content=batch_text)])
+            for batch_text in batch_texts
+        ]
+
+        if not messages:
+            return {"taxonomy_list": []}
+
+        taxonomy_list = self.taxonomy_agent.batch(messages)
+        structured_responses = [
+            response.get("structured_response")
+            for response in taxonomy_list
+            if response.get("structured_response")
+        ]
+        return {"taxonomy_list": structured_responses}
+
+    def _merge_taxonomies(self, state: State) -> dict:
+        """Merge multiple taxonomy batches into a single taxonomy."""
+
+        if not state.taxonomy_list:
+            return {"merged_taxonomy": None}
+
+        serialized_batches = [
+            f"Taxonomy {index}:\n{taxonomy.model_dump_json(indent=2)}"
+            for index, taxonomy in enumerate(state.taxonomy_list, start=1)
+        ]
+        prompt_value = ChatPromptValue(
+            messages=[
+                HumanMessage(
+                    content="\n\n".join(serialized_batches),
+                )
+            ]
+        )
+        response = self.merge_agent.batch([prompt_value])[0]
+        return {"merged_taxonomy": response.get("structured_response")}
+
+    def run(
+        self,
+        works: list[dict],
+        *,
+        batch_size: int | None = None,
+    ) -> Taxonomy | None:
+        """Execute the taxonomy graph and return the merged taxonomy."""
+
+        effective_batch_size = batch_size or self.batch_size
+        state = self.graph.invoke(
+            {
+                "works": works,
+                "taxonomy_list": [],
+                "merged_taxonomy": None,
+            },
+            config={"metadata": {"batch_size": effective_batch_size}},
+        )
+        return state
+
+
+def build_default_pipeline(batch_size: int = DEFAULT_BATCH_SIZE) -> TaxonomyPipeline:
+    """Convenience helper to construct a pipeline with default LLM settings."""
+
+    return TaxonomyPipeline(batch_size=batch_size)
 
 
 def load_works(data_path: Path = DEFAULT_DATA_PATH) -> list[dict]:
@@ -208,22 +250,21 @@ def load_works(data_path: Path = DEFAULT_DATA_PATH) -> list[dict]:
 
 def run_taxonomy_pipeline(
     works: list[dict],
-    batch_size: int = 20,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> Taxonomy | None:
-    """Execute the taxonomy graph and return the merged taxonomy."""
+    """Execute the taxonomy workflow using default configuration."""
 
-    state = graph.invoke(
-        {
-            "works": works,
-            "taxonomy_list": [],
-            "merged_taxonomy": None,
-        },
-        config={"metadata": {"batch_size": batch_size}},
-    )
-    return state
+    pipeline = build_default_pipeline(batch_size=batch_size)
+    return pipeline.run(works)
 
-works = load_works()
-state = run_taxonomy_pipeline(works)
 
+
+
+if __name__ == "__main__":
+    works = load_works()
+    pipeline = build_default_pipeline()
+    state = pipeline.run(works)
+    tree = taxonomy_to_tree(state['merged_taxonomy'])
+    tree.show()
 
 
