@@ -39,23 +39,50 @@ class TableFormatter(ABC):
         pass
 
     def format_table(self, results: list[dict[str, Any]]) -> Any:
-        """Create and populate a PrettyTable from results.
+        """Create and populate a Rich table from results."""
+        table = RichTable(
+            show_header=True,
+            header_style="bold cyan",
+            row_styles=None,
+            show_lines=False,
+        )
 
-        Args:
-            results: List of result dictionaries
-
-        Returns:
-            Populated table renderable
-        """
-        table = PrettyTable()
-        table.field_names = self.get_field_names()
-        table.max_width = self.max_width
-        table.align = "l"
+        for field in self.get_field_names():
+            overflow = self._get_column_overflow(field)
+            justify = self._get_column_justify(field)
+            table.add_column(field, overflow=overflow, justify=justify)
 
         for result in results:
-            table.add_row(self.extract_row_data(result))
+            row = self.extract_row_data(result)
+            style = self._get_row_style(result)
+            table.add_row(*[self._stringify_cell(cell) for cell in row], style=style)
 
         return table
+
+    def _get_column_overflow(self, field: str) -> str:
+        """Return overflow handling for a given column name."""
+        normalized = field.lower()
+        if "name" in normalized:
+            return "fold"
+        return "ellipsis"
+
+    def _get_column_justify(self, field: str) -> str:
+        """Choose justification for a column based on heuristics."""
+        normalized = field.lower().replace("-", "_")
+        numeric_keywords = ("count", "works", "citations", "year", "index", "level")
+        if any(keyword in normalized for keyword in numeric_keywords):
+            return "right"
+        return "left"
+
+    def _get_row_style(self, _result: dict[str, Any]) -> str | None:
+        """Optional hook for subclasses to style rows."""
+        return None
+
+    @staticmethod
+    def _stringify_cell(cell: Any) -> str:
+        if cell is None:
+            return ""
+        return str(cell)
 
 
 class WorksTableFormatter(TableFormatter):
@@ -127,34 +154,13 @@ class WorksTableFormatter(TableFormatter):
 
         return "dim"
 
-    def format_table(self, results: list[dict[str, Any]]) -> RichTable:
-        table = RichTable(
-            show_header=True,
-            header_style="bold cyan",
-            row_styles=None,
-            show_lines=False,
-        )
-
-        for field in self.get_field_names():
-            # Allow the Name column to wrap for long titles, keep others concise
-            overflow = "fold" if field == "Name" else "ellipsis"
-            justify = "left" if field != "Citations" else "right"
-            table.add_column(field, overflow=overflow, justify=justify)
-
-        for result in results:
-            row = self.extract_row_data(result)
-            style = self._get_row_style(result)
-            table.add_row(*[str(cell) for cell in row], style=style)
-
-        return table
-
 
 
 class AuthorsTableFormatter(TableFormatter):
     """Formatter for Authors entities."""
 
     def get_field_names(self) -> list[str]:
-        return ["Name", "Works", "Citations", "Institution", "ID"]
+        return ["Name", "Works", "Citations", "Institution", "ORCID", "ID"]
 
     def extract_row_data(self, result: dict[str, Any]) -> list[Any]:
         name = (result.get("display_name") or "Unknown")[: self.max_width]
@@ -172,9 +178,15 @@ class AuthorsTableFormatter(TableFormatter):
             inst = result["last_known_institution"]
             institution = (inst.get("display_name") or "Unknown")[:30]
 
+        orcid_value = result.get("orcid") or result.get("ids", {}).get("orcid")
+        if orcid_value:
+            orcid_value = orcid_value.split("/")[-1]
+        else:
+            orcid_value = "N/A"
+
         openalex_id = result.get("id", "").split("/")[-1]
 
-        return [name, works, citations, institution, openalex_id]
+        return [name, works, citations, institution, orcid_value, openalex_id]
 
 
 class InstitutionsTableFormatter(TableFormatter):

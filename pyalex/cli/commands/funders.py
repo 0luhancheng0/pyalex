@@ -41,6 +41,22 @@ def create_funders_command(app):
                 rich_help_panel=SEARCH_PANEL,
             )
         ] = None,
+        display_name_search: Annotated[
+            str | None,
+            typer.Option(
+                "--display-name-search",
+                help="Search funder display names (maps to display_name.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
+        description_search: Annotated[
+            str | None,
+            typer.Option(
+                "--description-search",
+                help="Search funder descriptions (maps to description.search)",
+                rich_help_panel=SEARCH_PANEL,
+            ),
+        ] = None,
         country_code: Annotated[
             str | None,
             typer.Option(
@@ -207,6 +223,7 @@ def create_funders_command(app):
         
         Examples:
           pyalex funders --search "NSF"
+                    pyalex funders --display-name-search "National Science"
           pyalex funders --country US --all
           pyalex funders --works-count "1000:10000" --limit 50
           pyalex funders --grants-count "50:" --h-index "25:" \
@@ -230,6 +247,12 @@ def create_funders_command(app):
 
             if search:
                 query = query.search(search)
+
+            if display_name_search:
+                query = query.search_filter(display_name=display_name_search)
+
+            if description_search:
+                query = query.search_filter(description=description_search)
 
             if country_code:
                 query = query.filter(country_code=country_code)

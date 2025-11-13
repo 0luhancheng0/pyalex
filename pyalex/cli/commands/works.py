@@ -47,7 +47,7 @@ class _WorksCommand(StdinSentinelCommand):
         "--host-venue-ids": STDIN_SENTINEL,
         "--source-issn": STDIN_SENTINEL,
         "--source-host-org-ids": STDIN_SENTINEL,
-        "--cited-by": STDIN_SENTINEL,
+        "--cites": STDIN_SENTINEL,
     }
 
 

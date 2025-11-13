@@ -413,16 +413,21 @@ def _extract_ids_from_data(data, id_field: str = "id") -> list[str]:
         if not data:
             raise ValueError("Empty list provided")
 
-        first_item = data[0]
+        # Filter out null entries commonly produced by tools like `jq`
+        filtered_items = [item for item in data if item is not None]
+        if not filtered_items:
+            raise ValueError("No valid IDs found in list")
+
+        first_item = filtered_items[0]
 
         if isinstance(first_item, str):
-            if not all(isinstance(item, str) for item in data):
+            if not all(isinstance(item, str) for item in filtered_items):
                 raise ValueError("Invalid list format")
-            return list(data)
+            return list(filtered_items)
 
         if isinstance(first_item, dict):
             ids: list[str] = []
-            for item in data:
+            for item in filtered_items:
                 if not isinstance(item, dict):
                     raise ValueError("Invalid list format")
                 if id_field not in item:
@@ -447,6 +452,8 @@ def _parse_ids_from_json_input(input_text: str, id_field: str = "id") -> list[st
     except json.JSONDecodeError as exc:
         # Fallback to newline-delimited JSON (NDJSON) parsing
         records: list[Any] = []
+        ndjson_failed = False
+
         for _line_number, line in enumerate(input_text.splitlines(), start=1):
             trimmed = line.strip()
             if not trimmed:
@@ -454,16 +461,26 @@ def _parse_ids_from_json_input(input_text: str, id_field: str = "id") -> list[st
 
             try:
                 records.append(json.loads(trimmed))
-            except json.JSONDecodeError as line_exc:
+            except json.JSONDecodeError:
+                ndjson_failed = True
+                break
+
+        if records and not ndjson_failed:
+            data = records
+        else:
+            # Fallback to treating the input as newline-delimited plain IDs
+            plain_ids = [line.strip() for line in input_text.splitlines() if line.strip()]
+
+            if not plain_ids and stripped:
+                plain_ids = [stripped]
+
+            if not plain_ids:
                 raise ValueError(
                     "Invalid JSON input: expected a JSON object/array or "
                     "newline-delimited JSON records"
-                ) from line_exc
+                ) from exc
 
-        if not records:
-            raise ValueError(f"Invalid JSON input: {exc}") from exc
-
-        data = records
+            return plain_ids
 
     return _extract_ids_from_data(data, id_field=id_field)
 
@@ -529,9 +546,19 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
                 f"https://api.openalex.org/"
                 f"{entity_class.__name__.lower()}/{batch_ids[0]}"
             )
+            query_segments = []
             data_version = getattr(config, "data_version", None)
-            if data_version:
-                base_url = f"{base_url}?data-version={data_version}"
+            if data_version not in (None, ""):
+                query_segments.append(f"data-version={data_version}")
+            include_xpac = getattr(config, "include_xpac", None)
+            if include_xpac not in (None, ""):
+                if isinstance(include_xpac, bool):
+                    include_xpac_value = "true" if include_xpac else "false"
+                else:
+                    include_xpac_value = str(include_xpac)
+                query_segments.append(f"include_xpac={include_xpac_value}")
+            if query_segments:
+                base_url = f"{base_url}?{'&'.join(query_segments)}"
             urls.append(base_url)
         else:
             # Multiple IDs - use OR operator for batch retrieval
@@ -1173,7 +1200,7 @@ def _output_table(
     selected_fields: list[str] | None = None,
     normalize: bool = False,
 ):
-    """Output results in table format using PrettyTable.
+    """Output results in table format using Rich tables.
 
     Uses the TableFormatterFactory to automatically detect entity type
     and format results appropriately.

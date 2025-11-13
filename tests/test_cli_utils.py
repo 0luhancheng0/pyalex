@@ -87,12 +87,12 @@ class TestSortOptionHandling:
         }
 
 
-class TestDataVersionPropagation:
-    """Ensure helper functions include the default data version."""
+class TestDefaultParameterPropagation:
+    """Ensure helper functions include default query parameters."""
 
     @pytest.mark.asyncio
-    async def test_async_retrieve_single_includes_data_version(self, monkeypatch):
-        """Single-entity retrieval URLs should include the data-version flag."""
+    async def test_async_retrieve_single_includes_default_params(self, monkeypatch):
+        """Single-entity retrieval URLs should include default query params."""
 
         captured_urls: list[str] = []
 
@@ -109,7 +109,58 @@ class TestDataVersionPropagation:
 
         assert results  # Should yield at least one result
         assert captured_urls
-        assert captured_urls[0].endswith("data-version=2")
+        assert "data-version=2" in captured_urls[0]
+        assert "include_xpac=true" in captured_urls[0]
+
+
+class TestAuthorsTableFormatter:
+    """Ensure author table output includes ORCID column."""
+
+    def test_field_names_include_orcid(self):
+        from pyalex.cli.formatters import AuthorsTableFormatter
+
+        formatter = AuthorsTableFormatter()
+        fields = formatter.get_field_names()
+        assert fields == [
+            "Name",
+            "Works",
+            "Citations",
+            "Institution",
+            "ORCID",
+            "ID",
+        ]
+
+    def test_extract_row_data_formats_orcid(self):
+        from pyalex.cli.formatters import AuthorsTableFormatter
+
+        formatter = AuthorsTableFormatter()
+        sample = {
+            "display_name": "Ada Lovelace",
+            "works_count": 3,
+            "cited_by_count": 42,
+            "last_known_institutions": [{"display_name": "Royal Society"}],
+            "orcid": "https://orcid.org/0000-0001-2345-6789",
+            "id": "https://openalex.org/A123456789",
+        }
+
+        row = formatter.extract_row_data(sample)
+        assert row[4] == "0000-0001-2345-6789"
+
+    def test_extract_row_data_handles_missing_orcid(self):
+        from pyalex.cli.formatters import AuthorsTableFormatter
+
+        formatter = AuthorsTableFormatter()
+        sample = {
+            "display_name": "No Orcid",
+            "works_count": 0,
+            "cited_by_count": 0,
+            "last_known_institutions": [],
+            "ids": {},
+            "id": "https://openalex.org/A42",
+        }
+
+        row = formatter.extract_row_data(sample)
+        assert row[4] == "N/A"
 
 
 class TestRangeFilterParsing:
@@ -317,6 +368,16 @@ class TestParseIdsFromJsonInput:
     def test_parse_ndjson_with_blank_lines(self):
         """Blank lines should be ignored when parsing NDJSON input."""
         payload = '\n{"id": "F1"}\n\n{"id": "F2"}\n'
+        assert _parse_ids_from_json_input(payload) == ["F1", "F2"]
+
+    def test_parse_single_plain_id(self):
+        """Plain single-line ID input should be accepted."""
+        payload = "F1"
+        assert _parse_ids_from_json_input(payload) == ["F1"]
+
+    def test_parse_plain_ids_with_newlines(self):
+        """Plain newline-delimited IDs should be accepted."""
+        payload = "F1\nF2\n"
         assert _parse_ids_from_json_input(payload) == ["F1", "F2"]
 
     def test_missing_id_field_raises(self):

@@ -3,6 +3,7 @@
 import json
 import sys
 from importlib import import_module
+from io import StringIO
 from typing import Annotated
 
 import typer
@@ -171,27 +172,53 @@ def show(
     file_path: Annotated[
         str | None,
         typer.Argument(
-            help="Path to the JSON or Parquet file to display "
+            help="Path to the JSON/JSONL or Parquet file to display "
             "(if not provided, reads from stdin)"
         ),
     ] = None,
 ):
     """
-    Display a JSON or Parquet file containing OpenAlex data in table format.
+    Display a JSON/JSONL or Parquet file containing OpenAlex data in table format.
 
-    Takes a JSON or Parquet file as input and displays it in a formatted table.
-    Can read JSON from a file or from stdin if no file is provided.
+    Takes a JSON, JSON Lines, or Parquet file as input and displays it in a formatted
+    table. Can read JSON or JSON Lines from a file or from stdin if no file is
+    provided.
 
     Examples:
       pyalex show results.json
+      pyalex show results.jsonl
       pyalex show results.parquet
       cat results.json | pyalex show
+      cat results.jsonl | pyalex show
     """
+    def convert_numpy_types(obj):
+        """Recursively convert numpy scalars and arrays to Python types."""
+
+        import numpy as np
+
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, dict):
+            return {k: convert_numpy_types(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [convert_numpy_types(item) for item in obj]
+        return obj
+
     try:
-        # Determine if input is parquet or JSON
+        # Determine the input format
         is_parquet = False
+        is_jsonl = False
         if file_path and file_path.lower().endswith(".parquet"):
             is_parquet = True
+        elif file_path and (
+            file_path.lower().endswith(".jsonl")
+            or file_path.lower().endswith(".ndjson")
+        ):
+            is_jsonl = True
 
         # Read data
         if is_parquet:
@@ -200,30 +227,7 @@ def show(
                 import pandas as pd
 
                 df = pd.read_parquet(file_path)
-                # Convert to list of dicts for consistent processing
-                # Use orient='records' which handles nested structures better
-                data = df.to_dict("records")
-
-                # Convert any numpy types to native Python types for JSON serialization
-                def convert_numpy_types(obj):
-                    """Recursively convert numpy types to Python native types."""
-                    import numpy as np
-
-                    if isinstance(obj, np.integer):
-                        return int(obj)
-                    elif isinstance(obj, np.floating):
-                        return float(obj)
-                    elif isinstance(obj, np.ndarray):
-                        return obj.tolist()
-                    elif isinstance(obj, dict):
-                        return {k: convert_numpy_types(v) for k, v in obj.items()}
-                    elif isinstance(obj, list):
-                        return [convert_numpy_types(item) for item in obj]
-                    else:
-                        return obj
-
-                # Apply conversion to all data
-                data = convert_numpy_types(data)
+                data = convert_numpy_types(df.to_dict("records"))
 
             except FileNotFoundError:
                 typer.echo(f"Error: File '{file_path}' not found", err=True)
@@ -235,18 +239,32 @@ def show(
                 )
                 raise typer.Exit(1) from None
         elif file_path:
-            # Read JSON file
             try:
                 with open(file_path) as f:
-                    data = json.load(f)
+                    if is_jsonl:
+                        import pandas as pd
+
+                        df = pd.read_json(f, lines=True)
+                        data = convert_numpy_types(df.to_dict("records"))
+                    else:
+                        data = json.load(f)
             except FileNotFoundError:
                 typer.echo(f"Error: File '{file_path}' not found", err=True)
                 raise typer.Exit(1) from None
             except json.JSONDecodeError as e:
-                typer.echo(f"Error: Invalid JSON in file '{file_path}': {e}", err=True)
+                typer.echo(
+                    f"Error: Invalid JSON content in file '{file_path}': {e}",
+                    err=True,
+                )
+                raise typer.Exit(1) from None
+            except ValueError as e:
+                typer.echo(
+                    f"Error: Failed to read JSON Lines file '{file_path}': {e}",
+                    err=True,
+                )
                 raise typer.Exit(1) from None
         else:
-            # Read from stdin (JSON only)
+            # Read from stdin (JSON or JSON Lines)
             input_data = sys.stdin.read().strip()
             if not input_data:
                 typer.echo("Error: No input provided", err=True)
@@ -255,8 +273,15 @@ def show(
             try:
                 data = json.loads(input_data)
             except json.JSONDecodeError as e:
-                typer.echo(f"Error: Invalid JSON input: {e}", err=True)
-                raise typer.Exit(1) from None
+                # Attempt to parse as JSON Lines if JSON parsing fails
+                try:
+                    import pandas as pd
+
+                    df = pd.read_json(StringIO(input_data), lines=True)
+                    data = convert_numpy_types(df.to_dict("records"))
+                except ValueError:
+                    typer.echo(f"Error: Invalid JSON input: {e}", err=True)
+                    raise typer.Exit(1) from None
 
         # Display the data (table output only)
         if isinstance(data, dict):

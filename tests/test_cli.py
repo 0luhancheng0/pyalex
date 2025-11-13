@@ -49,6 +49,7 @@ def test_topics_help():
 
 def test_topics_search_filters(monkeypatch):
     """Topics CLI should map field-specific search filters."""
+    
 
     from pyalex.cli import main as cli_main
     from pyalex.cli.commands import entities as entities_module
@@ -139,6 +140,78 @@ def test_topics_search_filters(monkeypatch):
     for expected in expected_filters:
         assert expected in recorded["search_filters"]
 
+def test_funders_search_filters(monkeypatch):
+    """Funders CLI should map display name and description search filters."""
+
+    from pyalex.cli import main as cli_main
+    from pyalex.cli.commands import funders as funders_module
+
+    recorded: dict[str, list] = {"search_filters": []}
+
+    class DummyFunders:
+        def __init__(self):
+            self.params: dict[str, dict[str, str]] = {}
+
+        def search(self, *_args, **_kwargs):
+            return self
+
+        def search_filter(self, **kwargs):
+            recorded.setdefault("search_filters", []).append(kwargs)
+            return self
+
+        def filter(self, **_kwargs):
+            return self
+
+    monkeypatch.setattr(funders_module, "Funders", DummyFunders)
+    monkeypatch.setattr(
+        funders_module,
+        "parse_select_fields",
+        lambda _select: None,
+    )
+    monkeypatch.setattr(
+        funders_module,
+        "_validate_and_apply_common_options",
+        lambda query, *_args, **_kwargs: query,
+    )
+    monkeypatch.setattr(
+        funders_module,
+        "execute_standard_query",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        funders_module,
+        "_output_results",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        funders_module,
+        "validate_output_format_options",
+        lambda *_args, **_kwargs: (None, None),
+    )
+
+    from typer.main import get_command
+
+    runner = CliRunner()
+    result = runner.invoke(
+        get_command(cli_main.app),
+        [
+            "funders",
+            "--display-name-search",
+            "national science foundation",
+            "--description-search",
+            "scientific research",
+            "--limit",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout or result.stderr
+    expected_filters = [
+        {"display_name": "national science foundation"},
+        {"description": "scientific research"},
+    ]
+    for expected in expected_filters:
+        assert expected in recorded["search_filters"]
 
 def test_concepts_help():
     """Test that the concepts subcommand help works."""
@@ -1074,6 +1147,64 @@ def test_authors_presence_flags(monkeypatch):
     assert {"has_orcid": True} in recorded
     assert {"has_twitter": True} in recorded
     assert {"has_wikipedia": False} in recorded
+
+
+def test_authors_defaults_to_h_index_sort(monkeypatch):
+    """Authors CLI should default to h-index sorting when unspecified."""
+
+    from pyalex.cli import main as cli_main
+    from pyalex.cli.commands import authors as authors_module
+
+    captured: dict[str, str | None] = {"sort_by": None}
+
+    class DummyAuthors:
+        def __init__(self):
+            self.params = {}
+
+        def search(self, *_args, **_kwargs):
+            return self
+
+    def capture_common_options(
+        query,
+        all_results,
+        limit,
+        sample,
+        seed,
+        sort_by,
+        select=None,
+    ):
+        captured["sort_by"] = sort_by
+        return query
+
+    monkeypatch.setattr(authors_module, "Authors", DummyAuthors)
+    monkeypatch.setattr(
+        authors_module,
+        "add_id_list_option_to_command",
+        lambda query, *_args, **_kwargs: query,
+    )
+    monkeypatch.setattr(
+        authors_module,
+        "parse_select_fields",
+        lambda _select: None,
+    )
+    monkeypatch.setattr(
+        authors_module,
+        "_validate_and_apply_common_options",
+        capture_common_options,
+    )
+    monkeypatch.setattr(
+        authors_module,
+        "handle_large_id_list_if_needed",
+        lambda *_args, **_kwargs: [],
+    )
+
+    from typer.main import get_command
+
+    runner = CliRunner()
+    result = runner.invoke(get_command(cli_main.app), ["authors", "--limit", "1"])
+
+    assert result.exit_code == 0, result.stdout or result.stderr
+    assert captured["sort_by"] == "summary_stats.h_index:desc"
 
 def test_works_cited_by_count_range(monkeypatch):
     """Works command should apply range filter for cited-by-count option."""

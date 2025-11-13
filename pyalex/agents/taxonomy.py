@@ -1,34 +1,32 @@
-import asyncio
-from dataclasses import dataclass
-from itertools import count
-from textwrap import dedent
-from langchain_core.runnables.config import RunnableConfig
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.prompts import HumanMessagePromptTemplate
-from langchain_core.prompt_values import ChatPromptValue
-from langchain_openai import ChatOpenAI
-from pydantic import BaseModel
-from pydantic import Field
-from treelib import Tree
-from langchain.agents.structured_output import ProviderStrategy
-from pyalex import Works
-from langchain.agents import create_agent
+from __future__ import annotations
+
 import operator
-from typing import TypedDict, Annotated
-from langgraph.graph import StateGraph, START, END
+from pathlib import Path
+from textwrap import dedent
+from typing import Annotated
+
 import pandas as pd
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ProviderStrategy
+from langchain_core.messages import HumanMessage
+from langchain_core.prompt_values import ChatPromptValue
+from langchain_core.runnables.config import RunnableConfig
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
+from treelib import Tree
 
 
 class Category(BaseModel):
     name: str = Field(..., description="The name of the category.")
     description: str = Field(..., description="A brief description of the category.")
-    subcategories: list["Category"] = Field(
+    subcategories: list[Category] = Field(
         default_factory=list,
         description=(
             "A list of subcategories. Empty if the current category is a leaf node."
         ),
     )
+
 
 class Taxonomy(BaseModel):
     category_list: list[Category] = Field(
@@ -36,13 +34,23 @@ class Taxonomy(BaseModel):
         description="A list of taxonomy items in nested bullet point format.",
     )
 
+
 class State(BaseModel):
-    works: Annotated[list[dict], operator.add] = Field(..., description="A list of works with title and abstract.")
-    messages: list[ChatPromptValue] = Field(..., description="A list of text messages.", default_factory=list)
-    taxonomy_list: Annotated[list[Taxonomy], operator.add] = Field(..., description="The generated taxonomy from the works.", default_factory=list)
-    
+    works: Annotated[list[dict], operator.add] = Field(
+        ..., description="A list of works with title and abstract."
+    )
+    taxonomy_list: Annotated[list[Taxonomy], operator.add] = Field(
+        default_factory=list,
+        description="The generated taxonomy from the works.",
+    )
+    merged_taxonomy: Taxonomy | None = Field(
+        default=None,
+        description="A single taxonomy merged from the generated batches.",
+    )
+
 
 def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
+    """Convert a `Taxonomy` into a `treelib` representation."""
 
     tree = Tree()
     tree.create_node("Taxonomy", "taxonomy")
@@ -57,58 +65,159 @@ def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
 
     return tree
 
+
 llm = ChatOpenAI(model="gpt-5-mini")
+
+
+taxonomy_agent_system_prompt = dedent(
+    f"""
+    You are an expert engineer collaborating on a technology landscaping workflow.
+
+    # Objective
+    Your task is to create a taxonomy from research documents that consist of title and abstracts.
+
+    # Constraints
+    - Your taxonomy should be hierarchical and cover the major topics found in the documents.
+    - Skip any topic that does not appear in the source documents.
+    - Give each category a name and a brief description.
+    - Do NOT include the input documents as taxonomy entries.
+
+    # Output Format
+    Here is the model JSON schema describing the output format you should follow:
+    {Taxonomy.model_json_schema()}
+    """
+)
+
 
 taxonomy_agent = create_agent(
     model=llm,
-    system_prompt=dedent(f"""
-        You are an expert engineer collaborating on a
-        technology landscaping workflow.
-
-        # Objective
-        Your task is to create a taxonomy from research
-        documents that consist of title and abstracts.
-
-        # Constraints
-        - Your taxonomy should be hierarchical and cover the major topics found in the documents.
-        - Skip any topic that does not appear in the source documents.
-        - Give each category a name and a brief description.
-        - Do NOT include the input documents as taxonomy entries.
-
-        # Output Format
-        Here is the model json schema describing the output format you should follow:
-        {Taxonomy.model_json_schema()}
-        """
-    ).strip(),
-    response_format=ProviderStrategy(Taxonomy)
+    system_prompt=taxonomy_agent_system_prompt,
+    response_format=ProviderStrategy(Taxonomy),
 )
 
-def build_messages(state: State, config: RunnableConfig) -> dict:
-    texts = [f"Title: {work['title']}\nAbstract: {work['abstract']}" for work in state.works]
-    batch_size = config['metadata']['batch_size']
-    batches = [texts[i:i + batch_size] for i in range(0, len(texts), batch_size)]
+
+taxonomy_merge_agent_system_prompt = dedent(
+    f"""
+    You merge multiple taxonomy batches into a single cohesive hierarchy.
+
+    # Objective
+    Combine the provided taxonomy JSON payloads into one taxonomy that captures all relevant topics without duplication.
+
+    # Guidelines
+    - Preserve meaningful distinctions between categories; merge overlapping concepts instead of repeating them.
+    - Ensure the hierarchy remains balanced and avoids redundant nesting.
+    - Keep descriptions concise and grounded in the source category descriptions.
+
+    # Output Format
+    Return a single taxonomy following this JSON schema:
+    {Taxonomy.model_json_schema()}
+    """
+)
+
+
+taxonomy_merge_agent = create_agent(
+    model=llm,
+    system_prompt=taxonomy_merge_agent_system_prompt,
+    response_format=ProviderStrategy(Taxonomy),
+)
+
+
+def generate_taxonomy(state: State, config: RunnableConfig | None = None) -> dict:
+    """Run the taxonomy agent across works converted into batched messages."""
+
+    default_batch_size = 20
+    batch_size = default_batch_size
+    if config and "metadata" in config:
+        batch_size = config["metadata"].get("batch_size", default_batch_size)
+
+    texts = [
+        f"Title: {work['title']}\nAbstract: {work['abstract']}"
+        for work in state.works
+    ]
+    batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
     batch_texts = ["\n\n".join(batch) for batch in batches]
-    messages = list(map(lambda x: ChatPromptValue(messages=[x]), map(HumanMessage, batch_texts)))
-    return {"messages": list(messages)}
+    messages = [
+        ChatPromptValue(messages=[HumanMessage(content=batch_text)])
+        for batch_text in batch_texts
+    ]
+
+    if not messages:
+        return {"taxonomy_list": []}
+
+    taxonomy_list = taxonomy_agent.batch(messages)
+    structured_responses = [
+        response["structured_response"]
+        for response in taxonomy_list
+        if "structured_response" in response
+    ]
+    return {"taxonomy_list": structured_responses}
 
 
-def generate_taxonomy(state: State) -> dict:
-    taxonomy_list = taxonomy_agent.batch(state.messages)
-    return {"taxonomy_list": [i['structured_response'] for i in taxonomy_list]}
+def merge_taxonomies(state: State) -> dict:
+    """Merge multiple taxonomy batches into a single taxonomy."""
 
+    if not state.taxonomy_list:
+        return {"merged_taxonomy": None}
 
-works = pd.read_json("/Users/luhancheng/pyalex/data/2025.jsonl", lines=True).to_dict(orient="records")
+    serialized_batches = [
+        f"Taxonomy {index}:\n{taxonomy.model_dump_json(indent=2)}"
+        for index, taxonomy in enumerate(state.taxonomy_list, start=1)
+    ]
+    prompt_value = ChatPromptValue(
+        messages=[
+            HumanMessage(
+                content="\n\n".join(serialized_batches),
+            )
+        ]
+    )
+    response = taxonomy_merge_agent.batch([prompt_value])[0]
+    return {"merged_taxonomy": response.get("structured_response")}
+
 
 graph_builder = StateGraph(State)
-graph_builder.add_node("build_messages", build_messages)
 graph_builder.add_node("generate_taxonomy", generate_taxonomy)
-
-
-graph_builder.add_edge(START, "build_messages")
-graph_builder.add_edge("build_messages", "generate_taxonomy")
-graph_builder.add_edge("generate_taxonomy", END)
+graph_builder.add_node("merge_taxonomies", merge_taxonomies)
+graph_builder.add_edge(START, "generate_taxonomy")
+graph_builder.add_edge("generate_taxonomy", "merge_taxonomies")
+graph_builder.add_edge("merge_taxonomies", END)
 graph = graph_builder.compile()
 
 
-state = graph.invoke({"works": works, "messages": [], "taxonomy_list": []}, config={"metadata": {"batch_size": 20}})
+DEFAULT_DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "2025.jsonl"
+
+
+def load_works(data_path: Path = DEFAULT_DATA_PATH) -> list[dict]:
+    """Load works data from a JSONL file."""
+
+    return pd.read_json(data_path, lines=True).to_dict(orient="records")
+
+
+def run_taxonomy_pipeline(
+    works: list[dict],
+    batch_size: int = 20,
+) -> Taxonomy | None:
+    """Execute the taxonomy graph and return the merged taxonomy."""
+
+    state = graph.invoke(
+        {
+            "works": works,
+            "taxonomy_list": [],
+            "merged_taxonomy": None,
+        },
+        config={"metadata": {"batch_size": batch_size}},
+    )
+    return state["merged_taxonomy"]
+
+
+def main() -> None:
+    works = load_works()
+    taxonomy = run_taxonomy_pipeline(works)
+    if taxonomy is None:
+        print("No taxonomy generated.")
+        return
+    print(f"Merged taxonomy generated with {len(taxonomy.category_list)} top-level categories.")
+
+
+if __name__ == "__main__":
+    main()
 

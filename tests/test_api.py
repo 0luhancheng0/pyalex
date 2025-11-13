@@ -25,6 +25,7 @@ from pyalex.core.expressions import not_
 from pyalex.core.expressions import or_
 from pyalex.core.response import OpenAlexResponseList
 from pyalex.core.response import QueryError
+from pyalex.entities.works import Work
 from pyalex.utils import from_id
 from pyalex.utils import get_entity_type
 
@@ -61,6 +62,36 @@ class TestEntityInitialization:
         topics = Topics()
         assert topics.params is None
         assert "topics" in topics.url.lower()
+
+
+class TestWorkEntityBehaviour:
+    """Ensure Work entity performs abstract normalization."""
+
+    def test_work_converts_inverted_abstract(self):
+        payload = {
+            "id": "https://openalex.org/W123",
+            "abstract_inverted_index": {
+                "hello": [0],
+                "world": [1],
+            },
+        }
+
+        work = Work(payload)
+
+        assert "abstract" in work
+        assert work["abstract"] == "hello world"
+        assert "abstract_inverted_index" not in work
+
+    def test_work_handles_missing_abstract(self):
+        payload = {
+            "id": "https://openalex.org/W999",
+            "abstract_inverted_index": None,
+        }
+
+        work = Work(payload)
+
+        assert "abstract" in work
+        assert work["abstract"] is None
 
 
 class TestEntityFiltering:
@@ -134,6 +165,7 @@ class TestURLGeneration:
         assert "https://api.openalex.org" in url
         assert "works" in url
         assert "data-version=2" in url
+        assert "include_xpac=true" in url
 
     def test_filtered_url(self):
         """Test URL with filters."""
@@ -141,6 +173,7 @@ class TestURLGeneration:
         url = works.url
         assert "filter" in url
         assert "data-version=2" in url
+        assert "include_xpac=true" in url
 
     def test_search_url(self):
         """Test URL with search parameter."""
@@ -148,6 +181,7 @@ class TestURLGeneration:
         url = works.url
         assert "search" in url
         assert "data-version=2" in url
+        assert "include_xpac=true" in url
 
 
 class TestEntityIndexing:
@@ -170,6 +204,7 @@ class TestEntityIndexing:
             works["W123"]
             assert works.params == "W123"
             assert "data-version=2" in captured_url.get("value", "")
+            assert "include_xpac=true" in captured_url.get("value", "")
 
     def test_list_id_format(self):
         """Test list of IDs creates filter_or query."""

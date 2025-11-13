@@ -1103,20 +1103,28 @@ class BaseOpenAlex:
         """Ensure required default query parameters are present in the URL."""
 
         data_version = getattr(config, "data_version", None)
+        include_xpac = getattr(config, "include_xpac", None)
 
         if query is None:
             query = ""
 
-        if not data_version:
-            return query
-
         segments = [
             segment
             for segment in query.split("&")
-            if segment and not segment.startswith("data-version=")
+            if segment
+            and not segment.startswith("data-version=")
+            and not segment.startswith("include_xpac=")
         ]
 
-        data_version_str = str(data_version)
-        segments.append(f"data-version={data_version_str}")
+        if data_version not in (None, ""):
+            data_version_str = str(data_version)
+            segments.append(f"data-version={data_version_str}")
+
+        if include_xpac not in (None, ""):
+            if isinstance(include_xpac, bool):
+                include_xpac_value = "true" if include_xpac else "false"
+            else:
+                include_xpac_value = str(include_xpac)
+            segments.append(f"include_xpac={include_xpac_value}")
 
         return "&".join(segments)

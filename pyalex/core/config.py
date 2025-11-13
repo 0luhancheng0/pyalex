@@ -52,10 +52,10 @@ DEFAULT_MAX_CONCURRENT = 10
 
 # CLI Display Defaults
 CLI_NAME_TRUNCATE_LENGTH = 50
-DEFAULT_TITLE_ABSTRACT_TEMPLATE = "Title: {title}\nAbstract: {abstract}"
 
 # Data version defaults
 DEFAULT_DATA_VERSION = os.getenv("OPENALEX_DATA_VERSION", "2")
+DEFAULT_INCLUDE_XPAC = os.getenv("OPENALEX_INCLUDE_XPAC", "true")
 
 
 class AlexConfig(dict):
@@ -151,9 +151,6 @@ config = AlexConfig(
     cli_name_truncate_length=_get_env_int(
         "OPENALEX_CLI_NAME_LENGTH", CLI_NAME_TRUNCATE_LENGTH
     ),
-    title_abstract_template=os.getenv(
-        "OPENALEX_TITLE_ABSTRACT_TEMPLATE", DEFAULT_TITLE_ABSTRACT_TEMPLATE
-    ),
     # HTTP client configurations
     total_timeout=_get_env_float("OPENALEX_TOTAL_TIMEOUT", DEFAULT_TOTAL_TIMEOUT),
     connect_timeout=_get_env_float("OPENALEX_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT),
@@ -165,4 +162,5 @@ config = AlexConfig(
     ),
     max_concurrent=_get_env_int("OPENALEX_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT),
     data_version=DEFAULT_DATA_VERSION,
+    include_xpac=DEFAULT_INCLUDE_XPAC,
 )

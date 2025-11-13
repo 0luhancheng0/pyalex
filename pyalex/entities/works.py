@@ -16,11 +16,34 @@ if TYPE_CHECKING:
 class Work(dict):
     """Class representing a work entity in OpenAlex."""
 
-    def __getitem__(self, key):
-        if key == "abstract":
-            return invert_abstract(self["abstract_inverted_index"])
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._original_abstract_index = (
+            dict.__getitem__(self, "abstract_inverted_index")
+            if "abstract_inverted_index" in self
+            else None
+        )
+        self._materialize_abstract_text()
 
-        return super().__getitem__(key)
+    def _materialize_abstract_text(self) -> None:
+        """Convert the inverted abstract into plain text for consumers."""
+
+        existing_abstract = dict.get(self, "abstract")
+        generated_abstract: str | None = None
+
+        if isinstance(self._original_abstract_index, dict):
+            try:
+                generated_abstract = invert_abstract(self._original_abstract_index)
+            except Exception:  # pragma: no cover - defensive guard
+                generated_abstract = None
+
+        if existing_abstract is None:
+            dict.__setitem__(self, "abstract", generated_abstract)
+        elif existing_abstract == "" and generated_abstract:
+            dict.__setitem__(self, "abstract", generated_abstract)
+
+        if "abstract_inverted_index" in self:
+            dict.pop(self, "abstract_inverted_index", None)
 
     def ngrams(self, return_meta=False):
         """Get n-grams for the work.

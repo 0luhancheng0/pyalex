@@ -409,8 +409,10 @@ def create_authors_command(app):
 
             cli_selected_fields = parse_select_fields(select)
 
+            effective_sort = sort_by or "summary_stats.h_index:desc"
+
             query = _validate_and_apply_common_options(
-                query, all_results, limit, sample, seed, sort_by, select
+                query, all_results, limit, sample, seed, effective_sort, select
             )
 
             if group_by:
