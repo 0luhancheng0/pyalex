@@ -47,18 +47,32 @@ class State(BaseModel):
         default=None,
         description="A single taxonomy merged from the generated batches.",
     )
-
+    
+from itertools import count
 
 def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
     """Convert a `Taxonomy` into a `treelib` representation."""
 
     tree = Tree()
-    tree.create_node("Taxonomy", "taxonomy")
+    # tree.create_node("Taxonomy", "taxonomy")
+    tree.create_node(tag="Taxonomy", identifier="taxonomy", data=None)
+
+    id_counter = count()
 
     def _add_category(category: Category, parent_id: str) -> None:
-        tree.create_node(category.name, category.name, parent=parent_id, data=category)
+        node_id = f"node-{next(id_counter)}"
+        tree.create_node(
+            tag=category.name,
+            identifier=node_id,
+            parent=parent_id,
+            data={
+                "name": category.name,
+                "description": category.description,
+                "subcategories": category.subcategories,
+            },
+        )
         for child in category.subcategories:
-            _add_category(child, category.name)
+            _add_category(child, node_id)
 
     for top_level in taxonomy.category_list:
         _add_category(top_level, "taxonomy")
@@ -66,8 +80,8 @@ def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
     return tree
 
 
-llm = ChatOpenAI(model="gpt-5-mini")
-
+# llm = ChatOpenAI(model="gpt-5-mini")
+llm = ChatOpenAI(model="Qwen/Qwen3-4B-Instruct-2507", base_url="http://localhost:8000/v1")
 
 taxonomy_agent_system_prompt = dedent(
     f"""
@@ -206,18 +220,10 @@ def run_taxonomy_pipeline(
         },
         config={"metadata": {"batch_size": batch_size}},
     )
-    return state["merged_taxonomy"]
+    return state
+
+works = load_works()
+state = run_taxonomy_pipeline(works)
 
 
-def main() -> None:
-    works = load_works()
-    taxonomy = run_taxonomy_pipeline(works)
-    if taxonomy is None:
-        print("No taxonomy generated.")
-        return
-    print(f"Merged taxonomy generated with {len(taxonomy.category_list)} top-level categories.")
-
-
-if __name__ == "__main__":
-    main()
 
