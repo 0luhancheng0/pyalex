@@ -25,3 +25,6 @@ The suite runs on `pytest` with warnings treated as errors (see `[tool.pytest.in
 Recent history favors short imperative summaries (for example, `bug fix`, `update --json option`); keep that tone but aim for clarity under 50 characters. Reference related issues in the body and note any CLI or API changes. Before opening a PR, run lint + tests, include reproduction or demo commands, update docs when behavior shifts, and attach screenshots for CLI output tweaks that affect formatting. Mark PRs as draft until automated checks pass or known gaps are documented, and confirm that pre-commit hooks (`pre-commit run --all-files`) are clean.
 
 
+NOTE: there are a bunch of standalone script in pyalex/agents directory. Don't need to run test if you are tasked with updating them. 
+
+If you are writing langgraph code, make sure you always reference the full documentation at "/Users/luhancheng/Documents/Obsidian Vault/LLM Context/LangGraph/llms-full.txt"
