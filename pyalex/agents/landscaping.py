@@ -109,7 +109,9 @@ def build_prompt_designer(llm: ChatOpenAI) -> Runnable:
     return RunnableLambda(asdict) | PROMPT_DESIGNER_PROMPT | llm | StrOutputParser()
 
 
-def build_aspect_agent(aspect_name: str, system_prompt: str, llm: ChatOpenAI) -> Runnable:
+def build_aspect_agent(
+    aspect_name: str, system_prompt: str, llm: ChatOpenAI
+) -> Runnable:
     """Create a runnable that extracts a single aspect from a publication."""
 
     prompt_template = ChatPromptTemplate(
@@ -122,14 +124,24 @@ def build_aspect_agent(aspect_name: str, system_prompt: str, llm: ChatOpenAI) ->
     def _attach_aspect(result: str) -> dict[str, dict[str, str]]:
         return {"aspects": {aspect_name: result}}
 
-    return RunnableLambda(asdict) | prompt_template | llm | StrOutputParser() | RunnableLambda(_attach_aspect)
+    return (
+        RunnableLambda(asdict)
+        | prompt_template
+        | llm
+        | StrOutputParser()
+        | RunnableLambda(_attach_aspect)
+    )
 
 
-def build_state_graph(aspect_agents: Sequence[tuple[AspectDefinition, Runnable]]) -> Runnable:
+def build_state_graph(
+    aspect_agents: Sequence[tuple[AspectDefinition, Runnable]],
+) -> Runnable:
     """Wire the aspect agents into a LangGraph state machine."""
 
     graph_builder = StateGraph(State)
-    graph_builder.channels["aspects"] = BinaryOperatorAggregate(dict, lambda current, update: {**current, **update})
+    graph_builder.channels["aspects"] = BinaryOperatorAggregate(
+        dict, lambda current, update: {**current, **update}
+    )
 
     for aspect, agent in aspect_agents:
         node_name = f"{aspect.aspect_name}_agent"
@@ -155,11 +167,19 @@ class LandscapingWorkflow:
         prompt_designer = build_prompt_designer(self.llm)
         prompt_texts = prompt_designer.batch(self.aspects)
         self._aspect_prompts = {
-            aspect.aspect_name: prompt for aspect, prompt in zip(self.aspects, prompt_texts, strict=True)
+            aspect.aspect_name: prompt
+            for aspect, prompt in zip(self.aspects, prompt_texts, strict=True)
         }
 
         aspect_agents = [
-            (aspect, build_aspect_agent(aspect.aspect_name, self._aspect_prompts[aspect.aspect_name], self.llm))
+            (
+                aspect,
+                build_aspect_agent(
+                    aspect.aspect_name,
+                    self._aspect_prompts[aspect.aspect_name],
+                    self.llm,
+                ),
+            )
             for aspect in self.aspects
         ]
 
@@ -196,7 +216,10 @@ class LandscapingWorkflow:
         if limit is not None:
             record_list = record_list[:limit]
 
-        states = [self._state_from_record(record, index) for index, record in enumerate(record_list)]
+        states = [
+            self._state_from_record(record, index)
+            for index, record in enumerate(record_list)
+        ]
 
         if config is not None:
             responses = self._graph.batch(states, config=config)
@@ -231,8 +254,8 @@ class LandscapingWorkflow:
 
         return State(id=identifier_str, title=title, abstract=abstract)
 
+
 df = pd.read_json("/Users/luhancheng/pyalex/data/2024.jsonl", lines=True)
 workflow = LandscapingWorkflow()
 response = workflow.run_dataframe(df, limit=3)
 aspects_df = workflow.aspects_dataframe(response)
-

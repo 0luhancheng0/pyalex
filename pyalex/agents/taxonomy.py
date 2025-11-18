@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-import operator
+from collections.abc import Callable
 from itertools import count
 from pathlib import Path
 from textwrap import dedent
-from typing import Annotated
+from uuid import uuid4
 
 import pandas as pd
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ProviderStrategy
 from langchain_core.messages import HumanMessage
+from langchain_core.messages import SystemMessage
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_core.runnables.config import RunnableConfig
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_openai import ChatOpenAI
-from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
+from langgraph.graph import END
+from langgraph.graph import START
+from langgraph.graph import StateGraph
+from langgraph.store.memory import InMemoryStore
+from pydantic import BaseModel
+from pydantic import Field
 from treelib import Tree
 
 
@@ -36,11 +42,46 @@ class Taxonomy(BaseModel):
     )
 
 
+class TaxonomyEvaluation(BaseModel):
+    coverage_score: int = Field(
+        ...,
+        ge=1,
+        le=5,
+        description="1 (poor coverage) to 5 (excellent coverage) across the source works.",
+    )
+    structure_score: int = Field(
+        ...,
+        ge=1,
+        le=5,
+        description="1 (disorganized) to 5 (clear hierarchy with balanced depth).",
+    )
+    description_quality_score: int = Field(
+        ...,
+        ge=1,
+        le=5,
+        description="1 (vague descriptions) to 5 (precise, grounded descriptions).",
+    )
+    strengths: str = Field(
+        ...,
+        description="Short paragraph describing what works well in the taxonomy.",
+    )
+    gaps_or_risks: str = Field(
+        ...,
+        description=(
+            "Short paragraph calling out missing areas, redundancy, or hierarchy issues."
+        ),
+    )
+    action_items: list[str] = Field(
+        default_factory=list,
+        description="Concise bullet-style suggestions to improve the taxonomy.",
+    )
+
+
 class State(BaseModel):
-    works: Annotated[list[dict], operator.add] = Field(
+    works: list[dict] = Field(
         ..., description="A list of works with title and abstract."
     )
-    taxonomy_list: Annotated[list[Taxonomy], operator.add] = Field(
+    taxonomy_list: list[Taxonomy] = Field(
         default_factory=list,
         description="The generated taxonomy from the works.",
     )
@@ -48,13 +89,13 @@ class State(BaseModel):
         default=None,
         description="A single taxonomy merged from the generated batches.",
     )
-
+    evaluation_report: TaxonomyEvaluation | None = Field(
+        default=None,
+        description="Evaluation metadata for the merged taxonomy.",
+    )
 
 def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
-    """Convert a `Taxonomy` into a `treelib` representation."""
-
     tree = Tree()
-    # tree.create_node("Taxonomy", "taxonomy")
     tree.create_node(tag="Taxonomy", identifier="taxonomy", data=None)
 
     id_counter = count()
@@ -80,19 +121,21 @@ def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
     return tree
 
 
+
 TAXONOMY_AGENT_SYSTEM_PROMPT = dedent(
     f"""
     You are an expert engineer collaborating on a technology landscaping workflow.
 
     # Objective
-    Your task is to create a taxonomy from research documents that consist of title and abstracts.
+    Your task is to create a taxonomy from research documents that consist
+    of title and abstracts.
 
     # Constraints
     - Your taxonomy should be hierarchical and cover the major topics found in the documents.
     - Skip any topic that does not appear in the source documents.
     - Give each category a name and a brief description.
     - Do NOT include the input documents as taxonomy entries.
-
+    
     # Output Format
     Here is the model JSON schema describing the output format you should follow:
     {Taxonomy.model_json_schema()}
@@ -105,10 +148,12 @@ TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT = dedent(
     You merge multiple taxonomy batches into a single cohesive hierarchy.
 
     # Objective
-    Combine the provided taxonomy JSON payloads into one taxonomy that captures all relevant topics without duplication.
+    Combine the provided taxonomy JSON payloads into one taxonomy that
+    captures all relevant topics without duplication.
 
     # Guidelines
-    - Preserve meaningful distinctions between categories; merge overlapping concepts instead of repeating them.
+        - Preserve meaningful distinctions between categories; merge overlapping
+            concepts instead of repeating them.
     - Ensure the hierarchy remains balanced and avoids redundant nesting.
     - Keep descriptions concise and grounded in the source category descriptions.
 
@@ -119,10 +164,29 @@ TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT = dedent(
 )
 
 
-DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
-DEFAULT_BASE_URL = "http://localhost:8000/v1"
-DEFAULT_BATCH_SIZE = 20
-DEFAULT_DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "2025.jsonl"
+TAXONOMY_EVALUATION_SYSTEM_PROMPT = dedent(
+        f"""
+        You are a rigorous evaluator of technology taxonomies derived from research works.
+
+        # Task
+        Review the provided taxonomy JSON and score it using the following criteria:
+            1. Coverage: Does it capture the breadth of concepts present in the source works?
+            2. Structure: Is the hierarchy balanced with meaningful parent/child relationships?
+            3. Description Quality: Do category descriptions clearly communicate the scope?
+
+        # Expectations
+        - Reference specific hierarchy patterns when praising or critiquing the taxonomy.
+        - Flag redundant, overlapping, or missing categories.
+        - Keep suggestions actionable so the author can iterate quickly.
+
+        # Output Format
+        Respond using this JSON schema:
+        {TaxonomyEvaluation.model_json_schema()}
+        """
+)
+
+
+
 
 
 class TaxonomyPipeline:
@@ -130,13 +194,18 @@ class TaxonomyPipeline:
 
     def __init__(
         self,
-        llm: ChatOpenAI | None = None,
-        batch_size: int = DEFAULT_BATCH_SIZE,
+        llm: ChatOpenAI,
+        batch_size: int,
+        store: InMemoryStore,
     ) -> None:
-        self.llm = llm or ChatOpenAI(model=DEFAULT_MODEL, base_url=DEFAULT_BASE_URL)
+        self.llm = llm
         self.batch_size = batch_size
+        self.store = store
+
         self.taxonomy_agent = self._create_taxonomy_agent()
         self.merge_agent = self._create_merge_agent()
+        self.evaluation_agent = self._create_evaluation_agent()
+        self.last_evaluation = None
         self.graph = self._build_graph()
 
     def _create_taxonomy_agent(self):
@@ -153,31 +222,38 @@ class TaxonomyPipeline:
             response_format=ProviderStrategy(Taxonomy),
         )
 
+    def _create_evaluation_agent(self):
+        return create_agent(
+            model=self.llm,
+            system_prompt=TAXONOMY_EVALUATION_SYSTEM_PROMPT,
+            response_format=ProviderStrategy(TaxonomyEvaluation),
+        )
+
     def _build_graph(self):
         graph_builder = StateGraph(State)
         graph_builder.add_node("generate_taxonomy", self._generate_taxonomy)
-        graph_builder.add_node("merge_taxonomies", self._merge_taxonomies)
+        graph_builder.add_node("merge_taxonomy", self._merge_taxonomy)
+        graph_builder.add_node("evaluate_taxonomy", self._evaluate_taxonomy)
+        
         graph_builder.add_edge(START, "generate_taxonomy")
-        graph_builder.add_edge("generate_taxonomy", "merge_taxonomies")
-        graph_builder.add_edge("merge_taxonomies", END)
-        return graph_builder.compile()
+        graph_builder.add_edge("generate_taxonomy", "merge_taxonomy")
+        graph_builder.add_edge("merge_taxonomy", "evaluate_taxonomy")
+        graph_builder.add_edge("evaluate_taxonomy", END)
+        
+        return graph_builder.compile(store=self.store)
 
-    def _resolve_batch_size(self, config: RunnableConfig | None) -> int:
-        if not config:
-            return self.batch_size
-        metadata = config.get("metadata") if isinstance(config, dict) else None
-        if not metadata:
-            return self.batch_size
-        return metadata.get("batch_size", self.batch_size)
-
-    def _generate_taxonomy(self, state: State, config: RunnableConfig | None = None) -> dict:
+    def _generate_taxonomy(
+        self,
+        state: State,
+        _config: RunnableConfig | None = None,
+    ) -> dict:
         """Run the taxonomy agent across works converted into batched messages."""
 
-        batch_size = self._resolve_batch_size(config)
-        texts = [
-            f"Title: {work['title']}\nAbstract: {work['abstract']}"
-            for work in state.works
-        ]
+        batch_size = self.batch_size
+        if not state.works:
+            return {"taxonomy_list": []}
+
+        texts = [self._format_prompt_block(work) for work in state.works]
         batches = [texts[i : i + batch_size] for i in range(0, len(texts), batch_size)]
         batch_texts = ["\n\n".join(batch) for batch in batches]
         messages = [
@@ -196,11 +272,11 @@ class TaxonomyPipeline:
         ]
         return {"taxonomy_list": structured_responses}
 
-    def _merge_taxonomies(self, state: State) -> dict:
+    def _merge_taxonomy(self, state: State) -> dict:
         """Merge multiple taxonomy batches into a single taxonomy."""
 
         if not state.taxonomy_list:
-            return {"merged_taxonomy": None}
+            return {"merged_taxonomy": None, "taxonomy_list": []}
 
         serialized_batches = [
             f"Taxonomy {index}:\n{taxonomy.model_dump_json(indent=2)}"
@@ -208,63 +284,124 @@ class TaxonomyPipeline:
         ]
         prompt_value = ChatPromptValue(
             messages=[
+                SystemMessage(
+                    content=(
+                        "You are an expert editor. Merge overlapping categories and ensure a coherent hierarchy."
+                    ),
+                ),
                 HumanMessage(
-                    content="\n\n".join(serialized_batches),
+                    content=(
+                        "Merge the following taxonomy batches into a single taxonomy JSON. "
+                        "Return only valid JSON matching the schema:\n"
+                        f"{''.join(serialized_batches)}"
+                    ),
+                ),
+            ]
+        )
+        response = self.taxonomy_agent.invoke(prompt_value)
+        merged_taxonomy = response.get("structured_response")
+
+        return {
+            "merged_taxonomy": merged_taxonomy,
+            "taxonomy_list": [merged_taxonomy],
+        }
+    def _evaluate_taxonomy(self, state: State) -> dict:
+        """Score the merged taxonomy and surface actionable feedback."""
+
+        if not state.merged_taxonomy:
+            return {"evaluation_report": None}
+
+        serialized_taxonomy = state.merged_taxonomy.model_dump_json(indent=2)
+        prompt_value = ChatPromptValue(
+            messages=[
+                HumanMessage(
+                    content=(
+                        "Evaluate the following taxonomy JSON and provide a structured report:\n"
+                        f"{serialized_taxonomy}"
+                    ),
                 )
             ]
         )
-        response = self.merge_agent.batch([prompt_value])[0]
-        return {"merged_taxonomy": response.get("structured_response")}
+        
+        response = self.evaluation_agent.batch([prompt_value])[0]
+        structured = response.get("structured_response")
+
+        if structured is None:
+            return {"evaluation_report": None}
+
+        evaluation = (
+            structured
+            if isinstance(structured, TaxonomyEvaluation)
+            else TaxonomyEvaluation.model_validate(structured)
+        )
+
+        return {"evaluation_report": evaluation}
 
     def run(
         self,
         works: list[dict],
-        *,
-        batch_size: int | None = None,
     ) -> Taxonomy | None:
         """Execute the taxonomy graph and return the merged taxonomy."""
+        taxonomy, _ = self.run_with_evaluation(works)
+        return taxonomy
 
-        effective_batch_size = batch_size or self.batch_size
-        state = self.graph.invoke(
+    def run_with_evaluation(
+        self,
+        works: list[dict],
+    ) -> tuple[Taxonomy | None, TaxonomyEvaluation | None]:
+        """Execute the graph and return both taxonomy and evaluation report."""
+
+        state = self._invoke_graph(works)
+        evaluation = state.get("evaluation_report")
+        self.last_evaluation = evaluation
+        return state["merged_taxonomy"], evaluation
+
+    def _invoke_graph(
+        self,
+        works: list[dict],
+    ) -> State:
+        normalized_works = [self._normalize_document(work) for work in works]
+        if normalized_works:
+            self._persist_documents(normalized_works)
+        return self.graph.invoke(
             {
-                "works": works,
+                "works": normalized_works,
                 "taxonomy_list": [],
                 "merged_taxonomy": None,
+                "evaluation_report": None,
             },
-            config={"metadata": {"batch_size": effective_batch_size}},
         )
-        return state
+
+    def _format_prompt_block(self, document: dict) -> str:
+        title = document.get("title") or "Untitled"
+        abstract = document.get("abstract") or ""
+        return f"Title: {title}\nAbstract: {abstract}"
 
 
-def build_default_pipeline(batch_size: int = DEFAULT_BATCH_SIZE) -> TaxonomyPipeline:
-    """Convenience helper to construct a pipeline with default LLM settings."""
 
-    return TaxonomyPipeline(batch_size=batch_size)
+    def _extract_value(
+        self,
+        data: dict,
+        configured_field: str,
+        *,
+        fallbacks: tuple[str, ...],
+    ) -> str:
+        candidates = (configured_field, *fallbacks)
+        for field in candidates:
+            value = data.get(field)
+            if value:
+                return str(value)
+        return ""
 
 
-def load_works(data_path: Path = DEFAULT_DATA_PATH) -> list[dict]:
+
+def load_works(data_path) -> list[dict]:
     """Load works data from a JSONL file."""
-
     return pd.read_json(data_path, lines=True).to_dict(orient="records")
 
 
-def run_taxonomy_pipeline(
-    works: list[dict],
-    batch_size: int = DEFAULT_BATCH_SIZE,
-) -> Taxonomy | None:
-    """Execute the taxonomy workflow using default configuration."""
 
-    pipeline = build_default_pipeline(batch_size=batch_size)
-    return pipeline.run(works)
+llm = ChatOpenAI(model="gpt-5-mini")
 
-
-
-
-if __name__ == "__main__":
-    works = load_works()
-    pipeline = build_default_pipeline()
-    state = pipeline.run(works)
-    tree = taxonomy_to_tree(state['merged_taxonomy'])
-    tree.show()
 
 
