@@ -1,6 +1,6 @@
 import operator
 from textwrap import dedent
-from typing import Annotated, Union
+from typing import Annotated
 from uuid import uuid4
 import graph_tool.all as gt
 import pandas as pd
@@ -434,6 +434,95 @@ class TaxonomyPipeline:
         return self.graph.invoke(self.input_state(works=works))
 
 
+
+class TaxonomyGraph(gt.Graph):
+    """Graph-tool helper that materializes taxonomy categories as a DAG."""
+
+    def __init__(
+        self,
+        g: gt.Graph | None = None,
+        directed: bool = True,
+        prune: bool = False,
+        vorder: list[int] | None = None,
+        fast_edge_removal: bool = False,
+        fast_edge_lookup: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            g,
+            directed,
+            prune,
+            vorder,
+            fast_edge_removal,
+            fast_edge_lookup,
+            **kwargs,
+        )
+        self._init_property_maps()
+
+    def _init_property_maps(self) -> None:
+        self.vp.name = self.new_vertex_property("string")
+        self.vp.description = self.new_vertex_property("string")
+        self.vp.path = self.new_vertex_property("string")
+        self.vp.depth = self.new_vertex_property("int")
+        self.vp.kind = self.new_vertex_property("string")
+        self.ep.relation = self.new_edge_property("string")
+
+    @classmethod
+    def from_category_json(
+        cls,
+        taxonomy: TaxonomyModel | dict | list[dict],
+        root_label: str = "taxonomy",
+    ) -> "TaxonomyGraph":
+        graph = cls()
+        categories = graph._normalize_categories(taxonomy)
+        root = graph.add_vertex()
+        graph.vp.name[root] = root_label
+        graph.vp.description[root] = ""
+        graph.vp.path[root] = root_label
+        graph.vp.depth[root] = 0
+        graph.vp.kind[root] = "root"
+        for category in categories:
+            graph._add_category(category, root, (root_label,), depth=1)
+        return graph
+
+    def _normalize_categories(
+        self,
+        taxonomy: TaxonomyModel | dict | list[dict],
+    ) -> list[dict]:
+        if isinstance(taxonomy, TaxonomyModel):
+            return taxonomy.model_dump().get("category_list", [])
+        if isinstance(taxonomy, dict):
+            if "category_list" in taxonomy:
+                return taxonomy.get("category_list") or []
+            return [taxonomy]
+        if isinstance(taxonomy, list):
+            return taxonomy
+        msg = "taxonomy payload must be TaxonomyModel, dict, or list[dict]"
+        raise TypeError(msg)
+
+    def _add_category(
+        self,
+        payload: dict,
+        parent,
+        ancestors: tuple[str, ...],
+        depth: int,
+    ) -> None:
+        name = payload.get("name", "")
+        description = payload.get("description", "")
+        vertex = self.add_vertex()
+        path = " > ".join((*ancestors, name)) if name else " > ".join(ancestors)
+        self.vp.name[vertex] = name
+        self.vp.description[vertex] = description
+        self.vp.path[vertex] = path
+        self.vp.depth[vertex] = depth
+        self.vp.kind[vertex] = "category"
+        edge = self.add_edge(parent, vertex)
+        self.ep.relation[edge] = "child"
+
+        for child in payload.get("subcategories", []) or []:
+            self._add_category(child, vertex, (*ancestors, name), depth + 1)
+
+
 works = pd.read_json(
     "/Users/luhancheng/research-link-technology-landscaping/modeling/results/grants.jsonl",
     lines=True,
@@ -447,18 +536,12 @@ pipeline = TaxonomyPipeline(llm=llm, batch_size=5, abstract_key="grant_summary")
 
 state = pipeline.run(works[:10])
 
-taxonomy = state["merged_taxonomy"].model_dump()
+taxonomy = state["merged_taxonomy"]
 
-g = gt.Graph()
+g = TaxonomyGraph.from_category_json(taxonomy)
 
-def traverse(category: Union[dict, list]):
-    if isinstance(category, dict):
-        print(category["name"])
-        for subcategory in category.get("subcategories", []):
-            traverse(subcategory)
-    else:
-        for cat in category:
-            traverse(cat)
+gt.graph_draw(g)
 
-traverse(taxonomy["category_list"])
+state = gt.minimize_blockmodel_dl(g)
 
+# gt.graph_draw(taxonomy_graph)
