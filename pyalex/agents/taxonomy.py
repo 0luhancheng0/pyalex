@@ -1,9 +1,19 @@
 import operator
+import pickle
+import re
+from collections import deque
+from collections.abc import Callable
+from functools import partial
+from pathlib import Path
 from textwrap import dedent
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import uuid4
-import graph_tool.all as gt
+
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ProviderStrategy
 from langchain_core.messages import HumanMessage
@@ -16,16 +26,16 @@ from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
-    
+
+from treelib import Node, Tree
+
 
 class CategoryModel(BaseModel):
     name: str = Field(..., description="The name of the category.")
     description: str = Field(..., description="A brief description of the category.")
     subcategories: list["CategoryModel"] = Field(
         default_factory=list,
-        description=(
-            "A list of subcategories. Empty if the current category is a leaf node."
-        ),
+        description="A list of subcategories. Empty if the current category is a leaf node."
     )
 
 
@@ -98,7 +108,7 @@ class WorkClassification(BaseModel):
     )
     categories: list[str] = Field(
         default_factory=list,
-        description="List of taxonomy category paths assigned to the work.",
+        description="List of taxonomy category names assigned to the work.",
     )
     rationale: str = Field(
         ...,
@@ -133,6 +143,10 @@ class State(BaseModel):
     work_classifications: list[WorkClassification] = Field(
         default_factory=list,
         description="Multi-label assignments of taxonomy categories to works.",
+    )
+    final_taxonomy: nx.DiGraph | None = Field(
+        default=None,
+        description="Graph representation of the merged taxonomy enriched with works.",
     )
 
 
@@ -187,7 +201,7 @@ CLASSIFICATION_AGENT_SYSTEM_PROMPT = dedent(
     f"""
     You map research works to one or more categories from a provided taxonomy.
 
-    - Use only the category names (or full breadcrumb paths) that appear in the taxonomy inventory.
+    - Use only the last level category name (aka. the immediate parent) that appear in the taxonomy inventory.
     - If a work does not fit any category, return an empty list for categories.
     - Keep rationales concise and reference evidence from the work text.
 
@@ -383,6 +397,146 @@ class ClassifyWorks:
             response_format=ProviderStrategy(WorkClassification),
         )
 
+
+class PruneEmptyCategories:
+    """Remove taxonomy categories that have no classified works."""
+
+    def __call__(self, state: State) -> dict[str, TaxonomyModel | None]:
+        """Prune the merged taxonomy using work classifications."""
+
+        taxonomy = state.merged_taxonomy
+        if not taxonomy or not state.work_classifications:
+            return {"merged_taxonomy": taxonomy}
+
+        used_categories = {
+            category
+            for classification in state.work_classifications
+            for category in classification.categories
+        }
+
+        if not used_categories:
+            return {"merged_taxonomy": taxonomy}
+
+        pruned_roots: list[CategoryModel] = []
+        for root in taxonomy.category_list:
+            pruned = self._prune_category(root, used_categories)
+            if pruned is not None:
+                pruned_roots.append(pruned)
+
+        pruned_taxonomy = taxonomy.model_copy(update={"category_list": pruned_roots})
+        return {"merged_taxonomy": pruned_taxonomy}
+
+    def _prune_category(
+        self, category: CategoryModel, used_categories: set[str]
+    ) -> CategoryModel | None:
+        """Recursively drop subtrees that never receive work labels."""
+
+        pruned_children: list[CategoryModel] = []
+        for child in category.subcategories:
+            pruned_child = self._prune_category(child, used_categories)
+            if pruned_child is not None:
+                pruned_children.append(pruned_child)
+
+        should_keep = (category.name in used_categories) or bool(pruned_children)
+        if not should_keep:
+            return None
+
+        return category.model_copy(update={"subcategories": pruned_children})
+
+
+class BuildGraph:
+    """Construct a NetworkX representation of the taxonomy with work links."""
+
+    def __call__(self, state: State) -> dict[str, nx.DiGraph | None]:
+        """Create the final taxonomy graph for the current state.
+
+        Args:
+            state: Pipeline state containing the merged taxonomy and work labels.
+
+        Returns:
+            Mapping that updates the state's ``final_taxonomy`` field.
+        """
+
+        if not state.merged_taxonomy:
+            return {"final_taxonomy": None}
+
+        taxonomy_graph, category_lookup = self._taxonomy_to_graph(
+            state.merged_taxonomy
+        )
+        self._attach_work_nodes(
+            taxonomy_graph=taxonomy_graph,
+            category_lookup=category_lookup,
+            classifications=state.work_classifications,
+        )
+        return {"final_taxonomy": taxonomy_graph}
+
+    def _taxonomy_to_graph(
+        self, taxonomy: TaxonomyModel
+    ) -> tuple[nx.DiGraph, dict[str, str]]:
+        """Convert the taxonomy hierarchy into a directed graph.
+
+        Args:
+            taxonomy: Structured taxonomy produced by the LLM.
+
+        Returns:
+            The graph instance and a lookup table for category nodes.
+        """
+
+        graph = nx.DiGraph()
+        category_lookup: dict[str, str] = {}
+
+        def add_category(category: CategoryModel, parent_node: str | None = None) -> None:
+            node_id = category.name
+            graph.add_node(
+                node_id,
+                name=category.name,
+                description=category.description,
+                node_type="category",
+                work_id="",
+            )
+            category_lookup[category.name] = node_id
+            if parent_node is not None:
+                graph.add_edge(parent_node, node_id)
+            for child in category.subcategories:
+                add_category(child, node_id)
+
+        for top_level in taxonomy.category_list:
+            add_category(top_level, None)
+
+        return graph, category_lookup
+
+    def _attach_work_nodes(
+        self,
+        taxonomy_graph: nx.DiGraph,
+        category_lookup: dict[str, str],
+        classifications: list[WorkClassification],
+    ) -> None:
+        """Attach work nodes and link them to the classified categories.
+
+        Args:
+            taxonomy_graph: Graph populated with taxonomy categories.
+            category_lookup: Mapping from category name to node identifier.
+            classifications: Work labels produced by the classifier.
+        """
+
+        for idx, classification in enumerate(classifications):
+            work_node_id = f"work::{classification.work_id}:{idx}"
+            taxonomy_graph.add_node(
+                work_node_id,
+                name=classification.title or classification.work_id,
+                description=classification.rationale,
+                node_type="work",
+                work_id=classification.work_id,
+            )
+
+            for category_name in classification.categories:
+                category_node = category_lookup.get(category_name)
+                if category_node is None:
+                    continue
+                taxonomy_graph.add_edge(work_node_id, category_node)
+
+
+
 class TaxonomyPipeline:
     """High-level orchestration for generating and merging taxonomies."""
 
@@ -397,6 +551,8 @@ class TaxonomyPipeline:
         self.merge_taxonomy = MergeTaxonomy(self.llm)
         self.evaluate_taxonomy = EvaluateTaxonomy(self.llm)
         self.classify_works = ClassifyWorks(self.llm, abstract_key=self.abstract_key)
+        self.prune_taxonomy = PruneEmptyCategories()
+        self.build_graph = BuildGraph()
         self.last_evaluation = None
         self.graph = self._build_graph()
 
@@ -407,13 +563,17 @@ class TaxonomyPipeline:
         graph_builder.add_node("merge_taxonomy", self.merge_taxonomy)
         graph_builder.add_node("evaluate_taxonomy", self.evaluate_taxonomy)
         graph_builder.add_node("classify_works", self.classify_works)
+        graph_builder.add_node("prune_taxonomy", self.prune_taxonomy)
+        graph_builder.add_node("build_graph", self.build_graph)
 
         graph_builder.add_edge(START, "create_messages")
         graph_builder.add_edge("create_messages", "generate_taxonomy")
         graph_builder.add_edge("generate_taxonomy", "merge_taxonomy")
         graph_builder.add_edge("merge_taxonomy", "evaluate_taxonomy")
         graph_builder.add_edge("evaluate_taxonomy", "classify_works")
-        graph_builder.add_edge("classify_works", END)
+        graph_builder.add_edge("classify_works", "prune_taxonomy")
+        graph_builder.add_edge("prune_taxonomy", "build_graph")
+        graph_builder.add_edge("build_graph", END)
 
         return graph_builder.compile()
 
@@ -425,102 +585,16 @@ class TaxonomyPipeline:
             merged_taxonomy=None,
             evaluation_report=None,
             work_classifications=[],
+            final_taxonomy=None,
             taxonomy_graph=None,
         )
     def run(
         self,
         works: list[dict],
     ) -> State:
-        return self.graph.invoke(self.input_state(works=works))
+        return State(**self.graph.invoke(self.input_state(works=works)))
 
 
-
-class TaxonomyGraph(gt.Graph):
-    """Graph-tool helper that materializes taxonomy categories as a DAG."""
-
-    def __init__(
-        self,
-        g: gt.Graph | None = None,
-        directed: bool = True,
-        prune: bool = False,
-        vorder: list[int] | None = None,
-        fast_edge_removal: bool = False,
-        fast_edge_lookup: bool = False,
-        **kwargs,
-    ) -> None:
-        super().__init__(
-            g,
-            directed,
-            prune,
-            vorder,
-            fast_edge_removal,
-            fast_edge_lookup,
-            **kwargs,
-        )
-        self._init_property_maps()
-
-    def _init_property_maps(self) -> None:
-        self.vp.name = self.new_vertex_property("string")
-        self.vp.description = self.new_vertex_property("string")
-        self.vp.path = self.new_vertex_property("string")
-        self.vp.depth = self.new_vertex_property("int")
-        self.vp.kind = self.new_vertex_property("string")
-        self.ep.relation = self.new_edge_property("string")
-
-    @classmethod
-    def from_category_json(
-        cls,
-        taxonomy: TaxonomyModel | dict | list[dict],
-        root_label: str = "taxonomy",
-    ) -> "TaxonomyGraph":
-        graph = cls()
-        categories = graph._normalize_categories(taxonomy)
-        root = graph.add_vertex()
-        graph.vp.name[root] = root_label
-        graph.vp.description[root] = ""
-        graph.vp.path[root] = root_label
-        graph.vp.depth[root] = 0
-        graph.vp.kind[root] = "root"
-        for category in categories:
-            graph._add_category(category, root, (root_label,), depth=1)
-        return graph
-
-    def _normalize_categories(
-        self,
-        taxonomy: TaxonomyModel | dict | list[dict],
-    ) -> list[dict]:
-        if isinstance(taxonomy, TaxonomyModel):
-            return taxonomy.model_dump().get("category_list", [])
-        if isinstance(taxonomy, dict):
-            if "category_list" in taxonomy:
-                return taxonomy.get("category_list") or []
-            return [taxonomy]
-        if isinstance(taxonomy, list):
-            return taxonomy
-        msg = "taxonomy payload must be TaxonomyModel, dict, or list[dict]"
-        raise TypeError(msg)
-
-    def _add_category(
-        self,
-        payload: dict,
-        parent,
-        ancestors: tuple[str, ...],
-        depth: int,
-    ) -> None:
-        name = payload.get("name", "")
-        description = payload.get("description", "")
-        vertex = self.add_vertex()
-        path = " > ".join((*ancestors, name)) if name else " > ".join(ancestors)
-        self.vp.name[vertex] = name
-        self.vp.description[vertex] = description
-        self.vp.path[vertex] = path
-        self.vp.depth[vertex] = depth
-        self.vp.kind[vertex] = "category"
-        edge = self.add_edge(parent, vertex)
-        self.ep.relation[edge] = "child"
-
-        for child in payload.get("subcategories", []) or []:
-            self._add_category(child, vertex, (*ancestors, name), depth + 1)
 
 
 works = pd.read_json(
@@ -528,20 +602,20 @@ works = pd.read_json(
     lines=True,
 ).to_dict(orient="records")
 
-# llm = ChatOpenAI(model="Qwen/Qwen3-4B-Instruct-2507", base_url="http://localhost:8000/v1")
-llm = ChatOpenAI(model="gpt-5-mini")
+pipeline = TaxonomyPipeline(
+    llm=ChatOpenAI(model="gpt-5-mini"),
+    batch_size=5,
+    abstract_key="grant_summary",
+)
 
-pipeline = TaxonomyPipeline(llm=llm, batch_size=5, abstract_key="grant_summary")
+if Path("results.pkl").exists():
+    with open("results.pkl", "rb") as f:
+        state = pickle.load(f)
+else:
+    state = pipeline.run(works=works[:10])
+    with open("results.pkl", "wb") as f:
+        pickle.dump(state, f)
 
+from draw_taxonomy import draw_taxonomy
 
-state = pipeline.run(works[:10])
-
-taxonomy = state["merged_taxonomy"]
-
-g = TaxonomyGraph.from_category_json(taxonomy)
-
-gt.graph_draw(g)
-
-state = gt.minimize_blockmodel_dl(g)
-
-# gt.graph_draw(taxonomy_graph)
+draw_taxonomy(state.final_taxonomy)

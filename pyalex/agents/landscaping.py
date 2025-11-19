@@ -255,7 +255,8 @@ class LandscapingWorkflow:
         return State(id=identifier_str, title=title, abstract=abstract)
 
 
-df = pd.read_json("/Users/luhancheng/pyalex/data/2024.jsonl", lines=True)
-workflow = LandscapingWorkflow()
-response = workflow.run_dataframe(df, limit=3)
-aspects_df = workflow.aspects_dataframe(response)
+if __name__ == "__main__":
+    df = pd.read_json("/Users/luhancheng/pyalex/data/2024.jsonl", lines=True)
+    workflow = LandscapingWorkflow()
+    response = workflow.run_dataframe(df, limit=3)
+    aspects_df = workflow.aspects_dataframe(response)
