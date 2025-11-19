@@ -1,11 +1,8 @@
-from __future__ import annotations
-from typing import Annotated
-from collections.abc import Callable
-from itertools import count
-from pathlib import Path
-from textwrap import dedent
-from uuid import uuid4
 import operator
+from textwrap import dedent
+from typing import Annotated, Union
+from uuid import uuid4
+import graph_tool.all as gt
 import pandas as pd
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ProviderStrategy
@@ -17,14 +14,14 @@ from langgraph.graph import END
 from langgraph.graph import START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
+from pydantic import ConfigDict
 from pydantic import Field
-from treelib import Tree
+    
 
-
-class Category(BaseModel):
+class CategoryModel(BaseModel):
     name: str = Field(..., description="The name of the category.")
     description: str = Field(..., description="A brief description of the category.")
-    subcategories: list[Category] = Field(
+    subcategories: list["CategoryModel"] = Field(
         default_factory=list,
         description=(
             "A list of subcategories. Empty if the current category is a leaf node."
@@ -32,42 +29,30 @@ class Category(BaseModel):
     )
 
 
-class Taxonomy(BaseModel):
-    category_list: list[Category] = Field(
+class TaxonomyModel(BaseModel):
+    category_list: list[CategoryModel] = Field(
         ...,
         description="A list of taxonomy items in nested bullet point format.",
     )
-    
-    def as_tree(self) -> Tree:
-        tree = Tree()
-        tree.create_node(tag="Taxonomy", identifier="taxonomy", data=None)
 
-        id_counter = count()
 
-        def _add_category(category: Category, parent_id: str) -> None:
-            node_id = f"node-{next(id_counter)}"
-            tree.create_node(
-                tag=category.name,
-                identifier=node_id,
-                parent=parent_id,
-                data={
-                    "name": category.name,
-                    "description": category.description,
-                    "subcategories": category.subcategories,
-                },
+    def flatten(self) -> list[str]:
+        paths: list[str] = []
+
+        def _visit(category: CategoryModel, ancestors: tuple[str, ...]) -> None:
+            path = (
+                " > ".join((*ancestors, category.name)) if ancestors else category.name
             )
+            paths.append(path)
             for child in category.subcategories:
-                _add_category(child, node_id)
+                _visit(child, (*ancestors, category.name))
 
         for top_level in self.category_list:
-            _add_category(top_level, "taxonomy")
+            _visit(top_level, ())
+        return paths
 
-        return tree
 
-    def as_json(self):
-        return self.as_tree().to_json(with_data=True)
-
-class TaxonomyEvaluation(BaseModel):
+class TaxonomyEvaluationModel(BaseModel):
     coverage_score: int = Field(
         ...,
         ge=1,
@@ -121,7 +106,11 @@ class WorkClassification(BaseModel):
     )
 
 
+
+
 class State(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     works: list[dict] = Field(
         ..., description="A list of works with title and abstract."
     )
@@ -129,15 +118,15 @@ class State(BaseModel):
         default_factory=list,
         description="Batched prompt payloads fed into the taxonomy generator.",
     )
-    taxonomy_list: Annotated[list[Taxonomy], operator.add] = Field(
+    taxonomy_list: Annotated[list[TaxonomyModel], operator.add] = Field(
         default_factory=list,
         description="The generated taxonomy from the works.",
     )
-    merged_taxonomy: Taxonomy | None = Field(
+    merged_taxonomy: TaxonomyModel | None = Field(
         default=None,
         description="A single taxonomy merged from the generated batches.",
     )
-    evaluation_report: TaxonomyEvaluation | None = Field(
+    evaluation_report: TaxonomyEvaluationModel | None = Field(
         default=None,
         description="Evaluation metadata for the merged taxonomy.",
     )
@@ -146,53 +135,9 @@ class State(BaseModel):
         description="Multi-label assignments of taxonomy categories to works.",
     )
 
-def taxonomy_to_tree(taxonomy: Taxonomy) -> Tree:
-    tree = Tree()
-    tree.create_node(tag="Taxonomy", identifier="taxonomy", data=None)
-
-    id_counter = count()
-
-    def _add_category(category: Category, parent_id: str) -> None:
-        node_id = f"node-{next(id_counter)}"
-        tree.create_node(
-            tag=category.name,
-            identifier=node_id,
-            parent=parent_id,
-            data={
-                "name": category.name,
-                "description": category.description,
-                "subcategories": category.subcategories,
-            },
-        )
-        for child in category.subcategories:
-            _add_category(child, node_id)
-
-    for top_level in taxonomy.category_list:
-        _add_category(top_level, "taxonomy")
-
-    return tree
 
 
 
-TAXONOMY_AGENT_SYSTEM_PROMPT = dedent(
-    f"""
-    You are an expert engineer collaborating on a technology landscaping workflow.
-
-    # Objective
-    Your task is to create a taxonomy from research documents that consist
-    of title and abstracts.
-
-    # Constraints
-    - Your taxonomy should be hierarchical and cover the major topics found in the documents.
-    - Skip any topic that does not appear in the source documents.
-    - Give each category a name and a brief description.
-    - Do NOT include the input documents as taxonomy entries.
-    
-    # Output Format
-    Here is the model JSON schema describing the output format you should follow:
-    {Taxonomy.model_json_schema()}
-    """
-)
 
 
 TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT = dedent(
@@ -211,13 +156,13 @@ TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT = dedent(
 
     # Output Format
     Return a single taxonomy following this JSON schema:
-    {Taxonomy.model_json_schema()}
+    {TaxonomyModel.model_json_schema()}
     """
 )
 
 
 TAXONOMY_EVALUATION_SYSTEM_PROMPT = dedent(
-        f"""
+    f"""
         You are a rigorous evaluator of technology taxonomies derived from research works.
 
         # Task
@@ -233,7 +178,7 @@ TAXONOMY_EVALUATION_SYSTEM_PROMPT = dedent(
 
         # Output Format
         Respond using this JSON schema:
-        {TaxonomyEvaluation.model_json_schema()}
+        {TaxonomyEvaluationModel.model_json_schema()}
         """
 )
 
@@ -254,75 +199,55 @@ CLASSIFICATION_AGENT_SYSTEM_PROMPT = dedent(
 
 
 
+class GenerateTaxonomy:
+    TAXONOMY_AGENT_SYSTEM_PROMPT = dedent(
+        f"""
+        You are an expert engineer collaborating on a technology landscaping workflow.
 
-class TaxonomyPipeline:
-    """High-level orchestration for generating and merging taxonomies."""
+        # Objective
+        Your task is to create a taxonomy from research documents that consist
+        of title and abstracts.
 
-    def __init__(
-        self,
-        llm: ChatOpenAI,
-        batch_size: int,
-        abstract_key: str
-    ) -> None:
+        # Constraints
+        - Your taxonomy should be hierarchical and cover the major topics found in the documents.
+        - Skip any topic that does not appear in the source documents.
+        - Give each category a name and a brief description.
+        - Do NOT include the input documents as taxonomy entries.
+        
+        # Output Format
+        Here is the model JSON schema describing the output format you should follow:
+        {TaxonomyModel.model_json_schema()}
+        """
+    )
+    def __init__(self, llm: ChatOpenAI) -> None:
         self.llm = llm
-        self.batch_size = batch_size
-
         self.taxonomy_agent = self._create_taxonomy_agent()
-        self.merge_agent = self._create_merge_agent()
-        self.evaluation_agent = self._create_evaluation_agent()
-        self.classification_agent = self._create_classification_agent()
-        self.last_evaluation = None
-        self.abstract_key = abstract_key
-        self.graph = self._build_graph()
-
+        
     def _create_taxonomy_agent(self):
         return create_agent(
             model=self.llm,
-            system_prompt=TAXONOMY_AGENT_SYSTEM_PROMPT,
-            response_format=ProviderStrategy(Taxonomy),
+            system_prompt=GenerateTaxonomy.TAXONOMY_AGENT_SYSTEM_PROMPT,
+            response_format=ProviderStrategy(TaxonomyModel),
         )
+    def __call__(self, state: State):
+        taxonomy_list = self.taxonomy_agent.batch(state.messages)
+        structured_responses = [
+            response["structured_response"] for response in taxonomy_list
+        ]
+        return {"taxonomy_list": structured_responses}
 
-    def _create_merge_agent(self):
-        return create_agent(
-            model=self.llm,
-            system_prompt=TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT,
-            response_format=ProviderStrategy(Taxonomy),
-        )
 
-    def _create_evaluation_agent(self):
-        return create_agent(
-            model=self.llm,
-            system_prompt=TAXONOMY_EVALUATION_SYSTEM_PROMPT,
-            response_format=ProviderStrategy(TaxonomyEvaluation),
-        )
+class CreateMessages:
+    def __init__(self, batch_size: int, abstract_key: str) -> None:
+        self.batch_size = batch_size
+        self.abstract_key = abstract_key
 
-    def _create_classification_agent(self):
-        return create_agent(
-            model=self.llm,
-            system_prompt=CLASSIFICATION_AGENT_SYSTEM_PROMPT,
-            response_format=ProviderStrategy(WorkClassification),
-        )
-
-    def _build_graph(self):
-        graph_builder = StateGraph(State)
-        graph_builder.add_node("create_messages", self._create_messages)
-        graph_builder.add_node("generate_taxonomy", self._generate_taxonomy)
-        graph_builder.add_node("merge_taxonomy", self._merge_taxonomy)
-        graph_builder.add_node("evaluate_taxonomy", self._evaluate_taxonomy)
-        graph_builder.add_node("classify_works", self._classify_works)
-        
-        graph_builder.add_edge(START, "create_messages")
-        graph_builder.add_edge("create_messages", "generate_taxonomy")
-        graph_builder.add_edge("generate_taxonomy", "merge_taxonomy")
-        graph_builder.add_edge("merge_taxonomy", "evaluate_taxonomy")
-        graph_builder.add_edge("evaluate_taxonomy", "classify_works")
-        graph_builder.add_edge("classify_works", END)
-        
-        return graph_builder.compile()
-
-    def _create_messages(self, state: State) -> list[ChatPromptValue]:
+    def __call__(self, state: State) -> dict:
         texts = [self._format_prompt_block(work) for work in state.works]
-        batches = [texts[i : i + self.batch_size] for i in range(0, len(texts), self.batch_size)]
+        batches = [
+            texts[i : i + self.batch_size]
+            for i in range(0, len(texts), self.batch_size)
+        ]
         batch_texts = ["\n\n".join(batch) for batch in batches]
         messages = [
             ChatPromptValue(messages=[HumanMessage(content=batch_text)])
@@ -330,25 +255,24 @@ class TaxonomyPipeline:
         ]
         return {"messages": messages}
 
-    def _generate_taxonomy(
-        self,
-        state: State,
-    ) -> dict:
-        """Run the taxonomy agent across works converted into batched messages."""
+    def _format_prompt_block(self, document: dict) -> str:
+        title = document.get("title") or ""
+        abstract = document.get(self.abstract_key) or ""
+        return f"Title: {title}\nAbstract: {abstract}"
 
-        taxonomy_list = self.taxonomy_agent.batch(state.messages)
-        structured_responses = [
-            response.get("structured_response")
-            for response in taxonomy_list
-            if response.get("structured_response")
-        ]
-        return {"taxonomy_list": structured_responses}
 
-    def _merge_taxonomy(self, state: State) -> dict:
-        """Merge multiple taxonomy batches into a single taxonomy."""
+class MergeTaxonomy:
+    def __init__(self, llm: ChatOpenAI) -> None:
+        self.llm = llm
+        self.agent = self._create_merge_agent()
 
+    def __call__(self, state: State) -> dict:
         if not state.taxonomy_list:
-            return {"merged_taxonomy": None, "taxonomy_list": []}
+            return {
+                "merged_taxonomy": None,
+                "taxonomy_list": [],
+                "taxonomy_graph": None,
+            }
 
         serialized_batches = [
             f"Taxonomy {index}:\n{taxonomy.model_dump_json(indent=2)}"
@@ -370,15 +294,24 @@ class TaxonomyPipeline:
                 ),
             ]
         )
-        response = self.taxonomy_agent.invoke(prompt_value)
+        response = self.agent.invoke(prompt_value)
         merged_taxonomy = response.get("structured_response")
+        return {"merged_taxonomy": merged_taxonomy}
 
-        return {
-            "merged_taxonomy": merged_taxonomy,
-        }
-    def _evaluate_taxonomy(self, state: State) -> dict:
-        """Score the merged taxonomy and surface actionable feedback."""
+    def _create_merge_agent(self):
+        return create_agent(
+            model=self.llm,
+            system_prompt=TAXONOMY_MERGE_AGENT_SYSTEM_PROMPT,
+            response_format=ProviderStrategy(TaxonomyModel),
+        )
 
+
+class EvaluateTaxonomy:
+    def __init__(self, llm: ChatOpenAI) -> None:
+        self.llm = llm
+        self.agent = self._create_evaluation_agent()
+
+    def __call__(self, state: State) -> dict:
         if not state.merged_taxonomy:
             return {"evaluation_report": None}
 
@@ -393,140 +326,139 @@ class TaxonomyPipeline:
                 )
             ]
         )
-        
-        response = self.evaluation_agent.batch([prompt_value])[0]
-        structured = response.get("structured_response")
-
-        if structured is None:
-            return {"evaluation_report": None}
-
-        evaluation = (
-            structured
-            if isinstance(structured, TaxonomyEvaluation)
-            else TaxonomyEvaluation.model_validate(structured)
-        )
-
+        response = self.agent.batch([prompt_value])[0]
+        evaluation = response.get("structured_response")
         return {"evaluation_report": evaluation}
 
-    def _classify_works(self, state: State) -> dict:
-        if not state.merged_taxonomy or not state.works:
+    def _create_evaluation_agent(self):
+        return create_agent(
+            model=self.llm,
+            system_prompt=TAXONOMY_EVALUATION_SYSTEM_PROMPT,
+            response_format=ProviderStrategy(TaxonomyEvaluationModel),
+        )
+
+
+class ClassifyWorks:
+    def __init__(self, llm: ChatOpenAI, abstract_key: str) -> None:
+        self.llm = llm
+        self.agent = self._create_classification_agent()
+        self.abstract_key = abstract_key
+    def __call__(self, state: State) -> dict:
+        
+        if not state.merged_taxonomy:
             return {"work_classifications": []}
 
-        taxonomy = state.merged_taxonomy
-        inventory = self._flatten_category_paths(taxonomy)
-        inventory_block = "\n".join(f"- {label}" for label in inventory)
-        taxonomy_json = taxonomy.model_dump_json(indent=2)
-
-        messages: list[ChatPromptValue] = []
-        metadata: list[tuple[str, str]] = []
-
+        serialized_taxonomy = state.merged_taxonomy.model_dump_json(indent=2)
+        classifications = []
+        prompts: list[ChatPromptValue] = []
         for work in state.works:
-            work_id = self._resolve_work_id(work)
-            title = (work.get("title") or "Untitled").strip()
-            abstract = (work.get(self.abstract_key) or "").strip()
-            metadata.append((work_id, title))
-            content = dedent(
-                f"""
-                Use the taxonomy below to assign zero or more categories to the work. Only pick from the
-                provided inventory. If nothing fits, return an empty list.
-
-                Taxonomy JSON:
-                {taxonomy_json}
-
-                Category inventory:
-                {inventory_block}
-
-                Work ID: {work_id}
-                Title: {title}
-                Abstract: {abstract}
-                """
-            ).strip()
-            messages.append(
-                ChatPromptValue(
-                    messages=[
-                        HumanMessage(content=content),
-                    ]
-                )
+            title = work.get("title") or ""
+            abstract = work.get(self.abstract_key) or ""
+            work_id = work.get("id")
+            prompt_value = ChatPromptValue(
+                messages=[
+                    SystemMessage(
+                        content=(
+                            f"Here is the taxonomy to classify against:\n{serialized_taxonomy}"
+                        ),
+                    ),
+                    HumanMessage(
+                        content=(
+                            f"Classify the following work into the taxonomy categories.\n"
+                            f"ID: {work_id}\nTitle: {title}\nAbstract: {abstract}"
+                        ),
+                    ),
+                ]
             )
-
-        responses = self.classification_agent.batch(messages)
-        inventory_set = {label for label in inventory}
-        inventory_leafs = {label.split(" > ")[-1] for label in inventory}
-        classifications: list[WorkClassification] = []
-
-        for (work_id, title), response in zip(metadata, responses, strict=True):
-            classification = response.get("structured_response")
-
-            filtered_categories = []
-            for category in classification.categories:
-                normalized = category.strip()
-                if not normalized:
-                    continue
-                if normalized in inventory_set or normalized.split(" > ")[-1] in inventory_leafs:
-                    filtered_categories.append(normalized)
-            classifications.append(
-                WorkClassification(
-                    work_id=work_id,
-                    title=title,
-                    categories=filtered_categories,
-                    rationale=classification.rationale,
-                )
-            )
-
+            prompts.append(prompt_value)
+            
+        response = self.agent.batch(prompts)
+        classifications = [i.get("structured_response") for i in response]
         return {"work_classifications": classifications}
+    
+    def _create_classification_agent(self):
+        return create_agent(
+            model=self.llm,
+            system_prompt=CLASSIFICATION_AGENT_SYSTEM_PROMPT,
+            response_format=ProviderStrategy(WorkClassification),
+        )
 
+class TaxonomyPipeline:
+    """High-level orchestration for generating and merging taxonomies."""
 
+    def __init__(self, llm: ChatOpenAI, batch_size: int, abstract_key: str) -> None:
+        self.llm = llm
+        self.batch_size = batch_size
+        self.abstract_key = abstract_key
+        self.generate_taxonomy = GenerateTaxonomy(llm=self.llm)
+        self.create_messages = CreateMessages(
+            batch_size=self.batch_size, abstract_key=self.abstract_key
+        )
+        self.merge_taxonomy = MergeTaxonomy(self.llm)
+        self.evaluate_taxonomy = EvaluateTaxonomy(self.llm)
+        self.classify_works = ClassifyWorks(self.llm, abstract_key=self.abstract_key)
+        self.last_evaluation = None
+        self.graph = self._build_graph()
+
+    def _build_graph(self):
+        graph_builder = StateGraph(State)
+        graph_builder.add_node("create_messages", self.create_messages)
+        graph_builder.add_node("generate_taxonomy", self.generate_taxonomy)
+        graph_builder.add_node("merge_taxonomy", self.merge_taxonomy)
+        graph_builder.add_node("evaluate_taxonomy", self.evaluate_taxonomy)
+        graph_builder.add_node("classify_works", self.classify_works)
+
+        graph_builder.add_edge(START, "create_messages")
+        graph_builder.add_edge("create_messages", "generate_taxonomy")
+        graph_builder.add_edge("generate_taxonomy", "merge_taxonomy")
+        graph_builder.add_edge("merge_taxonomy", "evaluate_taxonomy")
+        graph_builder.add_edge("evaluate_taxonomy", "classify_works")
+        graph_builder.add_edge("classify_works", END)
+
+        return graph_builder.compile()
+
+    def input_state(self, works):
+        return State(
+            works=works,
+            messages=[],
+            taxonomy_list=[],
+            merged_taxonomy=None,
+            evaluation_report=None,
+            work_classifications=[],
+            taxonomy_graph=None,
+        )
     def run(
         self,
         works: list[dict],
     ) -> State:
-        return self.graph.invoke(
-            {
-                "works": works,
-                "messages": [],
-                "taxonomy_list": [],
-                "merged_taxonomy": None,
-                "evaluation_report": None,
-                "work_classifications": [],
-            },
-        )
-
-    def _format_prompt_block(self, document: dict) -> str:
-        title = document.get("title") or ""
-        abstract = document.get(self.abstract_key) or ""
-        return f"Title: {title}\nAbstract: {abstract}"
-
-    def _flatten_category_paths(self, taxonomy: Taxonomy) -> list[str]:
-        paths: list[str] = []
-
-        def _visit(category: Category, ancestors: tuple[str, ...]) -> None:
-            path = " > ".join((*ancestors, category.name)) if ancestors else category.name
-            paths.append(path)
-            for child in category.subcategories:
-                _visit(child, (*ancestors, category.name))
-
-        for top_level in taxonomy.category_list:
-            _visit(top_level, ())
-        return paths
-
-    def _resolve_work_id(self, work: dict) -> str:
-        for candidate in ("id", "work_id", "grant_id"):
-            value = work.get(candidate)
-            if value:
-                return str(value)
-        return uuid4().hex
+        return self.graph.invoke(self.input_state(works=works))
 
 
+works = pd.read_json(
+    "/Users/luhancheng/research-link-technology-landscaping/modeling/results/grants.jsonl",
+    lines=True,
+).to_dict(orient="records")
 
-works = pd.read_json("/Users/luhancheng/research-link-technology-landscaping/modeling/results/grants.jsonl", lines=True).to_dict(orient="records")
-
-
-llm = ChatOpenAI(model="Qwen/Qwen3-4B-Instruct-2507", base_url="http://localhost:8000/v1")
+# llm = ChatOpenAI(model="Qwen/Qwen3-4B-Instruct-2507", base_url="http://localhost:8000/v1")
+llm = ChatOpenAI(model="gpt-5-mini")
 
 pipeline = TaxonomyPipeline(llm=llm, batch_size=5, abstract_key="grant_summary")
 
+
 state = pipeline.run(works[:10])
 
+taxonomy = state["merged_taxonomy"].model_dump()
 
-state["work_classifications"]
+g = gt.Graph()
+
+def traverse(category: Union[dict, list]):
+    if isinstance(category, dict):
+        print(category["name"])
+        for subcategory in category.get("subcategories", []):
+            traverse(subcategory)
+    else:
+        for cat in category:
+            traverse(cat)
+
+traverse(taxonomy["category_list"])
 
