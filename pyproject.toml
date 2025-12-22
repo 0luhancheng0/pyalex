@@ -1,0 +1,30 @@
+[project]
+name = "pyalex"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx[http2]>=0.28.1",
+    "ipython>=9.7.0",
+    "jupyter>=1.1.1",
+    "langchain>=1.0.8",
+    "langchain-openai>=1.0.3",
+    "langgraph>=1.0.3",
+    "matplotlib>=3.10.7",
+    "networkx>=3.5",
+    "pandas>=2.3.3",
+    "plotly>=6.5.0",
+    "prettytable>=3.17.0",
+    "pydantic>=2.12.4",
+    "scikit-learn>=1.7.2",
+    "treelib>=1.8.0",
+    "typer>=0.20.0",
+    "umap>=0.1.1",
+]
+
+[project.scripts]
+pyalex = "pyalex.cli:app"
+
+[tool.setuptools]
+packages = ["pyalex"]
