@@ -3,7 +3,7 @@ name = "pyalex"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12, <3.14"
 dependencies = [
     "httpx[http2]>=0.28.1",
     "ipython>=9.7.0",
@@ -20,7 +20,8 @@ dependencies = [
     "scikit-learn>=1.7.2",
     "treelib>=1.8.0",
     "typer>=0.20.0",
-    "umap>=0.1.1",
+    "umap-learn>=0.5.0",
+    "wordcloud",
 ]
 
 [project.scripts]
