@@ -126,6 +126,9 @@ class BatchFilterRegistry:
                 "works_institution": BatchFilterConfig(
                     "authorships.institutions", "id"
                 ),
+                "works_institutions_country_code": BatchFilterConfig(
+                    "institutions", "country_code"
+                ),
                 "works_source": BatchFilterConfig("primary_location.source", "id"),
                 "works_source_issn": BatchFilterConfig(
                     "primary_location.source", "issn"

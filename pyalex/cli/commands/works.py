@@ -39,6 +39,7 @@ class _WorksCommand(StdinSentinelCommand):
     _stdin_options = {
         "--author-ids": STDIN_SENTINEL,
         "--institution-ids": STDIN_SENTINEL,
+        "--institutions-country-code": STDIN_SENTINEL,
         "--topic-ids": STDIN_SENTINEL,
         "--subfield-ids": STDIN_SENTINEL,
         "--funder-ids": STDIN_SENTINEL,
@@ -195,6 +196,18 @@ def create_works_command(app):
                     "for OR logic (e.g., --institution-ids 'I123,I456,I789'). Omit "
                     "the value to read JSON input from stdin (same formats as pyalex "
                     "from-ids)"
+                ),
+                rich_help_panel=ID_FILTERS_PANEL,
+            ),
+        ] = None,
+        institutions_country_code: Annotated[
+            str | None,
+            typer.Option(
+                "--institutions-country-code",
+                help=(
+                    "Filter by institution country code(s) (ISO 3166-1 alpha-2). "
+                    "Use comma-separated values for OR logic (e.g., 'fr,gb'). "
+                    "Omit the value to read from stdin."
                 ),
                 rich_help_panel=ID_FILTERS_PANEL,
             ),
@@ -565,6 +578,9 @@ def create_works_command(app):
             institution_ids = resolve_ids_option(
                 institution_ids, "--institution-ids"
             )
+            institutions_country_code = resolve_ids_option(
+                institutions_country_code, "--institutions-country-code"
+            )
             topic_ids = resolve_ids_option(topic_ids, "--topic-ids")
             subfield_ids = resolve_ids_option(subfield_ids, "--subfield-ids")
             funder_ids = resolve_ids_option(funder_ids, "--funder-ids")
@@ -616,6 +632,14 @@ def create_works_command(app):
                 # Use the generalized helper for ID list handling
                 query = add_id_list_option_to_command(
                     query, institution_ids, "works_institution", Works
+                )
+
+            if institutions_country_code:
+                query = add_id_list_option_to_command(
+                    query,
+                    institutions_country_code,
+                    "works_institutions_country_code",
+                    Works,
                 )
 
             if publication_year:
