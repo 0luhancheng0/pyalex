@@ -17,6 +17,7 @@ dependencies = [
     "plotly>=6.5.0",
     "prettytable>=3.17.0",
     "pydantic>=2.12.4",
+    "pymupdf4llm>=0.2.9",
     "scikit-learn>=1.7.2",
     "treelib>=1.8.0",
     "typer>=0.20.0",
