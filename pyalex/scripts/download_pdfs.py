@@ -3,16 +3,36 @@ import json
 import os
 import re
 import sys
+import tempfile
+import typer
+import httpx
+import pandas as pd
 from typing import Optional
 
-import httpx
-import typer
-import pymupdf4llm
+# Check for pymupdf4llm availability
+try:
+    import pymupdf4llm
+    HAS_PYMUPDF4LLM = True
+except ImportError:
+    HAS_PYMUPDF4LLM = False
 
-app = typer.Typer(help="Download PDFs from OpenAlex Works JSONL file.")
+# Check for fitz (PyMuPDF) availability for fallback
+try:
+    import fitz
+    HAS_FITZ = True
+except ImportError:
+    HAS_FITZ = False
+
+from pyalex import Authors, Works, config
+
+app = typer.Typer(help="Download all papers for a specific author as Markdown.")
 
 async def convert_pdf_to_markdown(filepath: str):
-    """Convert PDF to Markdown using pymupdf4llm."""
+    """Convert PDF to Markdown using pymupdf4llm, with fallback to basic text extraction."""
+    if not HAS_PYMUPDF4LLM:
+        print(f"Warning: pymupdf4llm not installed. Skipping Markdown conversion for {filepath}", file=sys.stderr)
+        return
+
     try:
         # Run CPU-bound conversion in a separate thread
         md_text = await asyncio.to_thread(pymupdf4llm.to_markdown, filepath)
@@ -20,7 +40,26 @@ async def convert_pdf_to_markdown(filepath: str):
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(md_text)
     except Exception as e:
-        print(f"\nError converting {filepath} to Markdown: {e}", file=sys.stderr)
+        # Fallback to simple text extraction if layout analysis fails (e.g. scanned PDFs or complex layouts)
+        if HAS_FITZ:
+            try:
+                doc = fitz.open(filepath)
+                text_content = []
+                for page in doc:
+                    text_content.append(page.get_text())
+                full_text = "\n".join(text_content).strip()
+                
+                if full_text:
+                    print(f"\nWarning: pymupdf4llm failed for {os.path.basename(filepath)}. Falling back to raw text extraction.", file=sys.stderr)
+                    md_path = os.path.splitext(filepath)[0] + ".md"
+                    with open(md_path, "w", encoding="utf-8") as f:
+                        f.write(f"# {os.path.basename(filepath)} (Raw Text)\n\n> Note: Layout analysis failed. Displaying raw text.\n\n{full_text}")
+                else:
+                    print(f"\nError converting {os.path.basename(filepath)}: PDF appears to be a scanned image with no text layer.", file=sys.stderr)
+            except Exception as fallback_e:
+                print(f"\nError converting {filepath} to Markdown: {e}. Fallback also failed: {fallback_e}", file=sys.stderr)
+        else:
+            print(f"\nError converting {filepath} to Markdown: {e}", file=sys.stderr)
 
 async def download_file(
     client: httpx.AsyncClient, 
@@ -65,7 +104,8 @@ async def process_downloads(
     download_dir: str, 
     concurrency: int, 
     limit: Optional[int],
-    markdown: bool
+    markdown: bool,
+    output_file: Optional[str] = None
 ):
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
@@ -88,12 +128,27 @@ async def process_downloads(
                 try:
                     data = json.loads(line)
                     
-                    # Extract PDF URL safely
-                    primary_location = data.get("primary_location")
-                    if not primary_location:
-                        continue
-                        
-                    pdf_url = primary_location.get("pdf_url")
+                    # Improved PDF URL extraction logic
+                    pdf_url = None
+                    
+                    # 1. Check primary_location
+                    primary_loc = data.get("primary_location")
+                    if primary_loc:
+                        pdf_url = primary_loc.get("pdf_url")
+                    
+                    # 2. Check best_oa_location if no PDF yet
+                    if not pdf_url:
+                        best_oa = data.get("best_oa_location")
+                        if best_oa:
+                            pdf_url = best_oa.get("pdf_url")
+                            
+                    # 3. Check all locations if still no PDF
+                    if not pdf_url and "locations" in data:
+                        for loc in data["locations"]:
+                            if loc.get("pdf_url"):
+                                pdf_url = loc.get("pdf_url")
+                                break
+                    
                     if not pdf_url:
                         continue
                         
@@ -187,6 +242,27 @@ async def process_downloads(
     print(f"✅ Downloaded: {results['success']}")
     print(f"⏭️  Skipped (Exists): {results['exists']}")
     print(f"❌ Errors: {results['errors']}")
+    
+    if output_file and markdown:
+        print(f"\nConcatenating Markdown files to {output_file}...")
+        try:
+            with open(output_file, "w", encoding="utf-8") as outfile:
+                count = 0
+                for _, filepath in work_items:
+                    md_path = os.path.splitext(filepath)[0] + ".md"
+                    if os.path.exists(md_path):
+                        try:
+                            with open(md_path, "r", encoding="utf-8") as infile:
+                                content = infile.read()
+                                outfile.write(f"\n\n# Source: {os.path.basename(filepath)}\n\n")
+                                outfile.write(content)
+                                outfile.write("\n\n---\n\n")
+                                count += 1
+                        except Exception as e:
+                            print(f"Error reading {md_path}: {e}", file=sys.stderr)
+            print(f"Successfully concatenated {count} Markdown files.")
+        except Exception as e:
+            print(f"Error creating output file {output_file}: {e}", file=sys.stderr)
 
 @app.command()
 def main(
@@ -195,13 +271,14 @@ def main(
     concurrency: int = typer.Option(10, "--concurrency", "-c", help="Number of concurrent downloads"),
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of lines to process from input file"),
     markdown: bool = typer.Option(True, "--markdown", "-m", help="Convert downloaded PDFs to Markdown"),
+    output_file: Optional[str] = typer.Option(None, "--output-file", "-o", help="Concatenate all Markdown output to a single file"),
 ):
     """
     Download PDFs from a PyAlex Works JSONL export.
     
     Extracts 'primary_location.pdf_url' and saves files using the DOI or OpenAlex ID as the filename.
     """
-    asyncio.run(process_downloads(input_jsonl, download_dir, concurrency, limit, markdown))
+    asyncio.run(process_downloads(input_jsonl, download_dir, concurrency, limit, markdown, output_file))
 
 if __name__ == "__main__":
     app()

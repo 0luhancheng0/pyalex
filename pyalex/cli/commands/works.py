@@ -1,6 +1,7 @@
 """Works command for PyAlex CLI."""
 
 import datetime
+import re
 from typing import Annotated
 
 import typer
@@ -403,7 +404,10 @@ def create_works_command(app):
             str | None,
             typer.Option(
                 "--oa-status",
-                help="Filter by specific OA status (e.g., gold, green, hybrid, bronze)",
+                help=(
+                    "Filter by specific OA status. Supports ranges (e.g. 'green:', ':gold'). "
+                    "Ranking: diamond > gold > green > hybrid > bronze > closed"
+                ),
                 rich_help_panel=ACCESS_PANEL,
             ),
         ] = None,
@@ -680,6 +684,18 @@ def create_works_command(app):
                         start_date = start_date.strip()
                         end_date = end_date.strip()
 
+                        # Handle relative start date (e.g. "-7d")
+                        if re.match(r"^-\d+d$", start_date):
+                            days_ago = int(start_date[1:-1])
+                            start_date = (
+                                datetime.date.today()
+                                - datetime.timedelta(days=days_ago)
+                            ).strftime("%Y-%m-%d")
+
+                            # If end date is missing for relative range, default to today
+                            if not end_date:
+                                end_date = datetime.date.today().strftime("%Y-%m-%d")
+
                         # Validate date format (basic check for YYYY-MM-DD)
                         datetime.datetime.strptime(start_date, "%Y-%m-%d")
                         datetime.datetime.strptime(end_date, "%Y-%m-%d")
@@ -690,7 +706,8 @@ def create_works_command(app):
                     except ValueError as ve:
                         typer.echo(
                             "Error: Invalid date range format. Use "
-                            "'YYYY-MM-DD:YYYY-MM-DD' (e.g., '2019-01-01:2020-12-31')",
+                            "'YYYY-MM-DD:YYYY-MM-DD' (e.g., '2019-01-01:2020-12-31') "
+                            "or relative format (e.g., '-7d:')",
                             err=True,
                         )
                         raise typer.Exit(1) from ve
@@ -791,6 +808,46 @@ def create_works_command(app):
                 )
 
             if oa_status:
+                # Handle OA status hierarchy ranges
+                # Ranking from lowest (closed) to highest (diamond) openness
+                oa_ranks = ["closed", "bronze", "hybrid", "green", "gold", "diamond"]
+                
+                if ":" in oa_status:
+                    start_stat, end_stat = oa_status.split(":", 1)
+                    start_stat = start_stat.strip().lower()
+                    end_stat = end_stat.strip().lower()
+                    
+                    start_idx = 0
+                    end_idx = len(oa_ranks) - 1
+                    
+                    if start_stat:
+                        if start_stat not in oa_ranks:
+                             typer.echo(
+                                 f"Error: Invalid OA status '{start_stat}'. "
+                                 f"Valid statuses: {', '.join(oa_ranks)}", 
+                                 err=True
+                             )
+                             raise typer.Exit(1)
+                        start_idx = oa_ranks.index(start_stat)
+                    
+                    if end_stat:
+                        if end_stat not in oa_ranks:
+                             typer.echo(
+                                 f"Error: Invalid OA status '{end_stat}'. "
+                                 f"Valid statuses: {', '.join(oa_ranks)}", 
+                                 err=True
+                             )
+                             raise typer.Exit(1)
+                        end_idx = oa_ranks.index(end_stat)
+                    
+                    if start_idx > end_idx:
+                         typer.echo("Error: Start status rank is higher than end status.", err=True)
+                         raise typer.Exit(1)
+                         
+                    # Join selected statuses with OR operator (|)
+                    selected_stats = oa_ranks[start_idx : end_idx + 1]
+                    oa_status = "|".join(selected_stats)
+
                 query = query.filter_by_open_access(oa_status=oa_status)
             elif is_oa is not None:
                 query = query.filter_by_open_access(is_oa=is_oa)
