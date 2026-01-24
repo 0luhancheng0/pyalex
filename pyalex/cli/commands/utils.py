@@ -93,6 +93,12 @@ def _load_entity_class_from_prefix(openalex_id: str) -> tuple[type, str]:
 
 
 def from_ids(
+    ids: Annotated[
+        str | None,
+        typer.Argument(
+            help="OpenAlex IDs (comma-separated). If not provided, reads from stdin."
+        ),
+    ] = None,
     jsonl_flag: Annotated[
         bool, typer.Option("--jsonl", help="Output JSON Lines to stdout")
     ] = False,
@@ -121,21 +127,24 @@ def from_ids(
         ),
     ] = False,
 ):
-    """Retrieve entities by their OpenAlex IDs from stdin."""
+    """Retrieve entities by their OpenAlex IDs from cli or stdin."""
 
     try:
         effective_jsonl_path, effective_parquet_path = validate_output_format_options(
             jsonl_flag, jsonl_path, parquet_path
         )
+        
+        if ids:
+            parsed_ids = [id.strip() for id in ids.split(",")]
+        else:
+            payload = sys.stdin.read()
+            try:
+                parsed_ids = _parse_ids_from_json_input(payload)
+            except ValueError as exc:
+                typer.echo(f"Error: {exc}", err=True)
+                raise typer.Exit(1) from None
 
-        payload = sys.stdin.read()
-        try:
-            ids = _parse_ids_from_json_input(payload)
-        except ValueError as exc:
-            typer.echo(f"Error: {exc}", err=True)
-            raise typer.Exit(1) from None
-
-        cleaned_ids = _clean_ids(ids)
+        cleaned_ids = _clean_ids(parsed_ids)
         if not cleaned_ids:
             typer.echo("Error: No IDs found in input", err=True)
             raise typer.Exit(1)
