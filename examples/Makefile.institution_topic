@@ -1,3 +1,0 @@
-
-au.jsonl:
-	pyalex institutions --type nonprofit --country AU  --limit 5 --jsonl-file $@
