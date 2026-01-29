@@ -96,7 +96,6 @@ def expand_backward(
             return
 
         sorted_ids = sorted(list(referenced_ids))
-        typer.echo(f"Found {len(sorted_ids)} unique referenced works.", err=True)
 
         # Fetch entities
         results = asyncio.run(

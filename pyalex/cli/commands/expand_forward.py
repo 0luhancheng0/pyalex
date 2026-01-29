@@ -95,7 +95,6 @@ def expand_forward(
             return
 
         sorted_ids = sorted(list(input_ids))
-        typer.echo(f"Found {len(sorted_ids)} unique input works.", err=True)
 
         # Build query
         query = Works()
