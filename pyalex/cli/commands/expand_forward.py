@@ -56,21 +56,6 @@ def expand_forward(
             help="Flatten nested fields using pandas.json_normalize before emitting results",
         ),
     ] = False,
-    limit: Annotated[
-        int | None,
-        typer.Option(
-            "--limit",
-            "-l",
-            help="Maximum number of results to return per batch or total (depending on execution mode)",
-        ),
-    ] = None,
-    all_results: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help="Retrieve all results",
-        ),
-    ] = False,
 ):
     """
     Extract IDs from a JSONL file of Works and fetch works that cite them (forward citations).
@@ -124,8 +109,8 @@ def expand_forward(
         results = handle_large_id_list_if_needed(
             query,
             Works,
-            all_results,
-            limit,
+            True, # all_results
+            None, # limit
             effective_jsonl_path,
             normalize=normalize,
         )
@@ -135,7 +120,7 @@ def expand_forward(
         # Note: handle_large_id_list_if_needed DOES output results if it runs.
         if results is None:
             results = execute_standard_query(
-                query, "Works", all_results=all_results, limit=limit
+                query, "Works", all_results=True, limit=None
             )
 
             # Output results for standard query

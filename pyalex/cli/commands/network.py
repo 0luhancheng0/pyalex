@@ -20,7 +20,7 @@ except ImportError:
 from ..utils import _handle_cli_exception
 
 
-def citation_network(
+def network(
     input_path: Annotated[
         Path,
         typer.Option(
@@ -40,7 +40,7 @@ def citation_network(
             "-o",
             help="Path to save the interactive network visualization",
         ),
-    ] = Path("citation_network.html"),
+    ] = Path("network.html"),
     include_external: Annotated[
         bool,
         typer.Option(
@@ -62,6 +62,13 @@ def citation_network(
             help="Layout algorithm: 'spring', 'time-shell' (concentric), or 'timeline' (default, chronological x-axis)",
         ),
     ] = "timeline",
+    edge_type: Annotated[
+        str,
+        typer.Option(
+            "--edge-type",
+            help="Edge type to build network from: 'citation' (referenced_works) or 'related' (related_works)",
+        ),
+    ] = "citation",
 ):
     """
     Builds a citation network from OpenAlex works using rustworkx and visualizes it with Plotly.
@@ -71,6 +78,10 @@ def citation_network(
             "Error: rustworkx and plotly are required for this command.", err=True
         )
         typer.echo("Please install them with: pip install rustworkx plotly", err=True)
+        raise typer.Exit(1)
+
+    if edge_type not in ["citation", "related"]:
+        typer.echo("Error: --edge-type must be either 'citation' or 'related'.", err=True)
         raise typer.Exit(1)
 
     try:
@@ -115,8 +126,12 @@ def citation_network(
         for work in works_data:
             work_id = work.get("id")
             if work_id:
+                # Clean ID if it's a URL
+                work_id = work_id.replace("https://openalex.org/", "")
                 if work_id not in id_to_idx:
-                    source_name = work_source_map.get(work_id, "Unknown")
+                    # Use original ID for map lookup as work_source_map uses original IDs
+                    source_name = work_source_map.get(work.get("id"), "Unknown")
+                    
                     # Store publication year for layout
                     idx = graph.add_node(
                         {
@@ -133,36 +148,45 @@ def citation_network(
         edge_count = 0
         external_node_count = 0
 
+        edge_field = "referenced_works" if edge_type == "citation" else "related_works"
+        typer.echo(f"Building {edge_type} network using field '{edge_field}'...")
+
         for work in works_data:
             source_id = work.get("id")
             if not source_id:
                 continue
 
+            source_id = source_id.replace("https://openalex.org/", "")
             source_idx = id_to_idx[source_id]
 
-            referenced_works = work.get("referenced_works", [])
-            for ref_id in referenced_works:
-                if ref_id in id_to_idx:
+            targets = work.get(edge_field, [])
+            for target_ref in targets:
+                # Clean ID if it's a URL
+                target_id = target_ref.replace("https://openalex.org/", "")
+                
+                if target_id in id_to_idx:
                     # Internal edge
-                    target_idx = id_to_idx[ref_id]
-                    graph.add_edge(source_idx, target_idx, None)
-                    edge_count += 1
+                    target_idx = id_to_idx[target_id]
+                    # Avoid self-loops if related works point back to self (unlikely but possible)
+                    if source_idx != target_idx:
+                        graph.add_edge(source_idx, target_idx, None)
+                        edge_count += 1
                 elif include_external:
                     # Add external node
-                    if ref_id not in id_to_idx:
+                    if target_id not in id_to_idx:
                         idx = graph.add_node(
                             {
                                 "title": "External Work",
-                                "id": ref_id,
+                                "id": target_id,
                                 "type": "external",
                                 "source_file": "External",
                                 "year": 0,  # Unknown year for external
                             }
                         )
-                        id_to_idx[ref_id] = idx
+                        id_to_idx[target_id] = idx
                         external_node_count += 1
 
-                    target_idx = id_to_idx[ref_id]
+                    target_idx = id_to_idx[target_id]
                     graph.add_edge(source_idx, target_idx, None)
                     edge_count += 1
 
@@ -397,8 +421,8 @@ def citation_network(
         _handle_cli_exception(e)
 
 
-def create_citation_network_command(app):
-    """Create and register the citation-network command."""
-    app.command(name="citation-network", rich_help_panel="Utility Commands")(
-        citation_network
+def create_network_command(app):
+    """Create and register the network command."""
+    app.command(name="network", rich_help_panel="Utility Commands")(
+        network
     )

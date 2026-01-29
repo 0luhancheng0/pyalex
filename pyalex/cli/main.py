@@ -23,7 +23,7 @@ from .commands.download import create_download_command
 from .commands.expand_backward import create_expand_backward_command
 from .commands.expand_forward import create_expand_forward_command
 from .commands.expand_related import create_expand_related_command
-from .commands.citation_network import create_citation_network_command
+from .commands.network import create_network_command
 
 # Create the main typer app
 app = typer.Typer(
@@ -94,4 +94,4 @@ create_download_command(app)
 create_expand_backward_command(app)
 create_expand_forward_command(app)
 create_expand_related_command(app)
-create_citation_network_command(app)
+create_network_command(app)
