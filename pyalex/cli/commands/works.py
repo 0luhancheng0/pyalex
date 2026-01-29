@@ -118,7 +118,7 @@ def _apply_citation_percentile_value_filter(query, raw_value: str):
 def create_works_command(app):
     """Create and register the works command."""
 
-    @app.command(cls=_WorksCommand)
+    @app.command(cls=_WorksCommand, rich_help_panel="Entity Commands")
     def works(
         search: Annotated[
             str | None,

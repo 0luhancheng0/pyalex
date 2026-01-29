@@ -59,7 +59,7 @@ class _AuthorsCommand(StdinSentinelCommand):
 def create_authors_command(app):
     """Create and register the authors command."""
 
-    @app.command(cls=_AuthorsCommand)
+    @app.command(cls=_AuthorsCommand, rich_help_panel="Entity Commands")
     def authors(
         search: Annotated[
             str | None,

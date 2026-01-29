@@ -455,15 +455,15 @@ def create_entity_commands(app):
     concepts_func = create_simple_entity_command(
         app, Concepts, "Concepts", "concepts"
     )
-    app.command(help="Search and retrieve concepts from OpenAlex")(concepts_func)
+    app.command(help="Search and retrieve concepts from OpenAlex", rich_help_panel="Entity Commands")(concepts_func)
 
     # Topics
     topics_func = create_topics_command(app)
-    app.command(help="Search and retrieve topics from OpenAlex")(topics_func)
+    app.command(help="Search and retrieve topics from OpenAlex", rich_help_panel="Entity Commands")(topics_func)
 
     # Sources
     sources_func = create_simple_entity_command(app, Sources, "Sources", "sources")
-    app.command(help="Search and retrieve sources (journals/venues) from OpenAlex")(
+    app.command(help="Search and retrieve sources (journals/venues) from OpenAlex", rich_help_panel="Entity Commands")(
         sources_func
     )
 
@@ -471,22 +471,22 @@ def create_entity_commands(app):
     publishers_func = create_simple_entity_command(
         app, Publishers, "Publishers", "publishers"
     )
-    app.command(help="Search and retrieve publishers from OpenAlex")(publishers_func)
+    app.command(help="Search and retrieve publishers from OpenAlex", rich_help_panel="Entity Commands")(publishers_func)
 
     # Domains
     domains_func = create_simple_entity_command(app, Domains, "Domains", "domains")
-    app.command(help="Search and retrieve domains from OpenAlex")(domains_func)
+    app.command(help="Search and retrieve domains from OpenAlex", rich_help_panel="Entity Commands")(domains_func)
 
     # Fields
     fields_func = create_simple_entity_command(app, Fields, "Fields", "fields")
-    app.command(help="Search and retrieve fields from OpenAlex")(fields_func)
+    app.command(help="Search and retrieve fields from OpenAlex", rich_help_panel="Entity Commands")(fields_func)
 
     # Subfields
     subfields_func = create_simple_entity_command(
         app, Subfields, "Subfields", "subfields"
     )
-    app.command(help="Search and retrieve subfields from OpenAlex")(subfields_func)
+    app.command(help="Search and retrieve subfields from OpenAlex", rich_help_panel="Entity Commands")(subfields_func)
 
     # Keywords
     keywords_func = create_simple_entity_command(app, Keywords, "Keywords", "keywords")
-    app.command(help="Search and retrieve keywords from OpenAlex")(keywords_func)
+    app.command(help="Search and retrieve keywords from OpenAlex", rich_help_panel="Entity Commands")(keywords_func)

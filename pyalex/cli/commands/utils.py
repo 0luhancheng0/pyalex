@@ -329,5 +329,5 @@ def show(
 
 def create_utils_commands(app):
     """Register utility commands with the app."""
-    app.command()(from_ids)
-    app.command()(show)
+    app.command(rich_help_panel="Utility Commands")(from_ids)
+    app.command(rich_help_panel="Utility Commands")(show)

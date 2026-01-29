@@ -30,7 +30,7 @@ from .help_panels import SEARCH_PANEL
 def create_funders_command(app):
     """Create and register the funders command."""
 
-    @app.command()
+    @app.command(rich_help_panel="Entity Commands")
     def funders(
         search: Annotated[
             str | None,

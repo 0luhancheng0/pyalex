@@ -30,7 +30,7 @@ from .help_panels import SEARCH_PANEL
 def create_institutions_command(app):
     """Create and register the institutions command."""
 
-    @app.command()
+    @app.command(rich_help_panel="Entity Commands")
     def institutions(
         search: Annotated[
             str | None,
