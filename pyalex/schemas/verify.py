@@ -13,38 +13,38 @@ def check_imports():  # noqa: F401
     """Verify all types can be imported."""
     print("Checking imports...")
     try:
-        from pyalex.typing import APC  # noqa: F401
-        from pyalex.typing import Author  # noqa: F401
-        from pyalex.typing import AuthorCounts  # noqa: F401
-        from pyalex.typing import AuthorLastKnownInstitution  # noqa: F401
-        from pyalex.typing import AuthorPosition  # noqa: F401
-        from pyalex.typing import Authorship  # noqa: F401
-        from pyalex.typing import AuthorSummaryStats  # noqa: F401
-        from pyalex.typing import Biblio  # noqa: F401
-        from pyalex.typing import CountsByYear  # noqa: F401
-        from pyalex.typing import DehydratedEntity  # noqa: F401
-        from pyalex.typing import Funder  # noqa: F401
-        from pyalex.typing import FunderCounts  # noqa: F401
-        from pyalex.typing import FunderSummaryStats  # noqa: F401
-        from pyalex.typing import Grant  # noqa: F401
-        from pyalex.typing import IDs  # noqa: F401
-        from pyalex.typing import Institution  # noqa: F401
-        from pyalex.typing import InstitutionCounts  # noqa: F401
-        from pyalex.typing import InstitutionGeo  # noqa: F401
-        from pyalex.typing import InstitutionRepository  # noqa: F401
-        from pyalex.typing import InstitutionSummaryStats  # noqa: F401
-        from pyalex.typing import InternationalDisplay  # noqa: F401
-        from pyalex.typing import Keyword  # noqa: F401
-        from pyalex.typing import Location  # noqa: F401
-        from pyalex.typing import OpenAccess  # noqa: F401
-        from pyalex.typing import Publisher  # noqa: F401
-        from pyalex.typing import PublisherCounts  # noqa: F401
-        from pyalex.typing import PublisherSummaryStats  # noqa: F401
-        from pyalex.typing import Source  # noqa: F401
-        from pyalex.typing import SourceCounts  # noqa: F401
-        from pyalex.typing import SourceSummaryStats  # noqa: F401
-        from pyalex.typing import Topic  # noqa: F401
-        from pyalex.typing import Work  # noqa: F401
+        from pyalex.schemas import APC  # noqa: F401
+        from pyalex.schemas import Author  # noqa: F401
+        from pyalex.schemas import AuthorCounts  # noqa: F401
+        from pyalex.schemas import AuthorLastKnownInstitution  # noqa: F401
+        from pyalex.schemas import AuthorPosition  # noqa: F401
+        from pyalex.schemas import Authorship  # noqa: F401
+        from pyalex.schemas import AuthorSummaryStats  # noqa: F401
+        from pyalex.schemas import Biblio  # noqa: F401
+        from pyalex.schemas import CountsByYear  # noqa: F401
+        from pyalex.schemas import DehydratedEntity  # noqa: F401
+        from pyalex.schemas import Funder  # noqa: F401
+        from pyalex.schemas import FunderCounts  # noqa: F401
+        from pyalex.schemas import FunderSummaryStats  # noqa: F401
+        from pyalex.schemas import Grant  # noqa: F401
+        from pyalex.schemas import IDs  # noqa: F401
+        from pyalex.schemas import Institution  # noqa: F401
+        from pyalex.schemas import InstitutionCounts  # noqa: F401
+        from pyalex.schemas import InstitutionGeo  # noqa: F401
+        from pyalex.schemas import InstitutionRepository  # noqa: F401
+        from pyalex.schemas import InstitutionSummaryStats  # noqa: F401
+        from pyalex.schemas import InternationalDisplay  # noqa: F401
+        from pyalex.schemas import Keyword  # noqa: F401
+        from pyalex.schemas import Location  # noqa: F401
+        from pyalex.schemas import OpenAccess  # noqa: F401
+        from pyalex.schemas import Publisher  # noqa: F401
+        from pyalex.schemas import PublisherCounts  # noqa: F401
+        from pyalex.schemas import PublisherSummaryStats  # noqa: F401
+        from pyalex.schemas import Source  # noqa: F401
+        from pyalex.schemas import SourceCounts  # noqa: F401
+        from pyalex.schemas import SourceSummaryStats  # noqa: F401
+        from pyalex.schemas import Topic  # noqa: F401
+        from pyalex.schemas import Work  # noqa: F401
 
         print("✓ All core types imported successfully")
         return True
@@ -57,7 +57,7 @@ def check_type_structure():
     """Verify type definitions have correct structure."""
     print("\nChecking type structure...")
     try:
-        from pyalex.typing import Work
+        from pyalex.schemas import Work
 
         # Check that Work is a TypedDict
         hints = get_type_hints(Work)

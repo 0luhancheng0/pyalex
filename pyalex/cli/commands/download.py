@@ -1,26 +1,29 @@
+"""
+Download command for PyAlex CLI.
+
+This command allows downloading PDFs from a JSONL file containing OpenAlex Works objects.
+"""
+
 import asyncio
 import json
 import os
 import re
 import sys
-import tempfile
-import typer
-import httpx
-import pandas as pd
+from typing import Annotated
 from typing import Optional
 
+import httpx
+import typer
 
-from pyalex import Authors, Works, config
-
-app = typer.Typer(help="Download all papers for a specific author as Markdown.")
+from ..utils import _handle_cli_exception
+from .help_panels import UTILITY_PANEL
 
 
 async def download_file(
-    client: httpx.AsyncClient, 
-    url: str, 
-    filepath: str, 
+    client: httpx.AsyncClient,
+    url: str,
+    filepath: str,
     semaphore: asyncio.Semaphore,
-    create_markdown: bool = False
 ) -> str:
     """Download a single file with concurrency control."""
     async with semaphore:
@@ -30,60 +33,70 @@ async def download_file(
                 return "exists"
 
             response = await client.get(url, follow_redirects=True)
-            
+
             if response.status_code == 200:
                 # content-type check
                 content_type = response.headers.get("Content-Type", "").lower()
-                if "pdf" not in content_type and "application/octet-stream" not in content_type:
+                if (
+                    "pdf" not in content_type
+                    and "application/octet-stream" not in content_type
+                ):
                     return f"skipped_content_type_{content_type}"
 
                 # Ensure directory exists (race condition check)
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
-                
+
                 with open(filepath, "wb") as f:
                     async for chunk in response.aiter_bytes():
                         f.write(chunk)
-                    
+
                 return "success"
             else:
                 return f"error_{response.status_code}"
         except Exception as e:
             return f"exception_{str(e)}"
 
+
 async def process_downloads(
-    input_jsonl: str, 
-    download_dir: str, 
-    concurrency: int, 
-    limit: Optional[int]
+    input_jsonl: str,
+    download_dir: str,
+    concurrency: int,
+    limit: Optional[int],
 ):
+    """
+    Process the downloads asynchronously.
+    """
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
 
-    print(f"Scanning {input_jsonl} for PDF URLs...")
-    
+    typer.echo(f"Scanning {input_jsonl} for PDF URLs...")
+
     work_items = []
-    
+
     # Process file line by line to avoid loading huge files into memory
     try:
         with open(input_jsonl, "r", encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if limit and i >= limit:
                     break
-                    
+
                 line = line.strip()
                 if not line:
                     continue
-                    
+
                 try:
                     data = json.loads(line)
-                    
+
                     if not isinstance(data, dict):
-                        print(f"Warning: Skipping non-object data on line {i+1}: {str(data)[:50]}", file=sys.stderr)
+                        typer.echo(
+                            f"Warning: Skipping non-object data on line {i+1}: {str(data)[:50]}",
+                            err=True,
+                        )
                         continue
-                    
+
                     # Improved PDF URL extraction logic
                     pdf_url = None
-                    
+
                     # 1. Check best_oa_location first
                     best_oa = data.get("best_oa_location")
                     if best_oa:
@@ -94,86 +107,95 @@ async def process_downloads(
                         primary_loc = data.get("primary_location")
                         if primary_loc:
                             pdf_url = primary_loc.get("pdf_url")
-                            
+
                     # 3. Check all locations if still no PDF
                     if not pdf_url and "locations" in data:
                         for loc in data["locations"]:
                             if loc.get("pdf_url"):
                                 pdf_url = loc.get("pdf_url")
                                 break
-                    
+
                     if not pdf_url:
                         continue
-                        
+
                     # Determine filename: Priority Title -> DOI -> ID
                     filename = None
                     title = data.get("title")
                     doi = data.get("doi")
-                    
+
                     if title:
                         # Sanitize title for filename
                         # Replace invalid characters with underscore
-                        safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                        safe_title = re.sub(r'[<>:"/\\|?*]', "_", title)
                         # Remove newlines and tabs
-                        safe_title = re.sub(r'[\n\t\r]', ' ', safe_title)
+                        safe_title = re.sub(r"[\n\t\r]", " ", safe_title)
                         # Remove leading/trailing periods (can be issues on Windows) and spaces
                         safe_title = safe_title.strip(". ")
-                        
+
                         # Truncate if too long (max 200 chars to leave room for path)
                         if len(safe_title) > 200:
                             safe_title = safe_title[:200]
-                            
+
                         if safe_title:
                             filename = safe_title + ".pdf"
-                            
+
                     if not filename:
                         if doi:
                             # Sanitize DOI for filename
-                            filename = doi.replace("https://doi.org/", "").replace("/", "_") + ".pdf"
+                            filename = (
+                                doi.replace("https://doi.org/", "").replace("/", "_")
+                                + ".pdf"
+                            )
                         elif data.get("id"):
                             # Use OpenAlex ID
                             filename = data["id"].split("/")[-1] + ".pdf"
-                    
+
                     if filename:
                         filepath = os.path.join(download_dir, filename)
                         work_items.append((pdf_url, filepath))
-                        
+
                 except json.JSONDecodeError:
-                    print(f"Warning: Skipping invalid JSON on line {i+1}", file=sys.stderr)
+                    typer.echo(
+                        f"Warning: Skipping invalid JSON on line {i+1}", err=True
+                    )
                     continue
-                    
+
     except FileNotFoundError:
-        print(f"Error: Input file '{input_jsonl}' not found.", file=sys.stderr)
+        typer.echo(f"Error: Input file '{input_jsonl}' not found.", err=True)
         return
 
     total_files = len(work_items)
-    print(f"Found {total_files} PDFs to download.")
-    
+    typer.echo(f"Found {total_files} PDFs to download.")
+
     if total_files == 0:
         return
 
     # Configure client limits
-    limits = httpx.Limits(max_keepalive_connections=concurrency, max_connections=concurrency)
+    limits = httpx.Limits(
+        max_keepalive_connections=concurrency, max_connections=concurrency
+    )
     timeout = httpx.Timeout(30.0, connect=10.0)
     semaphore = asyncio.Semaphore(concurrency)
+
+    typer.echo(f"Starting downloads with {concurrency} concurrent requests...")
     
-    print(f"Starting downloads with {concurrency} concurrent requests...")
-    print(f"Starting downloads with {concurrency} concurrent requests...")    
-    async with httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        limits=limits, timeout=timeout, follow_redirects=True
+    ) as client:
         # Create tasks
         tasks = [
-            download_file(client, url, filepath, semaphore) 
+            download_file(client, url, filepath, semaphore)
             for url, filepath in work_items
         ]
-        
+
         # Track progress
         results = {"success": 0, "exists": 0, "errors": 0, "skipped_content_type": 0}
         completed = 0
-        
+
         for future in asyncio.as_completed(tasks):
             res = await future
             completed += 1
-            
+
             if res == "success":
                 results["success"] += 1
             elif res == "exists":
@@ -182,35 +204,70 @@ async def process_downloads(
                 results["skipped_content_type"] += 1
             else:
                 results["errors"] += 1
-            
+
             # Update progress line
             percent = (completed / total_files) * 100
             print(
                 f"\rProgress: {percent:.1f}% ({completed}/{total_files}) "
-                f"[Success: {results['success']} | Exists: {results['exists']} | Errors: {results['errors']} | Skipped (Type): {results['skipped_content_type']}]", 
-                end=""
+                f"[Success: {results['success']} | Exists: {results['exists']} | "
+                f"Errors: {results['errors']} | Skipped (Type): {results['skipped_content_type']}]",
+                end="",
+                flush=True
             )
 
-    print("\n\nDownload Summary:")
-    print(f"✅ Downloaded: {results['success']}")
-    print(f"⏭️  Skipped (Exists): {results['exists']}")
-    print(f"⏩ Skipped (Content-Type): {results['skipped_content_type']}")
-    print(f"❌ Errors: {results['errors']}")
-    
+    typer.echo("\n\nDownload Summary:")
+    typer.echo(f"✅ Downloaded: {results['success']}")
+    typer.echo(f"⏭️  Skipped (Exists): {results['exists']}")
+    typer.echo(f"⏩ Skipped (Content-Type): {results['skipped_content_type']}")
+    typer.echo(f"❌ Errors: {results['errors']}")
 
-@app.command()
-def main(
-    input_jsonl: str = typer.Option(..., "--input-jsonl", "-i", help="Path to input JSONL file containing Works"),
-    download_dir: str = typer.Option(..., "--download-dir", "-d", help="Directory to save downloaded PDFs"),
-    concurrency: int = typer.Option(10, "--concurrency", "-c", help="Number of concurrent downloads"),
-    limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of lines to process from input file"),
-):
-    """
-    Download PDFs from a PyAlex Works JSONL export.
-    
-    Extracts 'primary_location.pdf_url' and saves files using the DOI or OpenAlex ID as the filename.
-    """
-    asyncio.run(process_downloads(input_jsonl, download_dir, concurrency, limit))
 
-if __name__ == "__main__":
-    app()
+def create_download_command(app):
+    """Create and register the download command."""
+
+    @app.command(rich_help_panel="Utility Commands")
+    def download(
+        input_jsonl: Annotated[
+            str,
+            typer.Option(
+                "--input-jsonl",
+                "-i",
+                help="Path to input JSONL file containing Works",
+            ),
+        ],
+        download_dir: Annotated[
+            str,
+            typer.Option(
+                "--download-dir",
+                "-d",
+                help="Directory to save downloaded PDFs",
+            ),
+        ],
+        concurrency: Annotated[
+            int,
+            typer.Option(
+                "--concurrency",
+                "-c",
+                help="Number of concurrent downloads",
+            ),
+        ] = 10,
+        limit: Annotated[
+            Optional[int],
+            typer.Option(
+                "--limit",
+                "-l",
+                help="Limit number of lines to process from input file",
+            ),
+        ] = None,
+    ):
+        """
+        Download PDFs from a PyAlex Works JSONL export.
+
+        Extracts 'primary_location.pdf_url' and saves files using the DOI or OpenAlex ID as the filename.
+        """
+        try:
+            asyncio.run(
+                process_downloads(input_jsonl, download_dir, concurrency, limit)
+            )
+        except Exception as e:
+            _handle_cli_exception(e)

@@ -3,8 +3,8 @@
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from pyalex.typing.common import CountsByYear
-from pyalex.typing.common import IDs
+from pyalex.schemas.common import CountsByYear
+from pyalex.schemas.common import IDs
 
 
 class TopicDomain(BaseModel):

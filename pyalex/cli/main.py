@@ -18,6 +18,11 @@ from .commands.funders import create_funders_command
 from .commands.institutions import create_institutions_command
 from .commands.utils import create_utils_commands
 from .commands.works import create_works_command
+from .commands.download import create_download_command
+
+from .commands.expand_backward import create_expand_backward_command
+from .commands.expand_forward import create_expand_forward_command
+from .commands.citation_network import create_citation_network_command
 
 # Create the main typer app
 app = typer.Typer(
@@ -83,3 +88,8 @@ create_institutions_command(app)
 create_funders_command(app)
 create_utils_commands(app)
 create_entity_commands(app)
+create_download_command(app)
+
+create_expand_backward_command(app)
+create_expand_forward_command(app)
+create_citation_network_command(app)

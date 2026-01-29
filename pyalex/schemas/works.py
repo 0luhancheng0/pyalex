@@ -3,9 +3,9 @@
 from pydantic import BaseModel
 from pydantic import ConfigDict
 
-from pyalex.typing.common import CountsByYear
-from pyalex.typing.common import DehydratedEntity
-from pyalex.typing.common import IDs
+from pyalex.schemas.common import CountsByYear
+from pyalex.schemas.common import DehydratedEntity
+from pyalex.schemas.common import IDs
 
 
 class Biblio(BaseModel):
