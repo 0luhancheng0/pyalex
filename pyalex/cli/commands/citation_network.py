@@ -21,15 +21,15 @@ from ..utils import _handle_cli_exception
 
 
 def citation_network(
-    input_file: Annotated[
+    input_path: Annotated[
         Path,
         typer.Option(
-            "--input-file",
+            "--input-path",
             "-i",
-            help="Path to the works JSONL file",
+            help="Path to the works JSONL file or directory containing JSONL files",
             exists=True,
             file_okay=True,
-            dir_okay=False,
+            dir_okay=True,
             readable=True,
         ),
     ],
@@ -77,33 +77,53 @@ def citation_network(
         graph = rx.PyDiGraph()
         id_to_idx = {}
 
+        # Determine input files
+        if input_path.is_dir():
+            input_files = list(input_path.glob("*.jsonl"))
+            if not input_files:
+                typer.echo(f"No .jsonl files found in {input_path}", err=True)
+                raise typer.Exit(1)
+        else:
+            input_files = [input_path]
+
         # List to hold works to ensure we iterate correctly
         works_data = []
+        # Mapping from work ID to source filename (stem)
+        work_source_map = {}
+        source_files = set()
 
-        typer.echo(f"Reading works from {input_file}...")
-        with open(input_file, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                try:
-                    work = json.loads(line)
-                    works_data.append(work)
-                except json.JSONDecodeError:
-                    continue
+        for file_path in input_files:
+            source_name = file_path.name
+            source_files.add(source_name)
+            typer.echo(f"Reading works from {file_path}...")
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        work = json.loads(line)
+                        works_data.append(work)
+                        wid = work.get("id")
+                        if wid and wid not in work_source_map:
+                            work_source_map[wid] = source_name
+                    except json.JSONDecodeError:
+                        continue
 
-        typer.echo(f"Loaded {len(works_data)} works.")
+        typer.echo(f"Loaded {len(works_data)} works from {len(source_files)} files.")
 
         # Pass 1: Add nodes for all works in the file
         for work in works_data:
             work_id = work.get("id")
             if work_id:
                 if work_id not in id_to_idx:
+                    source_name = work_source_map.get(work_id, "Unknown")
                     # Store publication year for layout
                     idx = graph.add_node(
                         {
                             "title": work.get("title"),
                             "id": work_id,
-                            "is_source": True,
+                            "type": "source",
+                            "source_file": source_name,
                             "year": work.get("publication_year", 0),
                         }
                     )
@@ -134,7 +154,8 @@ def citation_network(
                             {
                                 "title": "External Work",
                                 "id": ref_id,
-                                "is_source": False,
+                                "type": "external",
+                                "source_file": "External",
                                 "year": 0,  # Unknown year for external
                             }
                         )
@@ -260,50 +281,87 @@ def citation_network(
                 mode="lines",
             )
 
-            # Create Node Traces
-            node_x = []
-            node_y = []
-            node_text = []
-            node_colors = []
+            # Assign colors based on source file
+            # Define a color palette
+            # Using Plotly's default qualitative sequence
+            import plotly.colors as pcolors
 
+            palette = pcolors.qualitative.Plotly
+            source_list = sorted(list(source_files))
+            source_color_map = {
+                src: palette[i % len(palette)] for i, src in enumerate(source_list)
+            }
+            source_color_map["External"] = "#d62728"  # Explicit Red for External
+
+            # Create one trace per group (source file) + External
+            # This allows the legend to show source files
+            traces = [edge_trace]
+
+            # Group nodes by their source_file
+            nodes_by_source = {}
+            # Initialize with all keys including External (if present)
+            # Actually better to just iterate:
+            
+            # Helper to organize node data
             for i in graph.node_indices():
                 if i in pos:
-                    x, y = pos[i]
-                    node_x.append(x)
-                    node_y.append(y)
-
                     data = graph.get_node_data(i)
+                    src = data.get("source_file", "Unknown")
+                    if src not in nodes_by_source:
+                        nodes_by_source[src] = {"x": [], "y": [], "text": [], "color": []}
+                    
+                    x, y = pos[i]
+                    nodes_by_source[src]["x"].append(x)
+                    nodes_by_source[src]["y"].append(y)
+                    
                     title = data.get("title", "Unknown")
                     year = data.get("year", "N/A")
                     wid = data.get("id", "N/A")
-
-                    # Hover text
-                    node_text.append(f"<b>{title}</b><br>Year: {year}<br>ID: {wid}")
-
-                    # Color (Blue for source, Red for external)
-                    if data.get("is_source"):
-                        node_colors.append("#1f77b4")  # Blue
+                    
+                    nodes_by_source[src]["text"].append(f"<b>{title}</b><br>Year: {year}<br>ID: {wid}<br>Source: {src}")
+                    
+                    # Color logic
+                    if data.get("type") == "external":
+                        c = source_color_map.get("External", "#d62728")
                     else:
-                        node_colors.append("#d62728")  # Red
+                        c = source_color_map.get(src, "#1f77b4")
+                    nodes_by_source[src]["color"].append(c)
 
-            node_trace = go.Scatter(
-                x=node_x,
-                y=node_y,
-                mode="markers",
-                hoverinfo="text",
-                text=node_text,
-                marker=dict(color=node_colors, size=10, line_width=2),
-            )
+            # Create scatter traces for each group
+            # Sort keys to ensure consistent legend order. Put 'External' last.
+            sorted_sources = sorted([s for s in nodes_by_source.keys() if s != "External"])
+            if "External" in nodes_by_source:
+                sorted_sources.append("External")
+                
+            for src in sorted_sources:
+                group_data = nodes_by_source[src]
+                # Use a single color for the trace if they are all the same, or individual
+                # Actually, best to just set the color for the whole trace based on mapping
+                if src == "External":
+                    color = source_color_map.get("External", "#d62728")
+                else:
+                    color = source_color_map.get(src, "#888888") # Fallback
+
+                node_trace = go.Scatter(
+                    x=group_data["x"],
+                    y=group_data["y"],
+                    mode="markers",
+                    name=src, # Legend name
+                    hoverinfo="text",
+                    text=group_data["text"],
+                    marker=dict(color=color, size=10, line_width=2),
+                )
+                traces.append(node_trace)
 
             # Create Figure
             fig = go.Figure(
-                data=[edge_trace, node_trace],
+                data=traces,
                 layout=go.Layout(
                     title=dict(
                         text=f"<br>Citation Network ({graph.num_nodes()} nodes, {graph.num_edges()} edges)",
                         font=dict(size=16),
                     ),
-                    showlegend=False,
+                    showlegend=True,
                     hovermode="closest",
                     margin=dict(b=60, l=5, r=5, t=40),
                     annotations=[
@@ -327,7 +385,7 @@ def citation_network(
                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 ),
             )
-
+            
             fig.write_html(str(output_html))
             typer.echo(f"Visualization saved to {output_html}")
 
