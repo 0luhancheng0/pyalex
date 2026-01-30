@@ -421,8 +421,11 @@ def network(
         _handle_cli_exception(e)
 
 
+from .help_panels import VISUALIZATION_PANEL
+
+
 def create_network_command(app):
     """Create and register the network command."""
-    app.command(name="network", rich_help_panel="Utility Commands")(
+    app.command(name="network", rich_help_panel=VISUALIZATION_PANEL)(
         network
     )

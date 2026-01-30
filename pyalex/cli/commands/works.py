@@ -480,6 +480,15 @@ def create_works_command(app):
                 rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
+        output_path: Annotated[
+            str | None,
+            typer.Option(
+                "--output",
+                "-o",
+                help="Output file path (extension determines format: .jsonl, .parquet)",
+                rich_help_panel=OUTPUT_PANEL,
+            ),
+        ] = None,
         normalize: Annotated[
             bool,
             typer.Option(
@@ -574,7 +583,7 @@ def create_works_command(app):
             validate_pagination_options(all_results, limit)
             effective_jsonl_path, effective_parquet_path = (
                 validate_output_format_options(
-                    jsonl_flag, jsonl_path, parquet_path
+                    jsonl_flag, jsonl_path, parquet_path, output_path
                 )
             )
 

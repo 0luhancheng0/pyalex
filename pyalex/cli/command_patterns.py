@@ -43,7 +43,10 @@ def validate_jsonl_output_options(
 
 
 def validate_output_format_options(
-    jsonl_flag: bool, jsonl_path: str | None, parquet_path: str | None
+    jsonl_flag: bool,
+    jsonl_path: str | None,
+    parquet_path: str | None,
+    output_path: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Validate and resolve output format options.
 
@@ -55,13 +58,15 @@ def validate_output_format_options(
         Path provided via --jsonl-file option
     parquet_path : Optional[str]
         Path provided via --parquet-file option
+    output_path : Optional[str]
+        Path provided via --output option
 
     Returns
     -------
     tuple[Optional[str], Optional[str]]
     Tuple of (effective_jsonl_path, parquet_path)
     - effective_jsonl_path: "-" for stdout, path string for file, or None
-        - parquet_path: path string for file or None
+    - parquet_path: path string for file or None
 
     Raises
     ------
@@ -70,25 +75,42 @@ def validate_output_format_options(
     """
     # Count how many output options are provided
     options_provided = sum(
-        [jsonl_flag, jsonl_path is not None, parquet_path is not None]
+        [
+            jsonl_flag,
+            jsonl_path is not None,
+            parquet_path is not None,
+            output_path is not None,
+        ]
     )
 
     if options_provided > 1:
         typer.echo(
-            "Error: --jsonl, --jsonl-file, and --parquet-file are mutually exclusive",
+            "Error: --output, --jsonl, --jsonl-file, and --parquet-file are mutually exclusive",
             err=True,
         )
         raise typer.Exit(1)
 
-    # Resolve JSON path
-    if jsonl_flag:
+    effective_jsonl_path = None
+    effective_parquet_path = parquet_path
+
+    # Resolve output path if provided
+    if output_path:
+        if output_path == "-":
+            effective_jsonl_path = "-"
+        elif output_path.lower().endswith(".parquet"):
+            effective_parquet_path = output_path
+        else:
+            # Default to JSONL for other extensions or no extension
+            # (unless generic output logic changes, but typically we output JSONL)
+            effective_jsonl_path = output_path
+
+    # Resolve legacy flags
+    elif jsonl_flag:
         effective_jsonl_path = "-"  # stdout
     elif jsonl_path:
         effective_jsonl_path = jsonl_path
-    else:
-        effective_jsonl_path = None
 
-    return effective_jsonl_path, parquet_path
+    return effective_jsonl_path, effective_parquet_path
 
 
 def validate_pagination_options(all_results: bool, limit: int | None) -> None:

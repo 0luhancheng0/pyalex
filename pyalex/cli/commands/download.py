@@ -227,22 +227,29 @@ def create_download_command(app):
 
     @app.command(rich_help_panel="Utility Commands")
     def download(
-        input_jsonl: Annotated[
-            str,
+        input_path: Annotated[
+            Optional[str],
+            typer.Argument(
+                help="Path to input JSONL file containing Works",
+            ),
+        ] = None,
+        input_opt: Annotated[
+            Optional[str],
             typer.Option(
-                "--input-jsonl",
+                "--input",
                 "-i",
                 help="Path to input JSONL file containing Works",
             ),
-        ],
-        download_dir: Annotated[
+        ] = None,
+        output_dir: Annotated[
             str,
             typer.Option(
-                "--download-dir",
-                "-d",
+                "--output",
+                "-o",
+                "--output-dir",
                 help="Directory to save downloaded PDFs",
             ),
-        ],
+        ] = "downloads",
         concurrency: Annotated[
             int,
             typer.Option(
@@ -266,8 +273,13 @@ def create_download_command(app):
         Extracts 'primary_location.pdf_url' and saves files using the DOI or OpenAlex ID as the filename.
         """
         try:
+            effective_input = input_opt or input_path
+            if not effective_input:
+                typer.echo("Error: Missing input file. Provide via arguments or --input.", err=True)
+                raise typer.Exit(1)
+
             asyncio.run(
-                process_downloads(input_jsonl, download_dir, concurrency, limit)
+                process_downloads(effective_input, output_dir, concurrency, limit)
             )
         except Exception as e:
             _handle_cli_exception(e)

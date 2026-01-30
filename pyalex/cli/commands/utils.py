@@ -116,6 +116,14 @@ def from_ids(
             help="Save results to Parquet file at specified path",
         ),
     ] = None,
+    output_path: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output file path (extension determines format: .jsonl, .parquet)",
+        ),
+    ] = None,
     normalize: Annotated[
         bool,
         typer.Option(
@@ -131,7 +139,7 @@ def from_ids(
 
     try:
         effective_jsonl_path, effective_parquet_path = validate_output_format_options(
-            jsonl_flag, jsonl_path, parquet_path
+            jsonl_flag, jsonl_path, parquet_path, output_path
         )
         
         if ids:

@@ -8,9 +8,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
 
-def create_visualize_topics_command(app: typer.Typer):
-    @app.command(name="visualize-topics", rich_help_panel="Utility Commands")
-    def visualize_topics(
+from .help_panels import VISUALIZATION_PANEL
+
+def create_topic_treemap_command(app: typer.Typer):
+    @app.command(name="topic-treemap", rich_help_panel=VISUALIZATION_PANEL)
+    def topic_treemap(
         inputs: List[str] = typer.Option(
             ...,
             "--input",
@@ -57,6 +59,7 @@ def create_visualize_topics_command(app: typer.Typer):
                 label, path_str = input_str.split(":", 1)
             else:
                 path_str = input_str
+                # Use filename as label if not provided
                 label = Path(path_str).stem
                 
             file_path = Path(path_str)
@@ -66,45 +69,9 @@ def create_visualize_topics_command(app: typer.Typer):
                 
             print(f"Processing group '{label}' from {file_path}...")
             
-            # Initialize storage for this group
-            # structure: { topic_id: { count: total_count, meta: topic_object } }
-            group_topics = {}
-            
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        try:
-                            item = json.loads(line)
-                            topics = item.get('topics', [])
-                            
-                            for topic in topics:
-                                t_id = topic.get('id')
-                                if not t_id:
-                                    continue
-                                    
-                                count = topic.get('count', 0)
-                                if count == 0:
-                                     # sometimes count isn't present, or we just count occurrences
-                                     count = 1
-
-                                if t_id not in group_topics:
-                                    # Store metadata from the first occurrence
-                                    meta = topic.copy()
-                                    meta.pop('count', None)
-                                    meta.pop('score', None)
-                                    group_topics[t_id] = {
-                                        'count': 0,
-                                        'meta': meta
-                                    }
-                                
-                                group_topics[t_id]['count'] += count
-                                
-                        except json.JSONDecodeError:
-                            print(f"Warning: Skipping invalid JSON line in {file_path}")
-                            continue
-                            
+                group_topics = _process_file_topics(file_path)
                 aggregated_data[label] = group_topics
-                
             except Exception as e:
                 print(f"Error reading {file_path}: {e}")
                 raise typer.Exit(code=1)
@@ -123,6 +90,7 @@ def create_visualize_topics_command(app: typer.Typer):
                     for t_data in topics_map.values():
                         topic_obj = t_data['meta']
                         topic_obj['count'] = t_data['count']
+                        topic_obj['score'] = t_data['score']
                         topics_list.append(topic_obj)
                     
                     # Create the group entity
@@ -156,6 +124,54 @@ def create_visualize_topics_command(app: typer.Typer):
         _generate_treemap(final_entities, output_dir / "topics_treemap.html")
         
         print("\nDone!")
+
+
+def _process_file_topics(file_path: Path) -> Dict[str, Dict[str, Any]]:
+    """
+    Reads a JSONL file and aggregates topic counts and scores.
+    Returns a dictionary: { topic_id: { 'count': int, 'score': float, 'meta': dict } }
+    """
+    group_topics = {}
+    
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                item = json.loads(line)
+                topics = item.get('topics', [])
+                
+                for topic in topics:
+                    t_id = topic.get('id')
+                    if not t_id:
+                        continue
+                        
+                    count = topic.get('count', 0)
+                    if count == 0:
+                        # Fallback if count isn't explicit
+                        count = 1
+                    
+                    score = topic.get('score', 0.0)
+
+                    if t_id not in group_topics:
+                        # Store metadata from the first occurrence
+                        meta = topic.copy()
+                        # Remove dynamic fields from meta to avoid clutter
+                        meta.pop('count', None)
+                        meta.pop('score', None)
+                        
+                        group_topics[t_id] = {
+                            'count': 0,
+                            'score': 0.0,
+                            'meta': meta
+                        }
+                    
+                    group_topics[t_id]['count'] += count
+                    group_topics[t_id]['score'] += score
+                    
+            except json.JSONDecodeError:
+                print(f"Warning: Skipping invalid JSON line in {file_path}")
+                continue
+                
+    return group_topics
 
 
 def _generate_comparison_plot(entities: List[Dict], output_file: Path, log_scale: bool, min_share: float):
@@ -356,6 +372,7 @@ def _generate_treemap(entities: List[Dict], output_file: Path):
         for topic in topics:
             topic_name = topic.get('display_name', 'Unknown Topic')
             count = topic.get('count', 0)
+            score = topic.get('score', 0)
             
             domain = topic.get('domain', {}).get('display_name', 'Unknown Domain')
             field = topic.get('field', {}).get('display_name', 'Unknown Field')
@@ -367,7 +384,8 @@ def _generate_treemap(entities: List[Dict], output_file: Path):
                 'Field': field,
                 'Subfield': subfield,
                 'Topic': topic_name,
-                'Count': count
+                'Count': count,
+                'Score': score
             })
 
     if not all_data:
@@ -384,7 +402,7 @@ def _generate_treemap(entities: List[Dict], output_file: Path):
     fig = px.treemap(
         df, 
         path=['Entity', 'Domain', 'Field', 'Topic'], 
-        values='Count',
+        values='Score',
         color='Domain', 
         hover_data=['Subfield'],
         height=800,

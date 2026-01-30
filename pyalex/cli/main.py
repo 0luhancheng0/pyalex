@@ -20,11 +20,9 @@ from .commands.utils import create_utils_commands
 from .commands.works import create_works_command
 from .commands.download import create_download_command
 
-from .commands.expand_backward import create_expand_backward_command
-from .commands.expand_forward import create_expand_forward_command
-from .commands.expand_related import create_expand_related_command
+from .commands.expand import create_expand_command
 from .commands.network import create_network_command
-from .commands.visualize_topics import create_visualize_topics_command
+from .commands.visualize_topics import create_topic_treemap_command
 
 # Create the main typer app
 app = typer.Typer(
@@ -92,8 +90,6 @@ create_utils_commands(app)
 create_entity_commands(app)
 create_download_command(app)
 
-create_expand_backward_command(app)
-create_expand_forward_command(app)
-create_expand_related_command(app)
+create_expand_command(app)
 create_network_command(app)
-create_visualize_topics_command(app)
+create_topic_treemap_command(app)
