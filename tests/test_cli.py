@@ -468,7 +468,6 @@ def test_works_normalize_option_sets_flag(monkeypatch):
     def capture_output(
         _results,
         _jsonl_path=None,
-        _parquet_path=None,
         **kwargs,
     ):
         captured["normalize"] = kwargs.get("normalize")

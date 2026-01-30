@@ -109,19 +109,12 @@ def from_ids(
             help="Save results to JSON Lines file at specified path",
         ),
     ] = None,
-    parquet_path: Annotated[
-        str | None,
-        typer.Option(
-            "--parquet-file",
-            help="Save results to Parquet file at specified path",
-        ),
-    ] = None,
     output_path: Annotated[
         str | None,
         typer.Option(
             "--output",
             "-o",
-            help="Output file path (extension determines format: .jsonl, .parquet)",
+            help="Output file path (extension determines format: .jsonl)",
         ),
     ] = None,
     normalize: Annotated[
@@ -138,8 +131,8 @@ def from_ids(
     """Retrieve entities by their OpenAlex IDs from cli or stdin."""
 
     try:
-        effective_jsonl_path, effective_parquet_path = validate_output_format_options(
-            jsonl_flag, jsonl_path, parquet_path, output_path
+        effective_jsonl_path = validate_output_format_options(
+            jsonl_flag, jsonl_path, output_path
         )
         
         if ids:
@@ -173,7 +166,6 @@ def from_ids(
         _output_results(
             results,
             jsonl_path=effective_jsonl_path,
-            parquet_path=effective_parquet_path,
             normalize=normalize,
         )
 

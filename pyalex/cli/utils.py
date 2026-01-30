@@ -1034,13 +1034,12 @@ def _add_abstract_to_work(work_dict):
 def _output_results(
     results,
     jsonl_path: str | None = None,
-    parquet_path: str | None = None,
     single: bool = False,
     grouped: bool = False,
     selected_fields: list[str] | None = None,
     normalize: bool = False,
 ):
-    """Output results in table, JSON, or Parquet format."""
+    """Output results in table or JSON format."""
 
     import sys
 
@@ -1056,7 +1055,7 @@ def _output_results(
             except Exception:
                 pass
 
-    normalization_requested = normalize or parquet_path is not None
+    normalization_requested = normalize
 
     def _coerce_record(item: Any) -> dict[str, Any]:
         if isinstance(item, dict):
@@ -1073,28 +1072,22 @@ def _output_results(
             ) from exc
         return converted
 
-    try:
-        import pandas as pd  # type: ignore[import-not-found]
-    except ImportError:
-        pd = None  # type: ignore[assignment]
-        if normalization_requested:
+    pd = None
+    if normalization_requested:
+        try:
+            import pandas as pd  # type: ignore[import-not-found]
+        except ImportError:
             typer.echo(
-                "Error: pandas is required for --normalize or --parquet-file output",
+                "Error: pandas is required for --normalize output",
                 err=True,
             )
             raise typer.Exit(1) from None
-    else:
-        pd = pd  # type: ignore[assignment]
 
     if results is None:
         if jsonl_path:
             if jsonl_path != "-":
                 with open(jsonl_path, "w", encoding="utf-8"):
                     pass
-        elif parquet_path:
-            assert pd is not None
-            pd.DataFrame().to_parquet(parquet_path, index=False)
-            typer.echo(f"Empty results saved to {parquet_path}")
         else:
             typer.echo("No results found.")
         return
@@ -1123,10 +1116,6 @@ def _output_results(
             if jsonl_path != "-":
                 with open(jsonl_path, "w", encoding="utf-8"):
                     pass
-        elif parquet_path:
-            assert pd is not None
-            pd.DataFrame().to_parquet(parquet_path, index=False)
-            typer.echo(f"Empty results saved to {parquet_path}")
         else:
             typer.echo("No results found.")
         return
@@ -1158,23 +1147,8 @@ def _output_results(
             if jsonl_path != "-":
                 with open(jsonl_path, "w", encoding="utf-8"):
                     pass
-        elif parquet_path:
-            assert pd is not None
-            pd.DataFrame().to_parquet(parquet_path, index=False)
-            typer.echo(f"Empty results saved to {parquet_path}")
         else:
             typer.echo("No results found.")
-        return
-
-    if parquet_path:
-        assert pd is not None
-        if results_df is not None:
-            df = results_df
-        else:
-            df = pd.DataFrame(records)
-        df = pd.json_normalize(df.to_dict(orient="records"))
-        df.to_parquet(parquet_path, index=False)
-        typer.echo(f"Results saved to {parquet_path}")
         return
 
     if jsonl_path:
@@ -1349,15 +1323,13 @@ def _output_table(
 def _output_grouped_results(
     results,
     jsonl_path: str | None = None,
-    parquet_path: str | None = None,
     normalize: bool = False,
 ):
-    """Output grouped results in table, JSON, or Parquet format."""
+    """Output grouped results in table or JSON format."""
 
     _output_results(
         results,
         jsonl_path=jsonl_path,
-        parquet_path=parquet_path,
         grouped=True,
         normalize=normalize,
     )

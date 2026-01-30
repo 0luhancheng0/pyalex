@@ -50,7 +50,7 @@ def expand(
         typer.Option(
             "--output",
             "-o",
-            help="Output file path (extension determines format: .jsonl, .parquet)",
+            help="Output file path (extension determines format: .jsonl)",
             rich_help_panel=OUTPUT_PANEL,
         ),
     ] = None,
@@ -100,8 +100,8 @@ def expand(
             raise typer.Exit(1)
 
         # Validate output
-        effective_jsonl_path, effective_parquet_path = validate_output_format_options(
-            jsonl_flag, None, None, output_path
+        effective_jsonl_path = validate_output_format_options(
+            jsonl_flag, None, output_path
         )
 
         extracted_ids = set()
@@ -175,7 +175,6 @@ def expand(
                 _output_results(
                     results,
                     jsonl_path=effective_jsonl_path,
-                    parquet_path=effective_parquet_path,
                     normalize=normalize,
                 )
 
@@ -187,7 +186,6 @@ def expand(
             _output_results(
                 results,
                 jsonl_path=effective_jsonl_path,
-                parquet_path=effective_parquet_path,
                 normalize=normalize,
             )
 

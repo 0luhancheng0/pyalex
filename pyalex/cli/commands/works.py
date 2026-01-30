@@ -472,20 +472,12 @@ def create_works_command(app):
                 rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
-        parquet_path: Annotated[
-            str | None,
-            typer.Option(
-                "--parquet-file",
-                help="Save results to Parquet file at specified path",
-                rich_help_panel=OUTPUT_PANEL,
-            ),
-        ] = None,
         output_path: Annotated[
             str | None,
             typer.Option(
                 "--output",
                 "-o",
-                help="Output file path (extension determines format: .jsonl, .parquet)",
+                help="Output file path (extension determines format: .jsonl)",
                 rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
@@ -581,10 +573,8 @@ def create_works_command(app):
         try:
             # Validate options
             validate_pagination_options(all_results, limit)
-            effective_jsonl_path, effective_parquet_path = (
-                validate_output_format_options(
-                    jsonl_flag, jsonl_path, parquet_path, output_path
-                )
+            effective_jsonl_path = validate_output_format_options(
+                jsonl_flag, jsonl_path, output_path
             )
 
             author_ids = resolve_ids_option(author_ids, "--author-ids")
@@ -931,7 +921,6 @@ def create_works_command(app):
                 _output_grouped_results(
                     results,
                     effective_jsonl_path,
-                    effective_parquet_path,
                     normalize=normalize,
                 )
                 return
@@ -945,7 +934,6 @@ def create_works_command(app):
             _output_results(
                 results,
                 effective_jsonl_path,
-                effective_parquet_path,
                 selected_fields=cli_selected_fields,
                 normalize=normalize,
             )

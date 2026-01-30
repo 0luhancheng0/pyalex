@@ -48,7 +48,6 @@ def _execute_simple_entity_command(
     limit: int | None,
     jsonl_flag: bool,
     jsonl_path: str | None,
-    parquet_path: str | None,
     normalize: bool,
     sort_by: str | None,
     sample: int | None,
@@ -63,13 +62,12 @@ def _execute_simple_entity_command(
             raise typer.Exit(1)
 
         options_provided = sum(
-            [jsonl_flag, jsonl_path is not None, parquet_path is not None]
+            [jsonl_flag, jsonl_path is not None]
         )
 
         if options_provided > 1:
             typer.echo(
-                "Error: --jsonl, --jsonl-file, and --parquet-file "
-                "are mutually exclusive",
+                "Error: --jsonl and --jsonl-file are mutually exclusive",
                 err=True,
             )
             raise typer.Exit(1)
@@ -79,8 +77,6 @@ def _execute_simple_entity_command(
             effective_jsonl_path = "-"
         elif jsonl_path:
             effective_jsonl_path = jsonl_path
-
-        effective_parquet_path = parquet_path
 
         query = entity_class()
 
@@ -107,7 +103,6 @@ def _execute_simple_entity_command(
             _output_grouped_results(
                 results,
                 effective_jsonl_path,
-                effective_parquet_path,
                 normalize=normalize,
             )
             return
@@ -129,7 +124,6 @@ def _execute_simple_entity_command(
         _output_results(
             results,
             effective_jsonl_path,
-            effective_parquet_path,
             selected_fields=cli_selected_fields,
             normalize=normalize,
         )
@@ -192,14 +186,6 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
             typer.Option(
                 "--jsonl-file",
                 help="Save results to JSON Lines file at specified path",
-                rich_help_panel=OUTPUT_PANEL,
-            ),
-        ] = None,
-        parquet_path: Annotated[
-            str | None,
-            typer.Option(
-                "--parquet-file",
-                help="Save results to Parquet file at specified path",
                 rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
@@ -267,7 +253,6 @@ def create_simple_entity_command(app, entity_class, entity_name, entity_name_low
             limit=limit,
             jsonl_flag=jsonl_flag,
             jsonl_path=jsonl_path,
-            parquet_path=parquet_path,
             normalize=normalize,
             sort_by=sort_by,
             sample=sample,
@@ -360,14 +345,6 @@ def create_topics_command(app):
                 rich_help_panel=OUTPUT_PANEL,
             ),
         ] = None,
-        parquet_path: Annotated[
-            str | None,
-            typer.Option(
-                "--parquet-file",
-                help="Save results to Parquet file at specified path",
-                rich_help_panel=OUTPUT_PANEL,
-            ),
-        ] = None,
         normalize: Annotated[
             bool,
             typer.Option(
@@ -436,7 +413,6 @@ def create_topics_command(app):
             limit=limit,
             jsonl_flag=jsonl_flag,
             jsonl_path=jsonl_path,
-            parquet_path=parquet_path,
             normalize=normalize,
             sort_by=sort_by,
             sample=sample,
