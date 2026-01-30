@@ -201,7 +201,7 @@ class ResultMerger:
         for batch_results, batch_index in sorted(
             batch_results_list, key=lambda x: x[1]
         ):
-            if batch_results:
+            if batch_results is not None and len(batch_results) > 0:
                 all_results.extend(batch_results)
 
         if not all_results:
@@ -249,7 +249,7 @@ class ResultMerger:
         for batch_results, batch_index in sorted(
             batch_results_list, key=lambda x: x[1]
         ):
-            if batch_results:
+            if batch_results is not None and len(batch_results) > 0:
                 all_results.extend(batch_results)
 
         if not all_results:
@@ -414,7 +414,7 @@ class BatchProcessor:
             batch_results = _paginate_with_progress(batch_query, batch_name)
 
         if self.config.debug_mode:
-            batch_result_count = len(batch_results) if batch_results else 0
+            batch_result_count = len(batch_results) if batch_results is not None else 0
             self._log_batch_execution(
                 "pagination_complete", batch_index, result_count=batch_result_count
             )
@@ -437,7 +437,7 @@ class BatchProcessor:
         batch_results = asyncio.run(batch_query.get(limit=limit))
 
         if self.config.debug_mode:
-            batch_result_count = len(batch_results) if batch_results else 0
+            batch_result_count = len(batch_results) if batch_results is not None else 0
             self._log_batch_execution(
                 "limited_complete", batch_index, result_count=batch_result_count
             )
@@ -459,7 +459,7 @@ class BatchProcessor:
         batch_results = asyncio.run(batch_query.get())  # Default first page
 
         if self.config.debug_mode:
-            batch_result_count = len(batch_results) if batch_results else 0
+            batch_result_count = len(batch_results) if batch_results is not None else 0
             self._log_batch_execution(
                 "default_complete", batch_index, result_count=batch_result_count
             )
@@ -703,17 +703,17 @@ class BatchProcessor:
                 self._log_batch_execution("traceback", batch_index)
             raise
 
-        # Log summary
-        batch_count = len(batch_results) if batch_results else 0
-        self._log_batch_execution("summary", batch_index)
-        self._log_batch_execution("results", batch_index, result_count=batch_count)
-        self._log_batch_execution("complete", batch_index)
-
         # Convert DataFrame to list of dicts for compatibility with ResultMerger
         import pandas as pd
 
         if isinstance(batch_results, pd.DataFrame):
             batch_results = batch_results.to_dict("records")
+
+        # Log summary
+        batch_count = len(batch_results) if batch_results is not None else 0
+        self._log_batch_execution("summary", batch_index)
+        self._log_batch_execution("results", batch_index, result_count=batch_count)
+        self._log_batch_execution("complete", batch_index)
 
         return batch_results
 
@@ -807,7 +807,7 @@ class BatchProcessor:
                         limit,
                     )
 
-                    if batch_results:
+                    if batch_results is not None and len(batch_results) > 0:
                         batch_results_list.append((batch_results, batch_index))
 
                     # Update progress after batch completion
@@ -843,7 +843,7 @@ class BatchProcessor:
                     limit,
                 )
 
-                if batch_results:
+                if batch_results is not None and len(batch_results) > 0:
                     batch_results_list.append((batch_results, batch_index))
 
         # Merge results after all batches are processed

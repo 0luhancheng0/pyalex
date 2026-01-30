@@ -162,8 +162,14 @@ def _simple_paginate_all(query):
     paginator = query.paginate(method="cursor", cursor="*", per_page=MAX_PER_PAGE)
     all_results = []
     for batch in paginator:
-        if not batch:
+        if batch is None or len(batch) == 0:
             break
+        
+        # Convert DataFrame to list of dicts
+        import pandas as pd
+        if isinstance(batch, pd.DataFrame):
+            batch = batch.to_dict("records")
+            
         all_results.extend(batch)
 
     if all_results:
@@ -972,8 +978,14 @@ def _paginate_with_progress(query, entity_type_name="results"):
         paginator = query.paginate(method="cursor", cursor="*", per_page=MAX_PER_PAGE)
         all_results = []
         for batch in paginator:
-            if not batch:
+            if batch is None or len(batch) == 0:
                 break
+
+            # Convert DataFrame to list of dicts
+            import pandas as pd
+            if isinstance(batch, pd.DataFrame):
+                batch = batch.to_dict("records")
+
             all_results.extend(batch)
 
         if all_results:

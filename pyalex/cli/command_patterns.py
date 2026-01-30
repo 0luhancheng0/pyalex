@@ -264,7 +264,7 @@ def handle_large_id_list_if_needed(
         filter_config_key.split("_")[1] + " IDs",  # e.g., "funder IDs"
         all_results,
         limit,
-        jsonl_path=jsonl_path,
+        json_path=jsonl_path,
     )
 
     # Check if results is None or empty
