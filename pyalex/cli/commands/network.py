@@ -23,6 +23,7 @@ from ..utils import _handle_cli_exception
 from .help_panels import VISUALIZATION_PANEL
 
 
+
 def _load_works(input_files: List[Path]) -> Tuple[List[Dict], Dict[str, str], Set[str]]:
     """
     Load works from a list of JSONL files.
@@ -87,6 +88,11 @@ def _build_graph(
                 # Use original ID for map lookup as work_source_map uses original IDs
                 source_name = work_source_map.get(work.get("id"), "Unknown")
                 
+                # Extract citation_normalized_percentile
+                percentile = 0
+                if "citation_normalized_percentile" in work and work["citation_normalized_percentile"]:
+                     percentile = work["citation_normalized_percentile"].get("value", 0)
+
                 # Store publication year for layout
                 idx = graph.add_node(
                     {
@@ -95,6 +101,7 @@ def _build_graph(
                         "type": "source",
                         "source_file": source_name,
                         "year": work.get("publication_year", 0),
+                        "percentile": percentile,
                     }
                 )
                 id_to_idx[work_id] = idx
@@ -137,6 +144,7 @@ def _build_graph(
                                 "type": "external",
                                 "source_file": "External",
                                 "year": 0,
+                                "percentile": 0, # External nodes default to 0
                             }
                         )
                         id_to_idx[target_id] = idx
@@ -214,14 +222,63 @@ def _calculate_layout(graph: Any, layout: str) -> Dict[int, Tuple[float, float]]
         return rx.spring_layout(graph, k=2.0 / (graph.num_nodes() ** 0.5 + 1))
 
 
+def _calculate_node_sizes(graph: Any, size_by: str) -> Tuple[Dict[int, float], Dict[int, float]]:
+    """
+    Calculates node sizes based on the selected method.
+    
+    Returns:
+        Tuple containing:
+        - Dictionary of node index -> normalized size (for plotting)
+        - Dictionary of node index -> raw value (for hover text)
+    """
+    sizes = {}
+    raw_values = {}
+    
+    if size_by == "centrality":
+        # Use Betweenness Centrality as a good measure of importance in citation networks
+        typer.echo("Calculating network centrality (betweenness)...")
+        raw_values = rx.betweenness_centrality(graph)
+        
+    elif size_by == "percentile":
+        typer.echo("Using citation_normalized_percentile for sizing...")
+        for i in graph.node_indices():
+            data = graph.get_node_data(i)
+            raw_values[i] = data.get("percentile", 0)
+    else:
+        # Default fixed size
+        return {i: 10.0 for i in graph.node_indices()}, {}
+        
+    # Normalize values to range [5, 30]
+    if not raw_values:
+        return {i: 10.0 for i in graph.node_indices()}, {}
+        
+    min_val = min(raw_values.values())
+    max_val = max(raw_values.values())
+    
+    if min_val == max_val:
+        return {i: 10.0 for i in graph.node_indices()}, raw_values
+        
+    for i, val in raw_values.items():
+        # Linear normalization: 5 + (val - min) / (max - min) * 25
+        normalized = 5 + (val - min_val) / (max_val - min_val) * 25
+        sizes[i] = normalized
+        
+    return sizes, raw_values
+
+
 def _generate_plot(
     graph: Any, 
     pos: Dict[int, Tuple[float, float]], 
     edge_types: List[str], 
     source_files: Set[str],
-    layout: str
+    layout: str,
+    node_sizes: Dict[int, float],
+    raw_metric_values: Dict[int, float] = None
 ) -> go.Figure:
     """Generates the Plotly figure from the graph and positions."""
+    if raw_metric_values is None:
+        raw_metric_values = {}
+
     traces = []
     
     # 1. Edge Traces
@@ -281,7 +338,7 @@ def _generate_plot(
             data = graph.get_node_data(i)
             src = data.get("source_file", "Unknown")
             if src not in nodes_by_source:
-                nodes_by_source[src] = {"x": [], "y": [], "text": [], "color": []}
+                nodes_by_source[src] = {"x": [], "y": [], "text": [], "color": [], "size": []}
             
             x, y = pos[i]
             nodes_by_source[src]["x"].append(x)
@@ -290,13 +347,27 @@ def _generate_plot(
             title = data.get("title", "Unknown")
             year = data.get("year", "N/A")
             wid = data.get("id", "N/A")
+            percentile = data.get("percentile", "N/A")
             
-            nodes_by_source[src]["text"].append(f"<b>{title}</b><br>Year: {year}<br>ID: {wid}<br>Source: {src}")
+            hover_text = f"<b>{title}</b><br>Year: {year}<br>ID: {wid}<br>Source: {src}<br>Percentile: {percentile}"
+            
+            # Add centrality if available
+            if i in raw_metric_values and raw_metric_values:
+                 # Check if we computed centrality (metric values exist and aren't just percentiles, 
+                 # though typically we just show whatever metric was used for sizing)
+                 metric_val = raw_metric_values[i]
+                 hover_text += f"<br>Metric Value: {metric_val:.4f}"
+
+            nodes_by_source[src]["text"].append(hover_text)
             
             # Color logic
             color_key = "External" if data.get("type") == "external" else src
             c = source_color_map.get(color_key, "#1f77b4")
             nodes_by_source[src]["color"].append(c)
+            
+            # Size logic
+            s = node_sizes.get(i, 10.0)
+            nodes_by_source[src]["size"].append(s)
 
     # Sort sources for consistent legend
     sorted_sources = sorted([s for s in nodes_by_source.keys() if s != "External"])
@@ -314,7 +385,7 @@ def _generate_plot(
             name=src, 
             hoverinfo="text",
             text=group_data["text"],
-            marker=dict(color=color, size=10, line_width=2),
+            marker=dict(color=color, size=group_data["size"], line_width=2),
         ))
 
     # 3. Create Figure
@@ -392,6 +463,13 @@ def network(
             help="Layout algorithm: 'spring', 'time-shell' (concentric), or 'timeline' (default, chronological x-axis)",
         ),
     ] = "timeline",
+    node_size: Annotated[
+        str,
+        typer.Option(
+            "--node-size",
+            help="Metric to determine node size: 'none' (fixed), 'centrality' (betweenness), or 'percentile' (citation_normalized_percentile)",
+        ),
+    ] = "none",
     edge_types: Annotated[
         List[str],
         typer.Option(
@@ -448,13 +526,16 @@ def network(
             typer.echo("Graph is empty.")
             return
 
-        # 5. Calculate Layout
+        # 5. Calculate Layout and Sizes
         typer.echo(f"Generating interactive visualization using '{layout}' layout...")
         pos = _calculate_layout(graph, layout)
+        
+        # Calculate node sizes
+        node_sizes, raw_metric_values = _calculate_node_sizes(graph, node_size)
 
         # 6. Generate Plot
         try:
-            fig = _generate_plot(graph, pos, edge_types, source_files, layout)
+            fig = _generate_plot(graph, pos, edge_types, source_files, layout, node_sizes, raw_metric_values)
             fig.write_html(str(output_html))
             typer.echo(f"Visualization saved to {output_html}")
         except Exception as e:

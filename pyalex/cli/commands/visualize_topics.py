@@ -23,7 +23,7 @@ def create_topic_treemap_command(app: typer.Typer):
             ".",
             "--output-dir",
             "-o",
-            help="Directory to save the generated artifacts (aggregated JSONL, comparison HTML, treemap HTML)."
+            help="Directory to save the generated HTML visualizations (comparison plot, treemap)."
         ),
         log_scale: bool = typer.Option(
             True,
@@ -41,7 +41,7 @@ def create_topic_treemap_command(app: typer.Typer):
 
         This command performs three main steps:
         1. **Aggregate**: Reads multiple input JSONL files (each representing a group/entity like a country or institution),
-           and aggregates topic counts. It creates an `aggregated_topics.jsonl` file.
+           and aggregates topic counts in memory.
         2. **Compare**: Generates an interactive scatter plot (`topic_comparison.html`) comparing topic prevalence between the groups.
         3. **Visualize**: Generates a treemap (`topics_treemap.html`) for each group to show their topic hierarchy.
         """
@@ -76,37 +76,27 @@ def create_topic_treemap_command(app: typer.Typer):
                 print(f"Error reading {file_path}: {e}")
                 raise typer.Exit(code=1)
 
-        # Write aggregated output
-        aggregated_output_path = output_dir / "aggregated_topics.jsonl"
-        print(f"Writing aggregated results to {aggregated_output_path}...")
+        # Build in-memory representation for visualizations
+        print("Building aggregated data structure...")
         
         final_entities = []
         
-        try:
-            with open(aggregated_output_path, 'w', encoding='utf-8') as f:
-                for label, topics_map in aggregated_data.items():
-                    # Reconstruct the topics list for this group
-                    topics_list = []
-                    for t_data in topics_map.values():
-                        topic_obj = t_data['meta']
-                        topic_obj['count'] = t_data['count']
-                        topic_obj['score'] = t_data['score']
-                        topics_list.append(topic_obj)
-                    
-                    # Create the group entity
-                    group_entity = {
-                        "display_name": label,
-                        "topics": topics_list
-                    }
-                    
-                    # Keep in memory for next steps
-                    final_entities.append(group_entity)
-                    
-                    f.write(json.dumps(group_entity) + "\n")
-                    
-        except Exception as e:
-            print(f"Error writing aggregated output: {e}")
-            raise typer.Exit(code=1)
+        for label, topics_map in aggregated_data.items():
+            # Reconstruct the topics list for this group
+            topics_list = []
+            for t_data in topics_map.values():
+                topic_obj = t_data['meta'].copy()
+                topic_obj['count'] = t_data['count']
+                topic_obj['score'] = t_data['score']
+                topics_list.append(topic_obj)
+            
+            # Create the group entity
+            group_entity = {
+                "display_name": label,
+                "topics": topics_list
+            }
+            
+            final_entities.append(group_entity)
 
         if not final_entities:
             print("No data aggregated. Exiting.")
@@ -121,7 +111,7 @@ def create_topic_treemap_command(app: typer.Typer):
 
         # --- Step 3: Visualize Topics (Treemap) ---
         print("\nStep 3: Generating treemaps...")
-        _generate_treemap(final_entities, output_dir / "topics_treemap.html")
+        _generate_treemap(final_entities, output_dir / "topic_treemap.html")
         
         print("\nDone!")
 

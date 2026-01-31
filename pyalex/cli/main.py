@@ -19,6 +19,7 @@ from .commands.institutions import create_institutions_command
 from .commands.utils import create_utils_commands
 from .commands.works import create_works_command
 from .commands.download import create_download_command
+from .commands.extract import create_extract_command
 
 from .commands.expand import create_expand_command
 from .commands.network import create_network_command
@@ -89,6 +90,7 @@ create_funders_command(app)
 create_utils_commands(app)
 create_entity_commands(app)
 create_download_command(app)
+create_extract_command(app)
 
 create_expand_command(app)
 create_network_command(app)

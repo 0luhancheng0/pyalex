@@ -23,44 +23,41 @@ async def download_file(
     client: httpx.AsyncClient,
     url: str,
     filepath: str,
-    semaphore: asyncio.Semaphore,
 ) -> str:
-    """Download a single file with concurrency control."""
-    async with semaphore:
-        try:
-            # Check if file already exists
-            if os.path.exists(filepath):
-                return "exists"
+    """Download a single file."""
+    try:
+        # Check if file already exists
+        if os.path.exists(filepath):
+            return "exists"
 
-            response = await client.get(url, follow_redirects=True)
+        response = await client.get(url, follow_redirects=True)
 
-            if response.status_code == 200:
-                # content-type check
-                content_type = response.headers.get("Content-Type", "").lower()
-                if (
-                    "pdf" not in content_type
-                    and "application/octet-stream" not in content_type
-                ):
-                    return f"skipped_content_type_{content_type}"
+        if response.status_code == 200:
+            # content-type check
+            content_type = response.headers.get("Content-Type", "").lower()
+            if (
+                "pdf" not in content_type
+                and "application/octet-stream" not in content_type
+            ):
+                return f"skipped_content_type_{content_type}"
 
-                # Ensure directory exists (race condition check)
-                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            # Ensure directory exists (race condition check)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-                with open(filepath, "wb") as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
+            with open(filepath, "wb") as f:
+                async for chunk in response.aiter_bytes():
+                    f.write(chunk)
 
-                return "success"
-            else:
-                return f"error_{response.status_code}"
-        except Exception as e:
-            return f"exception_{str(e)}"
+            return "success"
+        else:
+            return f"error_{response.status_code}"
+    except Exception as e:
+        return f"exception_{str(e)}"
 
 
 async def process_downloads(
     input_jsonl: str,
     download_dir: str,
-    concurrency: int,
     limit: Optional[int],
 ):
     """
@@ -170,21 +167,17 @@ async def process_downloads(
     if total_files == 0:
         return
 
-    # Configure client limits
-    limits = httpx.Limits(
-        max_keepalive_connections=concurrency, max_connections=concurrency
-    )
+    # Configure client with no connection limits
     timeout = httpx.Timeout(30.0, connect=10.0)
-    semaphore = asyncio.Semaphore(concurrency)
 
-    typer.echo(f"Starting downloads with {concurrency} concurrent requests...")
+    typer.echo(f"Starting downloads with unlimited concurrency...")
     
     async with httpx.AsyncClient(
-        limits=limits, timeout=timeout, follow_redirects=True
+        timeout=timeout, follow_redirects=True
     ) as client:
         # Create tasks
         tasks = [
-            download_file(client, url, filepath, semaphore)
+            download_file(client, url, filepath)
             for url, filepath in work_items
         ]
 
@@ -250,14 +243,6 @@ def create_download_command(app):
                 help="Directory to save downloaded PDFs",
             ),
         ] = "downloads",
-        concurrency: Annotated[
-            int,
-            typer.Option(
-                "--concurrency",
-                "-c",
-                help="Number of concurrent downloads",
-            ),
-        ] = 10,
         limit: Annotated[
             Optional[int],
             typer.Option(
@@ -279,7 +264,7 @@ def create_download_command(app):
                 raise typer.Exit(1)
 
             asyncio.run(
-                process_downloads(effective_input, output_dir, concurrency, limit)
+                process_downloads(effective_input, output_dir, limit)
             )
         except Exception as e:
             _handle_cli_exception(e)
