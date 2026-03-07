@@ -531,6 +531,14 @@ def create_works_command(app):
                 rich_help_panel=RESULT_PANEL,
             ),
         ] = None,
+        embeddings_model: Annotated[
+            str | None,
+            typer.Option(
+                "--embeddings-model",
+                help="Generate and include embeddings based on the works' title and abstract using the specified model.",
+                rich_help_panel=RESULT_PANEL,
+            ),
+        ] = None,
     ):
         """
         Search and retrieve works from OpenAlex.
@@ -602,6 +610,9 @@ def create_works_command(app):
 
             # Build query
             query = Works()
+
+            if embeddings_model:
+                query = query.with_embeddings(model=embeddings_model)
 
             if search:
                 query = query.search(search)

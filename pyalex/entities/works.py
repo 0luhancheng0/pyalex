@@ -94,6 +94,7 @@ class Works(BaseOpenAlex):
     """Class representing a collection of work entities in OpenAlex."""
 
     resource_class = Work
+    default_embedding_fields = ["title", "abstract"]
 
     def filter_by_author(self, author_id, **kwargs):
         """Filter works by author OpenAlex ID.

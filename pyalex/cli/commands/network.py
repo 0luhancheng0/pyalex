@@ -64,7 +64,8 @@ def _build_graph(
     works_data: List[Dict], 
     work_source_map: Dict[str, str], 
     edge_types: List[str], 
-    include_external: bool
+    include_external: bool,
+    include_embeddings: bool = False
 ) -> Tuple[Any, Dict[str, int], int]:
     """
     Builds the PyDiGraph from works data.
@@ -94,16 +95,21 @@ def _build_graph(
                      percentile = float(work["citation_normalized_percentile"].get("value", 0.0))
 
                 # Store publication year for layout
-                idx = graph.add_node(
-                    {
-                        "title": work.get("title"),
-                        "id": work_id,
-                        "type": "source",
-                        "source_file": source_name,
-                        "year": int(work.get("publication_year") or 0),
-                        "percentile": percentile,
-                    }
-                )
+                node_data = {
+                    "title": work.get("title"),
+                    "id": work_id,
+                    "type": "source",
+                    "source_file": source_name,
+                    "year": int(work.get("publication_year") or 0),
+                    "percentile": percentile,
+                }
+
+                # Optional: include embeddings
+                if include_embeddings and "embedding" in work and work["embedding"]:
+                    # Convert list to string for GraphML compatibility
+                    node_data["embedding"] = json.dumps(work["embedding"])
+
+                idx = graph.add_node(node_data)
                 id_to_idx[work_id] = idx
 
     external_node_count = 0
@@ -174,16 +180,19 @@ def _build_graph(
                     author_id = author_id.replace("https://openalex.org/", "")
 
                     if author_id not in id_to_idx:
-                        idx = graph.add_node(
-                            {
-                                "title": author.get("display_name", "Unknown Author"),
-                                "id": author_id,
-                                "type": "author",
-                                "source_file": "Author",
-                                "year": 0,
-                                "percentile": 0.0,
-                            }
-                        )
+                        node_data = {
+                            "title": author.get("display_name", "Unknown Author"),
+                            "id": author_id,
+                            "type": "author",
+                            "source_file": "Author",
+                            "year": 0,
+                            "percentile": 0.0,
+                        }
+                        
+                        if include_embeddings and "embedding" in author and author["embedding"]:
+                            node_data["embedding"] = json.dumps(author["embedding"])
+
+                        idx = graph.add_node(node_data)
                         id_to_idx[author_id] = idx
 
                     author_idx = id_to_idx[author_id]
@@ -203,16 +212,18 @@ def _build_graph(
 
                     # Authors should have been added by 'authorship' edge step, but if only 'affiliation' is used:
                     if author_id not in id_to_idx:
-                        idx = graph.add_node(
-                            {
-                                "title": author.get("display_name", "Unknown Author"),
-                                "id": author_id,
-                                "type": "author",
-                                "source_file": "Author",
-                                "year": 0,
-                                "percentile": 0,
-                            }
-                        )
+                        node_data = {
+                            "title": author.get("display_name", "Unknown Author"),
+                            "id": author_id,
+                            "type": "author",
+                            "source_file": "Author",
+                            "year": 0,
+                            "percentile": 0,
+                        }
+                        if include_embeddings and "embedding" in author and author["embedding"]:
+                            node_data["embedding"] = json.dumps(author["embedding"])
+
+                        idx = graph.add_node(node_data)
                         id_to_idx[author_id] = idx
                     
                     author_idx = id_to_idx[author_id]
@@ -224,16 +235,18 @@ def _build_graph(
                         inst_id = inst_id.replace("https://openalex.org/", "")
 
                         if inst_id not in id_to_idx:
-                            idx = graph.add_node(
-                                {
-                                    "title": inst.get("display_name", "Unknown Institution"),
-                                    "id": inst_id,
-                                    "type": "institution",
-                                    "source_file": "Institution",
-                                    "year": 0,
-                                    "percentile": 0.0,
-                                }
-                            )
+                            node_data = {
+                                "title": inst.get("display_name", "Unknown Institution"),
+                                "id": inst_id,
+                                "type": "institution",
+                                "source_file": "Institution",
+                                "year": 0,
+                                "percentile": 0.0,
+                            }
+                            if include_embeddings and "embedding" in inst and inst["embedding"]:
+                                node_data["embedding"] = json.dumps(inst["embedding"])
+
+                            idx = graph.add_node(node_data)
                             id_to_idx[inst_id] = idx
 
                         inst_idx = id_to_idx[inst_id]
@@ -262,7 +275,56 @@ def _prune_graph(graph: Any):
 def _calculate_layout(graph: Any, layout: str) -> Dict[int, Tuple[float, float]]:
     """Calculates node positions based on the selected layout algorithm."""
     
-    if layout == "time-shell":
+    if layout == "umap":
+        try:
+            from umap.umap_ import UMAP
+            import numpy as np
+        except ImportError:
+            typer.echo("Error: umap-learn and numpy are required for 'umap' layout.", err=True)
+            typer.echo("Please install them with: pip install umap-learn", err=True)
+            raise typer.Exit(1)
+
+        node_indices = []
+        embeddings = []
+        for i in graph.node_indices():
+            data = graph.get_node_data(i)
+            emb = data.get("embedding")
+            if emb:
+                if isinstance(emb, str):
+                    try:
+                        emb = json.loads(emb)
+                    except json.JSONDecodeError:
+                        continue
+                if isinstance(emb, list):
+                    embeddings.append(emb)
+                    node_indices.append(i)
+
+        if not embeddings:
+            typer.echo("Error: No embeddings found in graph data.", err=True)
+            typer.echo("Did you use --include-embeddings during 'network build'?", err=True)
+            raise typer.Exit(1)
+            
+        typer.echo(f"  - Calculating UMAP 2D projection for {len(embeddings)} nodes with embeddings...")
+        X = np.array(embeddings)
+        
+        # Adjust n_neighbors based on dataset size, default is 15 but can crash if n_samples < 15
+        n_neighbors = min(15, len(embeddings) - 1) if len(embeddings) > 2 else 2
+        
+        reducer = UMAP(n_components=2, random_state=42, n_neighbors=n_neighbors)
+        proj = reducer.fit_transform(X)
+        
+        pos = {}
+        for idx, p in zip(node_indices, proj):
+            # UMAP axes don't have intrinsic meaning like years, so we can just use the raw coordinates
+            pos[idx] = (float(p[0]), float(p[1]))
+            
+        missing_count = graph.num_nodes() - len(node_indices)
+        if missing_count > 0:
+            typer.echo(f"  - Warning: {missing_count} nodes did not have embeddings and will not be displayed.")
+            
+        return pos
+
+    elif layout == "time-shell":
         years = {}
         for i in graph.node_indices():
             data = graph.get_node_data(i)
@@ -585,6 +647,13 @@ def build(
             help="Edge type(s) to build network from: 'citation', 'related', 'authorship', or 'affiliation'",
         ),
     ] = ["citation"],
+    include_embeddings: Annotated[
+        bool,
+        typer.Option(
+            "--include-embeddings",
+            help="Include embeddings in the node data if present in input files",
+        ),
+    ] = False,
 ):
     """
     Builds a citation/entity network from OpenAlex works and saves it to a GraphML file.
@@ -618,7 +687,7 @@ def build(
 
         # 3. Build Graph
         graph, _, external_node_count = _build_graph(
-            works_data, work_source_map, edge_types, include_external
+            works_data, work_source_map, edge_types, include_external, include_embeddings
         )
 
         typer.echo(f"Graph built: {graph.num_nodes()} nodes, {graph.num_edges()} edges")
@@ -673,7 +742,7 @@ def visualize(
         str,
         typer.Option(
             "--layout",
-            help="Layout algorithm: 'spring', 'time-shell' (concentric), or 'timeline' (default, chronological x-axis)",
+            help="Layout algorithm: 'spring', 'time-shell' (concentric), 'timeline' (default, chronological x-axis), or 'umap' (based on embeddings)",
         ),
     ] = "timeline",
     node_size: Annotated[

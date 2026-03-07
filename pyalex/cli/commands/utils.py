@@ -127,6 +127,13 @@ def from_ids(
             ),
         ),
     ] = False,
+    embeddings_model: Annotated[
+        str | None,
+        typer.Option(
+            "--embeddings-model",
+            help="Generate and include embeddings based on the entity's text fields using the specified model.",
+        ),
+    ] = None,
 ):
     """Retrieve entities by their OpenAlex IDs from cli or stdin."""
 
@@ -162,6 +169,10 @@ def from_ids(
         results = asyncio.run(
             _async_retrieve_entities(entity_class, cleaned_ids, class_name)
         )
+
+        if embeddings_model and hasattr(entity_class, "with_embeddings"):
+            dummy = entity_class().with_embeddings(model=embeddings_model)
+            results = dummy._apply_embeddings(results)
 
         _output_results(
             results,

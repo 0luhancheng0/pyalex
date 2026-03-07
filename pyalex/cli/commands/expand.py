@@ -27,18 +27,20 @@ from .help_panels import OUTPUT_PANEL
 
 
 class ExpandMode(str, Enum):
-    related = "related"
-    forward = "forward"
-    backward = "backward"
-    authors = "authors"
-    institutions = "institutions"
+    work_related = "work_related"
+    work_forward = "work_forward"
+    work_backward = "work_backward"
+    work_authors = "work_authors"
+    work_institutions = "work_institutions"
+    author_institutions = "author_institutions"
+    author_works = "author_works"
 
 
 def expand(
     input_path: Annotated[
         Optional[str],
         typer.Argument(
-            help="Path to input JSONL file containing Works",
+            help="Path to input JSONL file containing Works or Authors",
         ),
     ] = None,
     input_opt: Annotated[
@@ -46,7 +48,7 @@ def expand(
         typer.Option(
             "--input",
             "-i",
-            help="Path to input JSONL file containing Works",
+            help="Path to input JSONL file containing Works or Authors",
         ),
     ] = None,
     output_path: Annotated[
@@ -63,9 +65,9 @@ def expand(
         typer.Option(
             "--mode",
             "-m",
-            help="Expansion mode: 'related' (related_works), 'backward' (referenced_works), 'forward' (citing works), 'authors' (authors of the input works), or 'institutions' (institutions of the input authors or works)",
+            help="Expansion mode: 'work_related' (related_works), 'work_backward' (referenced_works), 'work_forward' (citing works), 'work_authors' (authors of the input works), 'work_institutions' (institutions of the input works), 'author_institutions' (institutions of the input authors), or 'author_works' (works of the input authors)",
         ),
-    ] = ExpandMode.related,
+    ] = ExpandMode.work_related,
     jsonl_flag: Annotated[
         bool,
         typer.Option(
@@ -87,16 +89,26 @@ def expand(
             rich_help_panel=OUTPUT_PANEL,
         ),
     ] = False,
+    embeddings_model: Annotated[
+        str | None,
+        typer.Option(
+            "--embeddings-model",
+            help="Generate and include embeddings based on the works' title and abstract using the specified model.",
+            rich_help_panel=OUTPUT_PANEL,
+        ),
+    ] = None,
 ):
     """
-    Expand a set of Works by fetching related, referenced, or citing works, or extracting authors.
+    Expand a set of Works or Authors by fetching related entities.
 
     Modes:
-    - related: Fetch works listed in 'related_works' of input works.
-    - backward: Fetch works listed in 'referenced_works' of input works.
-    - forward: Fetch works that cite the input works (citing works).
-    - authors: Fetch authors listed in 'authorships' of input works.
-    - institutions: Fetch institutions listed in 'last_known_institutions' (from authors) or 'institutions' (from works).
+    - work_related: Fetch works listed in 'related_works' of input works.
+    - work_backward: Fetch works listed in 'referenced_works' of input works.
+    - work_forward: Fetch works that cite the input works (citing works).
+    - work_authors: Fetch authors listed in 'authorships' of input works.
+    - work_institutions: Fetch institutions listed in 'authorships' of input works.
+    - author_institutions: Fetch institutions listed in 'last_known_institutions' or 'affiliations' of input authors.
+    - author_works: Fetch works authored by the input authors.
     """
     try:
         # Resolve input
@@ -122,29 +134,29 @@ def expand(
                     try:
                         data = json.loads(line)
                         
-                        if mode == ExpandMode.forward:
-                            # For forward, we collect the IDs of the input works themselves
+                        if mode == ExpandMode.work_forward:
+                            # For work_forward, we collect the IDs of the input works themselves
                             work_id = data.get("id")
                             if work_id:
                                 clean_id = work_id.replace("https://openalex.org/", "")
                                 extracted_ids.add(clean_id)
                         
-                        elif mode == ExpandMode.backward:
-                            # For backward, we collect IDs from referenced_works
+                        elif mode == ExpandMode.work_backward:
+                            # For work_backward, we collect IDs from referenced_works
                             refs = data.get("referenced_works", [])
                             for ref in refs:
                                 clean_id = ref.replace("https://openalex.org/", "")
                                 extracted_ids.add(clean_id)
                         
-                        elif mode == ExpandMode.related:
-                            # For related, we collect IDs from related_works
+                        elif mode == ExpandMode.work_related:
+                            # For work_related, we collect IDs from related_works
                             refs = data.get("related_works", [])
                             for ref in refs:
                                 clean_id = ref.replace("https://openalex.org/", "")
                                 extracted_ids.add(clean_id)
                                 
-                        elif mode == ExpandMode.authors:
-                            # For authors, we collect IDs from authorships
+                        elif mode == ExpandMode.work_authors:
+                            # For work_authors, we collect IDs from authorships
                             authorships = data.get("authorships", [])
                             for authorship in authorships:
                                 author = authorship.get("author", {})
@@ -153,11 +165,17 @@ def expand(
                                     clean_id = author_id.replace("https://openalex.org/", "")
                                     extracted_ids.add(clean_id)
 
-                        elif mode == ExpandMode.institutions:
-                            # For institutions, we collect IDs from affiliations/last_known_institutions in Authors,
-                            # or from institutions in Works' authorships
+                        elif mode == ExpandMode.work_institutions:
+                            # For work_institutions, we collect IDs from institutions in Works' authorships
+                            if "authorships" in data:
+                                for authorship in data.get("authorships", []):
+                                    for inst in authorship.get("institutions", []):
+                                        if "id" in inst and inst["id"]:
+                                            extracted_ids.add(inst["id"].replace("https://openalex.org/", ""))
+
+                        elif mode == ExpandMode.author_institutions:
+                            # For author_institutions, we collect IDs from affiliations/last_known_institutions in Authors
                             if "last_known_institutions" in data:
-                                # It's an Author object
                                 for inst in data.get("last_known_institutions", []):
                                     if "id" in inst and inst["id"]:
                                         extracted_ids.add(inst["id"].replace("https://openalex.org/", ""))
@@ -165,12 +183,13 @@ def expand(
                                     inst = aff.get("institution", {})
                                     if "id" in inst and inst["id"]:
                                         extracted_ids.add(inst["id"].replace("https://openalex.org/", ""))
-                            elif "authorships" in data:
-                                # It's a Work object
-                                for authorship in data.get("authorships", []):
-                                    for inst in authorship.get("institutions", []):
-                                        if "id" in inst and inst["id"]:
-                                            extracted_ids.add(inst["id"].replace("https://openalex.org/", ""))
+
+                        elif mode == ExpandMode.author_works:
+                            # For author_works, we collect the IDs of the input authors themselves
+                            author_id = data.get("id")
+                            if author_id:
+                                clean_id = author_id.replace("https://openalex.org/", "")
+                                extracted_ids.add(clean_id)
 
                     except json.JSONDecodeError:
                         continue
@@ -186,9 +205,11 @@ def expand(
         # typer.echo(f"Found {len(formatted_ids)} unique IDs to process.", err=True)
 
         # Process based on mode
-        if mode == ExpandMode.forward:
-             # Forward expansion means finding works that cite these IDs
+        if mode == ExpandMode.work_forward:
+             # work_forward expansion means finding works that cite these IDs
             query = Works()
+            if embeddings_model:
+                query = query.with_embeddings(model=embeddings_model)
             id_string = ",".join(formatted_ids)
             query = add_id_list_option_to_command(query, id_string, "works_cites", Works)
 
@@ -213,21 +234,57 @@ def expand(
                     normalize=normalize,
                 )
 
-        elif mode == ExpandMode.authors:
-            # Authors expansion means fetching these specific Author IDs
+        elif mode == ExpandMode.author_works:
+            # author_works expansion means finding works authored by these IDs
+            query = Works()
+            if embeddings_model:
+                query = query.with_embeddings(model=embeddings_model)
+            id_string = ",".join(formatted_ids)
+            query = add_id_list_option_to_command(query, id_string, "works_author", Works)
+
+            # Handle potentially large lists or standard query
+            results = handle_large_id_list_if_needed(
+                query,
+                Works,
+                True, # all_results
+                None, # limit
+                effective_jsonl_path,
+                normalize=normalize,
+            )
+
+            if results is None:
+                # Standard query fallback
+                results = execute_standard_query(
+                    query, "Works", all_results=True, limit=None
+                )
+                _output_results(
+                    results,
+                    jsonl_path=effective_jsonl_path,
+                    normalize=normalize,
+                )
+
+        elif mode == ExpandMode.work_authors:
+            # work_authors expansion means fetching these specific Author IDs
             results = asyncio.run(
                 _async_retrieve_entities(Authors, formatted_ids, "Authors")
             )
+            if embeddings_model and hasattr(Authors, "with_embeddings"):
+                dummy = Authors().with_embeddings(model=embeddings_model)
+                results = dummy._apply_embeddings(results)
             _output_results(
                 results,
                 jsonl_path=effective_jsonl_path,
                 normalize=normalize,
             )
 
-        elif mode == ExpandMode.institutions:
+        elif mode in (ExpandMode.work_institutions, ExpandMode.author_institutions):
+            # Fetch these specific Institution IDs
             results = asyncio.run(
                 _async_retrieve_entities(Institutions, formatted_ids, "Institutions")
             )
+            if embeddings_model and hasattr(Institutions, "with_embeddings"):
+                dummy = Institutions().with_embeddings(model=embeddings_model)
+                results = dummy._apply_embeddings(results)
             _output_results(
                 results,
                 jsonl_path=effective_jsonl_path,
@@ -235,16 +292,18 @@ def expand(
             )
 
         else:
-            # Backward and Related expansion means fetching these specific Work IDs
+            # work_backward and work_related expansion means fetching these specific Work IDs
             results = asyncio.run(
                 _async_retrieve_entities(Works, formatted_ids, "Works")
             )
+            if embeddings_model and hasattr(Works, "with_embeddings"):
+                dummy = Works().with_embeddings(model=embeddings_model)
+                results = dummy._apply_embeddings(results)
             _output_results(
                 results,
                 jsonl_path=effective_jsonl_path,
                 normalize=normalize,
             )
-
     except Exception as e:
         _handle_cli_exception(e)
 

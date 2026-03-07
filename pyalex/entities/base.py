@@ -224,7 +224,123 @@ class RangeFilterMixin:
         )
 
 
-class BaseOpenAlex:
+class EmbeddingQueryMixin:
+    """Mixin to add embedding generation capabilities to OpenAlex entities."""
+
+    def with_embeddings(self, model="all-MiniLM-L6-v2", fields=None):
+        """Enable embedding generation for the results.
+
+        Parameters
+        ----------
+        model : str, optional
+            The sentence-transformers model to use.
+        fields : list of str, optional
+            The fields to extract and concatenate for the embedding text.
+            If None, the entity's default fields will be used.
+
+        Returns
+        -------
+        self
+            Updated entity object.
+        """
+        self._generate_embeddings = True
+        self._embedding_model = model
+        if fields is not None:
+            self._embedding_fields = fields
+        return self
+
+    def _apply_embeddings(self, results):
+        """Apply embeddings to the results if enabled."""
+        if not getattr(self, "_generate_embeddings", False):
+            return results
+
+        # Determine the fields to use
+        fields = getattr(self, "_embedding_fields", [])
+        if not fields:
+            # If no fields provided, try to fallback to entity defaults
+            fields = getattr(self, "default_embedding_fields", [])
+            if not fields:
+                logger.warning("No embedding fields specified and no default found. Skipping embeddings.")
+                return results
+
+        # Import generator lazily
+        try:
+            from pyalex.embeddings.generator import generate_embeddings
+        except ImportError:
+            logger.warning("Could not import embedding generator. Ensure sentence-transformers is installed.")
+            return results
+
+        try:
+            import pandas as pd
+            HAS_PANDAS = True
+        except ImportError:
+            HAS_PANDAS = False
+
+        is_tuple = isinstance(results, tuple)
+        
+        # Handle tuple (results, meta)
+        if is_tuple:
+            data = results[0]
+            meta = results[1]
+        else:
+            data = results
+
+        is_df = HAS_PANDAS and isinstance(data, pd.DataFrame)
+
+        # Extract texts
+        texts = []
+        if is_df:
+            # For dataframe, iterate rows
+            for _, row in data.iterrows():
+                # combine fields, handling None/NaN
+                parts = []
+                for f in fields:
+                    val = row.get(f)
+                    if pd.notna(val) and val:
+                        parts.append(str(val))
+                texts.append(" ".join(parts))
+        elif isinstance(data, dict):
+            # Single entity dict
+            parts = []
+            for f in fields:
+                val = data.get(f)
+                if val:
+                    parts.append(str(val))
+            texts.append(" ".join(parts))
+        elif isinstance(data, list):
+            # List of dicts
+            for item in data:
+                parts = []
+                for f in fields:
+                    val = item.get(f)
+                    if val:
+                        parts.append(str(val))
+                texts.append(" ".join(parts))
+        else:
+            return results
+
+        # Generate embeddings
+        embeddings = generate_embeddings(texts, model_name=getattr(self, "_embedding_model", "all-MiniLM-L6-v2"))
+
+        # Apply embeddings back
+        if not embeddings:
+            return results
+
+        if is_df:
+            data["embedding"] = embeddings
+        elif isinstance(data, dict):
+            data["embedding"] = embeddings[0]
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                if i < len(embeddings):
+                    item["embedding"] = embeddings[i]
+
+        if is_tuple:
+            return (data, meta)
+        return data
+
+
+class BaseOpenAlex(EmbeddingQueryMixin):
     """Base class for OpenAlex objects.
 
     Parameters
@@ -328,7 +444,8 @@ class BaseOpenAlex:
             Single record data
         """
         self.params = record_id
-        return _run_async_safely(self._get_from_url_async(self.url))
+        res = _run_async_safely(self._get_from_url_async(self.url))
+        return self._apply_embeddings(res)
 
     def _handle_slice_id(self, record_id):
         """Handle slice notation for pagination.
@@ -535,10 +652,12 @@ class BaseOpenAlex:
 
                 if limit <= MAX_PAGE_BASED_RESULTS:
                     # Use parallel page-based pagination (faster)
-                    return await self._get_async_parallel_paging(limit, return_meta)
+                    res = await self._get_async_parallel_paging(limit, return_meta)
+                    return self._apply_embeddings(res)
                 else:
                     # Use sequential cursor-based pagination (required for >10k results)
-                    return await self._get_async_cursor_paging(limit, return_meta)
+                    res = await self._get_async_cursor_paging(limit, return_meta)
+                    return self._apply_embeddings(res)
 
         # Set default per_page for efficiency
         if per_page is None:
@@ -569,9 +688,9 @@ class BaseOpenAlex:
             meta = (
                 resp_list.attrs.get("meta", {}) if hasattr(resp_list, "attrs") else {}
             )
-            return resp_list, meta
+            return self._apply_embeddings((resp_list, meta))
         else:
-            return resp_list
+            return self._apply_embeddings(resp_list)
 
     async def _get_async_parallel_paging(self, limit, return_meta=False):
         """Async parallel pagination for medium-sized result sets (up to 10k).

@@ -23,6 +23,7 @@ from .commands.extract import create_extract_command
 
 from .commands.expand import create_expand_command
 from .commands.network import create_network_command
+from .commands.atlas import create_atlas_command
 from .commands.visualize_topics import create_topic_treemap_command
 
 # Create the main typer app
@@ -94,4 +95,5 @@ create_extract_command(app)
 
 create_expand_command(app)
 create_network_command(app)
+create_atlas_command(app)
 create_topic_treemap_command(app)

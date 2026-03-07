@@ -37,6 +37,10 @@ from pyalex.entities import Work
 from pyalex.entities import Works
 from pyalex.entities import autocomplete
 
+# Embeddings & Visualization
+from pyalex.embeddings import show_atlas
+from pyalex.embeddings import generate_embeddings
+
 # Import logging configuration
 from pyalex.logger import get_logger
 from pyalex.logger import setup_logger
@@ -80,4 +84,6 @@ __all__ = [
     "get_logger",
     "from_id",
     "get_entity_type",
+    "show_atlas",
+    "generate_embeddings",
 ]
