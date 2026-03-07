@@ -4,10 +4,12 @@ The `pyalex.embeddings` module provides tools for generating vector representati
 
 ## Installation
 
-To use the visualization features, install the optional dependencies:
+To use the embedding and visualization features, install the required dependencies:
 
 ```bash
-pip install embedding-atlas pandas
+pip install sentence-transformers pandas pyarrow fastparquet
+# And the atlas CLI for visualization
+pip install embedding-atlas
 ```
 
 ## Embedding Generation
@@ -32,34 +34,19 @@ print(works[0]["embedding"])
 pyalex works --search "test" --embeddings-model all-MiniLM-L6-v2 --limit 10 -o works.jsonl
 ```
 
-## Interactive Visualization (Embedding Atlas)
+### Generating Embeddings for Atlas
 
-PyAlex integrates with Apple's `embedding-atlas` to provide a WebGPU-powered semantic map of your entities. This allows you to explore thousands (or millions) of points with real-time clustering and filtering.
-
-### Python API (Jupyter Notebooks)
-
-If you are working in a Jupyter notebook or Google Colab, you can render the atlas directly as a widget:
-
-```python
-from pyalex import Works, show_atlas
-
-# Fetch data with embeddings
-works = Works().search("large language models").with_embeddings().get(limit=500)
-
-# Display the interactive atlas
-show_atlas(works)
-```
-
-### CLI Command
-
-You can launch a local visualization server from any JSONL file containing an `embedding` column:
+You can use the `embedding` subcommand to create a Parquet file from a network graph:
 
 ```bash
-# First, collect some data with embeddings
-pyalex works --search "quantum computing" --embeddings-model all-MiniLM-L6-v2 -o quantum.jsonl
+# 1. Build a network graph (copies all metadata)
+pyalex network build -i works.jsonl -o network.graphml --edge-type authorship --edge-type affiliation
 
-# Launch the interactive atlas
-pyalex atlas visualize -i quantum.jsonl --port 8000
+# 2. Generate embeddings for all entities (Works, Authors, Institutions)
+pyalex embedding generate network.graphml output.parquet
+
+# 3. Launch the interaction atlas using the standalone CLI
+embedding-atlas output.parquet --vector embedding
 ```
 
 ## Network Visualization (Plotly & UMAP)
@@ -76,6 +63,6 @@ pyalex network visualize -i quantum.graphml -o quantum.html --layout umap
 
 ## Performance Tips
 
-1. **Lazy Loading**: PyAlex only loads ML libraries (like `sentence-transformers` and `umap-learn`) when they are actually called, keeping the base library lightweight.
-2. **Metadata Flattening**: `show_atlas` automatically flattens nested OpenAlex metadata (like authorships) into JSON strings so they can be easily filtered and searched in the Atlas UI.
+1. **Lazy Loading**: PyAlex only loads ML libraries (like `sentence-transformers`) when they are actually called, keeping the base library lightweight.
+2. **Metadata Flattening**: The generator automatically flattens nested OpenAlex metadata (like authorships) into JSON strings so they can be easily filtered and searched in the Atlas UI.
 3. **WebGPU Support**: Embedding Atlas uses WebGPU/WebGL 2 for rendering. For large datasets (>100k points), ensure your browser supports these technologies for the best experience.

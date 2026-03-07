@@ -23,7 +23,7 @@ PyAlex provides a powerful command-line interface to interact with the [OpenAlex
 - **Batch Processing**: Handle large datasets efficiently with async processing
 - **Grouping & Aggregation**: Group results by various fields for analysis
 - **Pagination Control**: Retrieve specific pages or all results
-- **Embeddings Visualization**: Interactive visualization of research embeddings with Embedding Atlas
+- **Embeddings Generation**: Generate vector representations of scholarly works and entities
 - **LLM Integration**: Model Context Protocol server exposing PyAlex queries as agent tools
 
 ## 🛠️ CLI Reference
@@ -167,23 +167,19 @@ python basic_usage.py
 streamlit run streamlit_example.py
 ```
 
-### Embeddings Visualization
+### Embeddings Generation
 
-PyAlex includes integration with [Embedding Atlas](https://apple.github.io/embedding-atlas/) for interactive visualization of research embeddings in Streamlit apps:
+PyAlex provides a utility to generate embeddings for OpenAlex entities and export them as Parquet files compatible with [Embedding Atlas](https://apple.github.io/embedding-atlas/):
 
-```python
-from pyalex import Works
-from pyalex.embeddings import prepare_works_for_embeddings, pyalex_embedding_atlas
+```bash
+# Generate embeddings from a network graph
+pyalex embedding generate network.graphml output.parquet
 
-# Fetch and prepare data
-works = Works().search("machine learning").get(limit=1000)
-prepared = prepare_works_for_embeddings(works, text_column="abstract")
-
-# Create interactive visualization
-selection = pyalex_embedding_atlas(prepared, show_table=True)
+# Launch visualization (requires embedding-atlas installed separately)
+embedding-atlas output.parquet --vector embedding
 ```
 
-See `pyalex/embeddings/README.md` and `docs/embeddings.md` for full documentation.
+See `docs/embeddings.md` for full documentation.
 
 ### CLI Examples
 

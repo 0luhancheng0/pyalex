@@ -23,8 +23,8 @@ from .commands.extract import create_extract_command
 
 from .commands.expand import create_expand_command
 from .commands.network import create_network_command
-from .commands.atlas import create_atlas_command
 from .commands.visualize_topics import create_topic_treemap_command
+from pyalex.embeddings.embed import app as embed_app
 
 # Create the main typer app
 app = typer.Typer(
@@ -95,5 +95,5 @@ create_extract_command(app)
 
 create_expand_command(app)
 create_network_command(app)
-create_atlas_command(app)
 create_topic_treemap_command(app)
+app.add_typer(embed_app, name="embedding", help="Generate embeddings for entities in a network graph.")

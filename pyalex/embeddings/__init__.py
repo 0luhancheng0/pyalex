@@ -1,6 +1,3 @@
-"""PyAlex embeddings module."""
+from .pipeline import run_embedding_pipeline, process_graphml_file
 
-from pyalex.embeddings.generator import generate_embeddings
-from pyalex.embeddings.atlas import show_atlas
-
-__all__ = ["generate_embeddings", "show_atlas"]
+__all__ = ["run_embedding_pipeline", "process_graphml_file"]
