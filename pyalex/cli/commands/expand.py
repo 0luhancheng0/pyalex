@@ -12,6 +12,8 @@ from typing import Optional
 
 import typer
 
+from pyalex import Authors
+from pyalex import Institutions
 from pyalex import Works
 
 from ..batch import add_id_list_option_to_command
@@ -28,6 +30,8 @@ class ExpandMode(str, Enum):
     related = "related"
     forward = "forward"
     backward = "backward"
+    authors = "authors"
+    institutions = "institutions"
 
 
 def expand(
@@ -59,7 +63,7 @@ def expand(
         typer.Option(
             "--mode",
             "-m",
-            help="Expansion mode: 'related' (related_works), 'backward' (referenced_works), or 'forward' (citing works)",
+            help="Expansion mode: 'related' (related_works), 'backward' (referenced_works), 'forward' (citing works), 'authors' (authors of the input works), or 'institutions' (institutions of the input authors or works)",
         ),
     ] = ExpandMode.related,
     jsonl_flag: Annotated[
@@ -85,12 +89,14 @@ def expand(
     ] = False,
 ):
     """
-    Expand a set of Works by fetching related, referenced, or citing works.
+    Expand a set of Works by fetching related, referenced, or citing works, or extracting authors.
 
     Modes:
     - related: Fetch works listed in 'related_works' of input works.
     - backward: Fetch works listed in 'referenced_works' of input works.
     - forward: Fetch works that cite the input works (citing works).
+    - authors: Fetch authors listed in 'authorships' of input works.
+    - institutions: Fetch institutions listed in 'last_known_institutions' (from authors) or 'institutions' (from works).
     """
     try:
         # Resolve input
@@ -136,6 +142,35 @@ def expand(
                             for ref in refs:
                                 clean_id = ref.replace("https://openalex.org/", "")
                                 extracted_ids.add(clean_id)
+                                
+                        elif mode == ExpandMode.authors:
+                            # For authors, we collect IDs from authorships
+                            authorships = data.get("authorships", [])
+                            for authorship in authorships:
+                                author = authorship.get("author", {})
+                                author_id = author.get("id")
+                                if author_id:
+                                    clean_id = author_id.replace("https://openalex.org/", "")
+                                    extracted_ids.add(clean_id)
+
+                        elif mode == ExpandMode.institutions:
+                            # For institutions, we collect IDs from affiliations/last_known_institutions in Authors,
+                            # or from institutions in Works' authorships
+                            if "last_known_institutions" in data:
+                                # It's an Author object
+                                for inst in data.get("last_known_institutions", []):
+                                    if "id" in inst and inst["id"]:
+                                        extracted_ids.add(inst["id"].replace("https://openalex.org/", ""))
+                                for aff in data.get("affiliations", []):
+                                    inst = aff.get("institution", {})
+                                    if "id" in inst and inst["id"]:
+                                        extracted_ids.add(inst["id"].replace("https://openalex.org/", ""))
+                            elif "authorships" in data:
+                                # It's a Work object
+                                for authorship in data.get("authorships", []):
+                                    for inst in authorship.get("institutions", []):
+                                        if "id" in inst and inst["id"]:
+                                            extracted_ids.add(inst["id"].replace("https://openalex.org/", ""))
 
                     except json.JSONDecodeError:
                         continue
@@ -178,8 +213,29 @@ def expand(
                     normalize=normalize,
                 )
 
+        elif mode == ExpandMode.authors:
+            # Authors expansion means fetching these specific Author IDs
+            results = asyncio.run(
+                _async_retrieve_entities(Authors, formatted_ids, "Authors")
+            )
+            _output_results(
+                results,
+                jsonl_path=effective_jsonl_path,
+                normalize=normalize,
+            )
+
+        elif mode == ExpandMode.institutions:
+            results = asyncio.run(
+                _async_retrieve_entities(Institutions, formatted_ids, "Institutions")
+            )
+            _output_results(
+                results,
+                jsonl_path=effective_jsonl_path,
+                normalize=normalize,
+            )
+
         else:
-            # Backward and Related expansion means fetching these specific IDs
+            # Backward and Related expansion means fetching these specific Work IDs
             results = asyncio.run(
                 _async_retrieve_entities(Works, formatted_ids, "Works")
             )

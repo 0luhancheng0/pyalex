@@ -6,7 +6,7 @@ This command builds a citation network from OpenAlex works using rustworkx and v
 
 import json
 from pathlib import Path
-from typing import Annotated, List, Dict, Set, Any, Tuple
+from typing import Annotated, List, Dict, Set, Any, Tuple, Optional
 
 import typer
 
@@ -89,9 +89,9 @@ def _build_graph(
                 source_name = work_source_map.get(work.get("id"), "Unknown")
                 
                 # Extract citation_normalized_percentile
-                percentile = 0
+                percentile = 0.0
                 if "citation_normalized_percentile" in work and work["citation_normalized_percentile"]:
-                     percentile = work["citation_normalized_percentile"].get("value", 0)
+                     percentile = float(work["citation_normalized_percentile"].get("value", 0.0))
 
                 # Store publication year for layout
                 idx = graph.add_node(
@@ -100,7 +100,7 @@ def _build_graph(
                         "id": work_id,
                         "type": "source",
                         "source_file": source_name,
-                        "year": work.get("publication_year", 0),
+                        "year": int(work.get("publication_year") or 0),
                         "percentile": percentile,
                     }
                 )
@@ -110,48 +110,134 @@ def _build_graph(
 
     # Pass 2: Add edges
     for et in edge_types:
-        edge_field = "referenced_works" if et == "citation" else "related_works"
-        typer.echo(f"Adding '{et}' edges from field '{edge_field}'...")
-
-        for work in works_data:
-            source_id = work.get("id")
-            if not source_id:
-                continue
-
-            source_id = source_id.replace("https://openalex.org/", "")
-            # Ensure source exists in graph (it should from Pass 1)
-            if source_id not in id_to_idx:
-                continue
-                
-            source_idx = id_to_idx[source_id]
-
-            targets = work.get(edge_field, [])
-            for target_ref in targets:
-                target_id = target_ref.replace("https://openalex.org/", "")
-                
-                if target_id in id_to_idx:
-                    # Internal edge
-                    target_idx = id_to_idx[target_id]
-                    if source_idx != target_idx:
+        if et in ["citation", "related"]:
+            edge_field = "referenced_works" if et == "citation" else "related_works"
+            typer.echo(f"Adding '{et}' edges from field '{edge_field}'...")
+    
+            for work in works_data:
+                source_id = work.get("id")
+                if not source_id:
+                    continue
+    
+                source_id = source_id.replace("https://openalex.org/", "")
+                if source_id not in id_to_idx:
+                    continue
+                    
+                source_idx = id_to_idx[source_id]
+    
+                targets = work.get(edge_field, [])
+                for target_ref in targets:
+                    target_id = target_ref.replace("https://openalex.org/", "")
+                    
+                    if target_id in id_to_idx:
+                        # Internal edge
+                        target_idx = id_to_idx[target_id]
+                        if source_idx != target_idx:
+                            graph.add_edge(source_idx, target_idx, {"type": et})
+                    elif include_external:
+                        # Add external node
+                        if target_id not in id_to_idx:
+                            idx = graph.add_node(
+                                {
+                                    "title": "External Work",
+                                    "id": target_id,
+                                    "type": "external",
+                                    "source_file": "External",
+                                    "year": 0,
+                                    "percentile": 0.0,
+                                }
+                            )
+                            id_to_idx[target_id] = idx
+                            external_node_count += 1
+    
+                        target_idx = id_to_idx[target_id]
                         graph.add_edge(source_idx, target_idx, {"type": et})
-                elif include_external:
-                    # Add external node
-                    if target_id not in id_to_idx:
+        
+        elif et == "authorship":
+            typer.echo("Adding 'authorship' edges (Work -> Author)...")
+            for work in works_data:
+                source_id = work.get("id")
+                if not source_id:
+                    continue
+                source_id = source_id.replace("https://openalex.org/", "")
+                if source_id not in id_to_idx:
+                    continue
+                source_idx = id_to_idx[source_id]
+
+                for authorship in work.get("authorships", []):
+                    author = authorship.get("author", {})
+                    if not author:
+                        continue
+                    author_id = author.get("id")
+                    if not author_id:
+                        continue
+                    author_id = author_id.replace("https://openalex.org/", "")
+
+                    if author_id not in id_to_idx:
                         idx = graph.add_node(
                             {
-                                "title": "External Work",
-                                "id": target_id,
-                                "type": "external",
-                                "source_file": "External",
+                                "title": author.get("display_name", "Unknown Author"),
+                                "id": author_id,
+                                "type": "author",
+                                "source_file": "Author",
                                 "year": 0,
-                                "percentile": 0, # External nodes default to 0
+                                "percentile": 0.0,
                             }
                         )
-                        id_to_idx[target_id] = idx
-                        external_node_count += 1
+                        id_to_idx[author_id] = idx
 
-                    target_idx = id_to_idx[target_id]
-                    graph.add_edge(source_idx, target_idx, {"type": et})
+                    author_idx = id_to_idx[author_id]
+                    graph.add_edge(source_idx, author_idx, {"type": et})
+
+        elif et == "affiliation":
+            typer.echo("Adding 'affiliation' edges (Author -> Institution)...")
+            for work in works_data:
+                for authorship in work.get("authorships", []):
+                    author = authorship.get("author", {})
+                    if not author:
+                        continue
+                    author_id = author.get("id")
+                    if not author_id:
+                        continue
+                    author_id = author_id.replace("https://openalex.org/", "")
+
+                    # Authors should have been added by 'authorship' edge step, but if only 'affiliation' is used:
+                    if author_id not in id_to_idx:
+                        idx = graph.add_node(
+                            {
+                                "title": author.get("display_name", "Unknown Author"),
+                                "id": author_id,
+                                "type": "author",
+                                "source_file": "Author",
+                                "year": 0,
+                                "percentile": 0,
+                            }
+                        )
+                        id_to_idx[author_id] = idx
+                    
+                    author_idx = id_to_idx[author_id]
+
+                    for inst in authorship.get("institutions", []):
+                        inst_id = inst.get("id")
+                        if not inst_id:
+                            continue
+                        inst_id = inst_id.replace("https://openalex.org/", "")
+
+                        if inst_id not in id_to_idx:
+                            idx = graph.add_node(
+                                {
+                                    "title": inst.get("display_name", "Unknown Institution"),
+                                    "id": inst_id,
+                                    "type": "institution",
+                                    "source_file": "Institution",
+                                    "year": 0,
+                                    "percentile": 0.0,
+                                }
+                            )
+                            id_to_idx[inst_id] = idx
+
+                        inst_idx = id_to_idx[inst_id]
+                        graph.add_edge(author_idx, inst_idx, {"type": et})
     
     return graph, id_to_idx, external_node_count
 
@@ -193,20 +279,35 @@ def _calculate_layout(graph: Any, layout: str) -> Dict[int, Tuple[float, float]]
         years = {}
         for i in graph.node_indices():
             data = graph.get_node_data(i)
-            y = data.get("year", 0) or 0
+            # Differentiate entities with a true '0' year (unknown) vs entities without temporal alignment
+            node_type = data.get("type", "source")
+            if node_type in ["author", "institution"]:
+                y = "Entity"
+            else:
+                y = data.get("year", 0) or 0
+            
             if y not in years: years[y] = []
             years[y].append(i)
 
-        # Handle unknown years (0) - put them before min year
-        known_years = [y for y in years.keys() if y != 0]
-        if known_years:
-            min_year = min(known_years)
+        # Handle unknown work years (0) - put them before min year
+        numerical_years = [y for y in years.keys() if isinstance(y, int) and y != 0]
+        if numerical_years:
+            min_year = min(numerical_years)
             if 0 in years:
                 years[min_year - 1] = years.pop(0)
+
+        # Position "Entity" (Authors/Institutions) to the right of max year
+        if numerical_years:
+            max_year = max(numerical_years)
+        else:
+            max_year = 2000 # Fallback
+            
+        if "Entity" in years:
+            years[max_year + 2] = years.pop("Entity")
         
         pos = {}
         if years:
-             typer.echo(f"  - Organized chronologically from {min(years.keys())} to {max(years.keys())}")  
+             typer.echo(f"  - Organized chronologically (Entities offset to the right)")  
              
         for year in sorted(years.keys()):
             nodes = years[year]
@@ -283,8 +384,10 @@ def _generate_plot(
     
     # 1. Edge Traces
     edge_colors = {
-        "citation": "#888888",  # Gray
-        "related": "#ff7f0e",   # Orange
+        "citation": "#888888",   # Gray
+        "related": "#ff7f0e",    # Orange
+        "authorship": "#2ca02c", # Green
+        "affiliation": "#9467bd",# Purple
     }
     
     # Pre-aggregate coordinates by type to avoid creating too many small traces
@@ -346,6 +449,8 @@ def _generate_plot(
             
             title = data.get("title", "Unknown")
             year = data.get("year", "N/A")
+            if data.get("type") in ["author", "institution"]:
+                year = "Entity"
             wid = data.get("id", "N/A")
             percentile = data.get("percentile", "N/A")
             
@@ -370,13 +475,22 @@ def _generate_plot(
             nodes_by_source[src]["size"].append(s)
 
     # Sort sources for consistent legend
-    sorted_sources = sorted([s for s in nodes_by_source.keys() if s != "External"])
+    sorted_sources = sorted([s for s in nodes_by_source.keys() if s not in ["External", "Author", "Institution"]])
+    if "Author" in nodes_by_source:
+        sorted_sources.append("Author")
+    if "Institution" in nodes_by_source:
+        sorted_sources.append("Institution")
     if "External" in nodes_by_source:
         sorted_sources.append("External")
         
     for src in sorted_sources:
         group_data = nodes_by_source[src]
-        color = source_color_map.get("External" if src == "External" else src, "#888")
+        if src == "Author":
+            color = "#17becf" # Cyan
+        elif src == "Institution":
+            color = "#bcbd22" # Lime
+        else:
+            color = source_color_map.get("External" if src == "External" else src, "#888")
         
         traces.append(go.Scatter(
             x=group_data["x"],
@@ -421,7 +535,15 @@ def _generate_plot(
     return fig
 
 
-def network(
+network_app = typer.Typer(
+    name="network",
+    help="Build and visualize citation and entity networks",
+    no_args_is_help=True,
+)
+
+
+@network_app.command(name="build")
+def build(
     input_path: Annotated[
         Path,
         typer.Option(
@@ -434,14 +556,14 @@ def network(
             readable=True,
         ),
     ],
-    output_html: Annotated[
+    output_graphml: Annotated[
         Path,
         typer.Option(
-            "--output-html",
+            "--output-graphml",
             "-o",
-            help="Path to save the interactive network visualization",
+            help="Path to save the network graph in GraphML format (.graphml)",
         ),
-    ] = Path("network.html"),
+    ] = Path("network.graphml"),
     include_external: Annotated[
         bool,
         typer.Option(
@@ -456,40 +578,26 @@ def network(
             help="Remove isolated nodes (degree 0) from the graph",
         ),
     ] = True,
-    layout: Annotated[
-        str,
-        typer.Option(
-            "--layout",
-            help="Layout algorithm: 'spring', 'time-shell' (concentric), or 'timeline' (default, chronological x-axis)",
-        ),
-    ] = "timeline",
-    node_size: Annotated[
-        str,
-        typer.Option(
-            "--node-size",
-            help="Metric to determine node size: 'none' (fixed), 'centrality' (betweenness), or 'percentile' (citation_normalized_percentile)",
-        ),
-    ] = "none",
     edge_types: Annotated[
         List[str],
         typer.Option(
             "--edge-type",
-            help="Edge type(s) to build network from: 'citation' (referenced_works) or 'related' (related_works)",
+            help="Edge type(s) to build network from: 'citation', 'related', 'authorship', or 'affiliation'",
         ),
     ] = ["citation"],
 ):
     """
-    Builds a citation network from OpenAlex works using rustworkx and visualizes it with Plotly.
+    Builds a citation/entity network from OpenAlex works and saves it to a GraphML file.
     """
-    if rx is None or go is None:
+    if rx is None:
         typer.echo(
-            "Error: rustworkx and plotly are required for this command.", err=True
+            "Error: rustworkx is required for this command.", err=True
         )
-        typer.echo("Please install them with: pip install rustworkx plotly", err=True)
+        typer.echo("Please install it with: pip install rustworkx", err=True)
         raise typer.Exit(1)
 
     # Validate edge types
-    valid_types = ["citation", "related"]
+    valid_types = ["citation", "related", "authorship", "affiliation"]
     for et in edge_types:
         if et not in valid_types:
             typer.echo(f"Error: Invalid edge type '{et}'. Must be one of {valid_types}.", err=True)
@@ -506,7 +614,7 @@ def network(
             input_files = [input_path]
 
         # 2. Load Works
-        works_data, work_source_map, source_files = _load_works(input_files)
+        works_data, work_source_map, _ = _load_works(input_files)
 
         # 3. Build Graph
         graph, _, external_node_count = _build_graph(
@@ -526,16 +634,116 @@ def network(
             typer.echo("Graph is empty.")
             return
 
-        # 5. Calculate Layout and Sizes
+        # 5. Export GraphML
+        try:
+            typer.echo(f"Exporting GraphML to {output_graphml}...")
+            # We must convert year/percentile to float/int explicitly or rustworkx complains about type stability across writes
+            rx.write_graphml(graph, str(output_graphml))
+            typer.echo(f"GraphML saved to {output_graphml}")
+        except Exception as e:
+            typer.echo(f"Error exporting GraphML: {e}", err=True)
+            raise typer.Exit(1)
+
+    except Exception as e:
+        _handle_cli_exception(e)
+
+
+@network_app.command(name="visualize")
+def visualize(
+    input_graphml: Annotated[
+        Path,
+        typer.Option(
+            "--input-graphml",
+            "-i",
+            help="Path to the GraphML file created by 'network build'",
+            exists=True,
+            file_okay=True,
+            readable=True,
+        ),
+    ],
+    output_html: Annotated[
+        Path,
+        typer.Option(
+            "--output-html",
+            "-o",
+            help="Path to save the interactive network HTML visualization",
+        ),
+    ] = Path("network.html"),
+    layout: Annotated[
+        str,
+        typer.Option(
+            "--layout",
+            help="Layout algorithm: 'spring', 'time-shell' (concentric), or 'timeline' (default, chronological x-axis)",
+        ),
+    ] = "timeline",
+    node_size: Annotated[
+        str,
+        typer.Option(
+            "--node-size",
+            help="Metric to determine node size: 'none' (fixed), 'centrality' (betweenness), or 'percentile' (citation_normalized_percentile)",
+        ),
+    ] = "none",
+):
+    """
+    Visualizes a compiled network graph (GraphML) using Plotly and saves the HTML.
+    """
+    if rx is None or go is None:
+        typer.echo(
+            "Error: rustworkx and plotly are required for this command.", err=True
+        )
+        typer.echo("Please install them with: pip install rustworkx plotly", err=True)
+        raise typer.Exit(1)
+
+    try:
+        typer.echo(f"Loading GraphML from {input_graphml}...")
+        try:
+            graphs = rx.read_graphml(str(input_graphml))
+            if not graphs:
+                typer.echo("Error: No graphs found in the GraphML file.", err=True)
+                raise typer.Exit(1)
+            graph = graphs[0]
+        except Exception as e:
+            typer.echo(f"Error loading GraphML: {e}", err=True)
+            raise typer.Exit(1)
+        
+        typer.echo(f"Graph loaded: {graph.num_nodes()} nodes, {graph.num_edges()} edges")
+        
+        if graph.num_nodes() == 0:
+            typer.echo("Graph is empty.")
+            return
+
+        # Dynamically determine source files and edge types from the graph structure
+        source_files_set = set()
+        for i in graph.node_indices():
+            data = graph.get_node_data(i)
+            src_file = data.get("source_file")
+            if src_file and src_file != "External":
+                source_files_set.add(src_file)
+
+        edge_types_set = set()
+        for i in graph.edge_indices():
+            data = graph.get_edge_data_by_index(i)
+            if data and "type" in data:
+                edge_types_set.add(data["type"])
+                
+        # 1. Calculate Layout and Sizes
         typer.echo(f"Generating interactive visualization using '{layout}' layout...")
         pos = _calculate_layout(graph, layout)
         
         # Calculate node sizes
         node_sizes, raw_metric_values = _calculate_node_sizes(graph, node_size)
 
-        # 6. Generate Plot
+        # 2. Generate Plot
         try:
-            fig = _generate_plot(graph, pos, edge_types, source_files, layout, node_sizes, raw_metric_values)
+            fig = _generate_plot(
+                graph, 
+                pos, 
+                list(edge_types_set), 
+                source_files_set, 
+                layout, 
+                node_sizes, 
+                raw_metric_values
+            )
             fig.write_html(str(output_html))
             typer.echo(f"Visualization saved to {output_html}")
         except Exception as e:
@@ -547,7 +755,5 @@ def network(
 
 
 def create_network_command(app):
-    """Create and register the network command."""
-    app.command(name="network", rich_help_panel=VISUALIZATION_PANEL)(
-        network
-    )
+    """Create and register the network command suite."""
+    app.add_typer(network_app)
