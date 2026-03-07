@@ -89,14 +89,6 @@ def expand(
             rich_help_panel=OUTPUT_PANEL,
         ),
     ] = False,
-    embeddings_model: Annotated[
-        str | None,
-        typer.Option(
-            "--embeddings-model",
-            help="Generate and include embeddings based on the works' title and abstract using the specified model.",
-            rich_help_panel=OUTPUT_PANEL,
-        ),
-    ] = None,
 ):
     """
     Expand a set of Works or Authors by fetching related entities.
@@ -208,8 +200,6 @@ def expand(
         if mode == ExpandMode.work_forward:
              # work_forward expansion means finding works that cite these IDs
             query = Works()
-            if embeddings_model:
-                query = query.with_embeddings(model=embeddings_model)
             id_string = ",".join(formatted_ids)
             query = add_id_list_option_to_command(query, id_string, "works_cites", Works)
 
@@ -237,8 +227,6 @@ def expand(
         elif mode == ExpandMode.author_works:
             # author_works expansion means finding works authored by these IDs
             query = Works()
-            if embeddings_model:
-                query = query.with_embeddings(model=embeddings_model)
             id_string = ",".join(formatted_ids)
             query = add_id_list_option_to_command(query, id_string, "works_author", Works)
 
@@ -268,9 +256,6 @@ def expand(
             results = asyncio.run(
                 _async_retrieve_entities(Authors, formatted_ids, "Authors")
             )
-            if embeddings_model and hasattr(Authors, "with_embeddings"):
-                dummy = Authors().with_embeddings(model=embeddings_model)
-                results = dummy._apply_embeddings(results)
             _output_results(
                 results,
                 jsonl_path=effective_jsonl_path,
@@ -282,9 +267,6 @@ def expand(
             results = asyncio.run(
                 _async_retrieve_entities(Institutions, formatted_ids, "Institutions")
             )
-            if embeddings_model and hasattr(Institutions, "with_embeddings"):
-                dummy = Institutions().with_embeddings(model=embeddings_model)
-                results = dummy._apply_embeddings(results)
             _output_results(
                 results,
                 jsonl_path=effective_jsonl_path,
@@ -296,9 +278,6 @@ def expand(
             results = asyncio.run(
                 _async_retrieve_entities(Works, formatted_ids, "Works")
             )
-            if embeddings_model and hasattr(Works, "with_embeddings"):
-                dummy = Works().with_embeddings(model=embeddings_model)
-                results = dummy._apply_embeddings(results)
             _output_results(
                 results,
                 jsonl_path=effective_jsonl_path,

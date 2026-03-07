@@ -44,4 +44,6 @@ packages = ["pyalex"]
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "rustworkx>=0.17.1",
+    "scikit-learn>=1.7.2",
 ]
