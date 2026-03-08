@@ -4,6 +4,7 @@ Citation network builder command for PyAlex CLI.
 This command builds a citation network from OpenAlex works using rustworkx and visualizes it with Plotly.
 """
 
+import itertools
 import json
 from pathlib import Path
 from typing import Annotated, List, Dict, Set, Any, Tuple, Optional
@@ -251,7 +252,41 @@ def _build_graph(
 
                         inst_idx = id_to_idx[inst_id]
                         graph.add_edge(author_idx, inst_idx, {"type": et})
-    
+        elif et == "collaboration":
+            typer.echo("Adding 'collaboration' edges (Author <-> Author via shared works)...")
+            for work in works_data:
+                author_ids_in_work: list[str] = []
+                for authorship in work.get("authorships", []):
+                    author = authorship.get("author", {})
+                    if not author:
+                        continue
+                    author_id = author.get("id")
+                    if not author_id:
+                        continue
+                    author_id = author_id.replace("https://openalex.org/", "")
+
+                    # Create author node if not yet in the graph
+                    if author_id not in id_to_idx:
+                        node_data = _flatten_dict_for_graph(author)
+                        node_data["title"] = author.get("display_name", "Unknown Author")
+                        node_data["id"] = author_id
+                        node_data["type"] = "author"
+                        node_data["source_file"] = "Author"
+                        node_data["year"] = 0
+                        node_data["percentile"] = 0.0
+                        idx = graph.add_node(node_data)
+                        id_to_idx[author_id] = idx
+
+                    author_ids_in_work.append(author_id)
+
+                # Add one undirected-style edge per unique co-author pair.
+                # Sort IDs so the edge direction is deterministic and we don't
+                # add the same pair twice for the same work.
+                for a_id, b_id in itertools.combinations(sorted(set(author_ids_in_work)), 2):
+                    a_idx = id_to_idx[a_id]
+                    b_idx = id_to_idx[b_id]
+                    graph.add_edge(a_idx, b_idx, {"type": "collaboration"})
+
     return graph, id_to_idx, external_node_count
 
 
@@ -351,6 +386,7 @@ def _generate_neo4j_plot(
         "related": "#ff7f0e",
         "authorship": "#2ca02c",
         "affiliation": "#9467bd",
+        "collaboration": "#e377c2",
     }
     
     neo4j_nodes = []
@@ -490,7 +526,7 @@ def build(
         raise typer.Exit(1)
 
     # Validate edge types
-    valid_types = ["citation", "related", "authorship", "affiliation"]
+    valid_types = ["citation", "related", "authorship", "affiliation", "collaboration"]
     for et in edge_types:
         if et not in valid_types:
             typer.echo(f"Error: Invalid edge type '{et}'. Must be one of {valid_types}.", err=True)
@@ -619,7 +655,7 @@ def visualize(
                 raw_metric_values
             )
             
-            html_output = vg.render()
+            html_output = vg.render(width="100%", height="800px")
             if hasattr(html_output, "data"):
                 content = html_output.data
             else:
