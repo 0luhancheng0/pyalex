@@ -23,6 +23,7 @@ from .commands.extract import create_extract_command
 
 from .commands.expand import create_expand_command
 from .commands.network import create_network_command
+from .commands.rehydrate import create_rehydrate_command
 from .commands.visualize_topics import create_topic_treemap_command
 from pyalex.embeddings.embed import app as embed_app
 
@@ -94,6 +95,7 @@ create_download_command(app)
 create_extract_command(app)
 
 create_expand_command(app)
+create_rehydrate_command(app)
 create_network_command(app)
 create_topic_treemap_command(app)
 app.add_typer(embed_app, name="embedding", help="Generate embeddings for entities in a network graph.")
