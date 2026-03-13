@@ -182,6 +182,62 @@ def _simple_paginate_all(query):
         return OpenAlexResponseList([], {"count": 0})
 
 
+async def _async_simple_paginate_all(query):
+    """Simple async pagination to get all results without progress display.
+    
+    Like _simple_paginate_all but fully async to be safely awaited inside an
+    event loop without triggering nested event loop errors.
+
+    Args:
+        query: The query object to paginate.
+
+    Returns:
+        OpenAlexResponseList containing all results.
+    """
+    from pyalex.client.httpx_session import async_get_with_retry, get_async_client
+    from pyalex.core.config import MAX_PER_PAGE
+    import copy
+    
+    all_results = []
+    cursor = "*"
+    
+    async with await get_async_client() as client:
+        while True:
+            params_copy = copy.deepcopy(query.params) if hasattr(query, "params") and query.params else {}
+            page_query = query.__class__(params_copy)
+            page_query._add_params("per-page", MAX_PER_PAGE)
+            page_query._add_params("cursor", cursor)
+            
+            response_data = await async_get_with_retry(client, page_query.url)
+            
+            if "results" in response_data:
+                batch = response_data["results"]
+                if not batch:
+                    break
+                    
+                # Convert to OpenAlex entities
+                batch_ents = [query.resource_class(ent) for ent in batch]
+                
+                import pandas as pd
+                df = pd.DataFrame(batch_ents)
+                all_results.extend(df.to_dict("records"))
+                
+                meta = response_data.get("meta", {})
+                next_cursor = meta.get("next_cursor")
+                if not next_cursor:
+                    break
+                cursor = next_cursor
+            else:
+                break
+                
+    if all_results:
+        from pyalex.core.response import OpenAlexResponseList
+        return OpenAlexResponseList(all_results, {"count": len(all_results)})
+    else:
+        from pyalex.core.response import OpenAlexResponseList
+        return OpenAlexResponseList([], {"count": 0})
+
+
 def parse_range_filter(value: str) -> str | None:
     """Parse range or single value for filtering.
 

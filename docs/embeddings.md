@@ -45,8 +45,29 @@ pyalex network build -i works.jsonl -o network.graphml --edge-type authorship --
 # 2. Generate embeddings for all entities (Works, Authors, Institutions)
 pyalex embedding generate network.graphml output.parquet
 
-# 3. Launch the interaction atlas using the standalone CLI
-embedding-atlas output.parquet --vector embedding
+# 3. Launch Embedding Atlas with precomputed vectors + 2D projection
+embedding-atlas output.parquet --vector embedding --x projection_x --y projection_y
+
+# Optional: control UMAP parameters used during generation
+pyalex embedding generate network.graphml output.parquet \
+	--umap-n-neighbors 15 \
+	--umap-metric cosine
+
+# Optional: restrict author aggregation to pre-cutoff works
+pyalex embedding generate network.graphml output.parquet \
+	--author-cutoff-year 2016
+
+# Optional: choose author aggregation strategy
+pyalex embedding generate network.graphml output.parquet \
+	--author-aggregation-strategy mean
+
+# Supported strategies: mean, recency_weighted, citation_weighted,
+# concat_abstracts, max_pool
+
+# recency_weighted requires author cutoff year
+pyalex embedding generate network.graphml output.parquet \
+	--author-aggregation-strategy recency_weighted \
+	--author-cutoff-year 2016
 ```
 
 ## Network Visualization (Plotly & UMAP)

@@ -6,6 +6,7 @@ This command builds a citation network from OpenAlex works using rustworkx and v
 
 import itertools
 import json
+import math
 from pathlib import Path
 from typing import Annotated, List, Dict, Set, Any, Tuple, Optional
 
@@ -38,6 +39,7 @@ def _load_works(input_files: List[Path]) -> Tuple[List[Dict], Dict[str, str], Se
     works_data = []
     work_source_map = {}
     source_files = set()
+    seen_ids = set()
 
     for file_path in input_files:
         # Use stem (filename without extension) as the source label
@@ -50,10 +52,14 @@ def _load_works(input_files: List[Path]) -> Tuple[List[Dict], Dict[str, str], Se
                     continue
                 try:
                     work = json.loads(line)
-                    works_data.append(work)
                     wid = work.get("id")
-                    if wid and wid not in work_source_map:
-                        work_source_map[wid] = source_name
+                    if wid:
+                        if wid in seen_ids:
+                            continue
+                        seen_ids.add(wid)
+                        if wid not in work_source_map:
+                            work_source_map[wid] = source_name
+                    works_data.append(work)
                 except json.JSONDecodeError:
                     continue
     
@@ -66,11 +72,13 @@ def _flatten_dict_for_graph(d: Dict[str, Any]) -> Dict[str, Any]:
     """Flatten a dict so all values are GraphML-safe scalars.
 
     Nested dicts and lists are serialised to JSON strings.
-    None values are dropped.
+    None and NaN values are dropped.
     """
     flat: Dict[str, Any] = {}
     for k, v in d.items():
         if v is None:
+            continue
+        if isinstance(v, float) and math.isnan(v):
             continue
         if isinstance(v, (dict, list)):
             flat[k] = json.dumps(v)
@@ -109,15 +117,28 @@ def _build_graph(
                 # Extract citation_normalized_percentile
                 percentile = 0.0
                 if "citation_normalized_percentile" in work and work["citation_normalized_percentile"]:
-                     percentile = float(work["citation_normalized_percentile"].get("value", 0.0))
+                    p_val = work["citation_normalized_percentile"].get("value", 0.0)
+                    if p_val is not None and not (isinstance(p_val, float) and math.isnan(p_val)):
+                        percentile = float(p_val)
 
                 # Copy all attributes from the input JSONL
                 node_data = _flatten_dict_for_graph(work)
+                # Remove redundant or complex fields that might cause type mismatches
+                node_data.pop("publication_year", None)
+                node_data.pop("fwci", None)
+
                 # Override / add graph-specific fields
                 node_data["id"] = work_id
-                node_data["type"] = "source"
+                node_data["type"] = "work"
                 node_data["source_file"] = source_name
-                node_data["year"] = int(work.get("publication_year") or 0)
+                
+                # Safe year conversion
+                year_val = work.get("publication_year")
+                if year_val is None or (isinstance(year_val, float) and math.isnan(year_val)):
+                    node_data["year"] = 0
+                else:
+                    node_data["year"] = int(year_val)
+
                 node_data["percentile"] = percentile
 
                 idx = graph.add_node(node_data)
@@ -172,6 +193,7 @@ def _build_graph(
         
         elif et == "authorship":
             typer.echo("Adding 'authorship' edges (Work -> Author)...")
+            seen_authorship_edges = set()
             for work in works_data:
                 source_id = work.get("id")
                 if not source_id:
@@ -180,6 +202,9 @@ def _build_graph(
                 if source_id not in id_to_idx:
                     continue
                 source_idx = id_to_idx[source_id]
+
+                year_val = work.get("publication_year")
+                year = int(year_val) if year_val and not (isinstance(year_val, float) and math.isnan(year_val)) else 0
 
                 for authorship in work.get("authorships", []):
                     author = authorship.get("author", {})
@@ -203,7 +228,10 @@ def _build_graph(
                         id_to_idx[author_id] = idx
 
                     author_idx = id_to_idx[author_id]
-                    graph.add_edge(source_idx, author_idx, {"type": et})
+                    edge_key = (source_idx, author_idx)
+                    if edge_key not in seen_authorship_edges:
+                        seen_authorship_edges.add(edge_key)
+                        graph.add_edge(source_idx, author_idx, {"type": et, "year": year})
 
         elif et == "affiliation":
             typer.echo("Adding 'affiliation' edges (Author -> Institution)...")
@@ -254,8 +282,19 @@ def _build_graph(
                         graph.add_edge(author_idx, inst_idx, {"type": et})
         elif et == "collaboration":
             typer.echo("Adding 'collaboration' edges (Author <-> Author via shared works)...")
+            collaboration_edges = {}
             for work in works_data:
                 author_ids_in_work: list[str] = []
+                
+                year_val = work.get("publication_year")
+                year = int(year_val) if year_val and not (isinstance(year_val, float) and math.isnan(year_val)) else 0
+                
+                work_id = work.get("id")
+                if work_id:
+                    work_id = work_id.replace("https://openalex.org/", "")
+                else:
+                    continue
+                
                 for authorship in work.get("authorships", []):
                     author = authorship.get("author", {})
                     if not author:
@@ -283,9 +322,53 @@ def _build_graph(
                 # Sort IDs so the edge direction is deterministic and we don't
                 # add the same pair twice for the same work.
                 for a_id, b_id in itertools.combinations(sorted(set(author_ids_in_work)), 2):
-                    a_idx = id_to_idx[a_id]
-                    b_idx = id_to_idx[b_id]
-                    graph.add_edge(a_idx, b_idx, {"type": "collaboration"})
+                    edge_key = (id_to_idx[a_id], id_to_idx[b_id])
+                    if edge_key not in collaboration_edges:
+                        collaboration_edges[edge_key] = {"count": 0, "years": []}
+
+                    collaboration_edges[edge_key]["count"] += 1
+                    collaboration_edges[edge_key]["years"].append(year)
+
+            for (a_idx, b_idx), data in collaboration_edges.items():
+                years = sorted(data["years"])
+                graph.add_edge(a_idx, b_idx, {
+                    "type": "collaboration",
+                    "weight": data["count"],
+                    "first_year": years[0] if years else 0,
+                    "last_year": years[-1] if years else 0,
+                })
+
+        elif et == "topic":
+            typer.echo("Adding 'topic' edges (Work -> Topic)...")
+            for work in works_data:
+                source_id = work.get("id")
+                if not source_id:
+                    continue
+                source_id = source_id.replace("https://openalex.org/", "")
+                if source_id not in id_to_idx:
+                    continue
+                source_idx = id_to_idx[source_id]
+
+                for topic in work.get("topics", []):
+                    topic_id = topic.get("id")
+                    if not topic_id:
+                        continue
+                    topic_id = topic_id.replace("https://openalex.org/", "")
+
+                    if topic_id not in id_to_idx:
+                        node_data = _flatten_dict_for_graph(topic)
+                        node_data["title"] = topic.get("display_name", "Unknown Topic")
+                        node_data["id"] = topic_id
+                        node_data["type"] = "topic"
+                        node_data["source_file"] = "Topic"
+                        node_data["year"] = 0
+                        node_data["percentile"] = 0.0
+
+                        idx = graph.add_node(node_data)
+                        id_to_idx[topic_id] = idx
+
+                    topic_idx = id_to_idx[topic_id]
+                    graph.add_edge(source_idx, topic_idx, {"type": et})
 
     return graph, id_to_idx, external_node_count
 
@@ -511,7 +594,7 @@ def build(
         List[str],
         typer.Option(
             "--edge-type",
-            help="Edge type(s) to build network from: 'citation', 'related', 'authorship', or 'affiliation'",
+            help="Edge type(s) to build network from: 'citation', 'related', 'authorship', 'affiliation', 'collaboration', or 'topic'",
         ),
     ] = ["citation"],
 ):
@@ -526,7 +609,7 @@ def build(
         raise typer.Exit(1)
 
     # Validate edge types
-    valid_types = ["citation", "related", "authorship", "affiliation", "collaboration"]
+    valid_types = ["citation", "related", "authorship", "affiliation", "collaboration", "topic"]
     for et in edge_types:
         if et not in valid_types:
             typer.echo(f"Error: Invalid edge type '{et}'. Must be one of {valid_types}.", err=True)

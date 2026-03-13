@@ -20,7 +20,7 @@ This document serves as a high-level guide for AI agents (like Gemini) working o
 - **HTTP/Networking**: [httpx](https://www.python-httpx.org/) (with HTTP/2 support)
 - **CLI Framework**: [Typer](https://typer.tiangolo.com/)
 - **Data Handling**: [Pydantic](https://docs.pydantic.dev/) for models, [Pandas](https://pandas.pydata.org/) for dataframes
-- **Package Management**: [pixi](https://pixi.sh/) / [uv](https://github.com/astral-sh/uv)
+- **Package Management**: [uv](https://github.com/astral-sh/uv)
 - **Quality Control**: [Ruff](https://beta.ruff.rs/docs/) (linting/formatting), [pytest](https://docs.pytest.org/) (testing)
 
 ---
@@ -64,5 +64,5 @@ This document serves as a high-level guide for AI agents (like Gemini) working o
 ## ⚠️ Important Reminders
 
 - **Don't Fix What's Working**: Avoid refactoring stable code unless explicitly asked to fix a bug in that specific area.
-- **Environment**: If a command is missing, try prefixing with `pixi run`.
+- **Environment**: If a command is missing, try prefixing with `uv run`.
 - **Existing Tools**: Always check if a capability exists in the library before rewriting it.
