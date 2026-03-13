@@ -82,18 +82,18 @@ def aggregate_concat_abstracts(
 
 
 def compute_all_strategies(
-    graph,
-    author_work_map: dict[str, list[int]],
-    work_embeddings: dict[int, np.ndarray],
+    author_work_map: dict[str, list[str]],
+    work_embeddings: dict[str, np.ndarray],
+    work_texts_data: dict[str, dict],
     cutoff_year: int,
     model_name: str,
 ) -> dict[str, dict[str, np.ndarray]]:
     """Compute author embeddings under every aggregation strategy.
 
     Args:
-        graph: rustworkx PyDiGraph.
-        author_work_map: Maps author ID -> list of pre-cutoff work node indices.
-        work_embeddings: Maps work node index -> embedding vector.
+        author_work_map: Maps author ID -> list of pre-cutoff work IDs.
+        work_embeddings: Maps work ID -> embedding vector.
+        work_texts_data: Maps work ID -> raw work dictionary from JSONL.
         cutoff_year: Year used for recency weighting.
         model_name: SentenceTransformer model for concat_abstracts.
 
@@ -104,12 +104,13 @@ def compute_all_strategies(
 
     results: dict[str, dict[str, np.ndarray]] = {s: {} for s in STRATEGY_NAMES}
 
-    for author_id, work_indices in author_work_map.items():
-        embs = [work_embeddings[wi] for wi in work_indices if wi in work_embeddings]
-        if not embs:
+    for author_id, work_ids in author_work_map.items():
+        valid_work_ids = [wi for wi in work_ids if wi in work_embeddings and wi in work_texts_data]
+        if not valid_work_ids:
             continue
 
-        attrs_list = [graph.get_node_data(wi) or {} for wi in work_indices]
+        embs = [work_embeddings[wi] for wi in valid_work_ids]
+        attrs_list = [work_texts_data[wi] for wi in valid_work_ids]
         years = [parse_year(a) for a in attrs_list]
         citations = [parse_citations(a) for a in attrs_list]
         texts = [get_text(a) for a in attrs_list]

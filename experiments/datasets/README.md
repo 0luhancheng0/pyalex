@@ -23,6 +23,20 @@ making this a harder, more realistic dataset.
 
 ---
 
+## Intra-Disciplinary Datasets
+
+## Dataset 4: `cs_single_discipline/`
+**Computer Science** — seeded from a single high-level discipline (T11003) and 
+expanded recursively. Designed to test the embedding model's ability to 
+distinguish sub-specialisations using **hard negative sampling**.
+
+## Dataset 5: `ogb_collab_reproduction/`
+**Open Graph Benchmark (OGB) Reproduction** — an attempt to replicate the 
+scale, timeframe ($T_{cutoff}=2017$), and methodology of the official 
+`ogbl-collab` benchmark using OpenAlex data, evaluating with the Hits@K metric.
+
+---
+
 ## Common Pipeline
 
 ```
@@ -38,8 +52,10 @@ printed comparison table
 ## Running All Datasets
 
 ```bash
-cd pyalex/embeddings/experiments/datasets
+cd pyalex/experiments/datasets
 make -C quantum_vs_rl/
 make -C mit_cs_vs_cambridge_cs/
 make -C computational_biology_vs_nlp/
+make -C cs_single_discipline/
+make -C ogb_collab_reproduction/
 ```

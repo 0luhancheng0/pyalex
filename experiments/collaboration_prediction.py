@@ -1,206 +1,225 @@
 """Collaboration prediction experiment — CLI entry point.
 
-Evaluates which embedding aggregation strategy best predicts future
-co-authorship. Uses a temporal split: author embeddings are computed
-from pre-cutoff works, then evaluated against post-cutoff labels.
+Samples temporal link-prediction supervision pairs from a collaboration graph.
+The `sample` command writes positive/negative author-pair CSVs.
+The `evaluate` command consumes the original GraphML plus those CSVs.
 
 Usage
 -----
-    python collaboration_prediction.py prepare network.graphml \\
-        --cutoff-year 2016 --min-works 3 -o results.json
+    python collaboration_prediction.py sample network.graphml \\
+        --cutoff-year 2016 \\
+        --positive-output positive_pairs.csv \\
+        --negative-output negative_pairs.csv
 
-    python collaboration_prediction.py evaluate results.json
+    python collaboration_prediction.py evaluate network.graphml \\
+        --embeddings-file embeddings.parquet \\
+        --positive-pairs positive_pairs.csv \\
+        --negative-pairs negative_pairs.csv \\
+        -o results.json
 """
 
 import json
 import sys
 from pathlib import Path
 
-# Ensure sibling modules (aggregations, graph_utils, metrics) are importable
-# regardless of the working directory the script is invoked from.
+# Ensure sibling modules are importable regardless of the working directory.
 sys.path.insert(0, str(Path(__file__).parent))
 
-from typing import Annotated
+from typing import Annotated, Optional
 
-import numpy as np
 import typer
 
-from aggregations import STRATEGY_NAMES, compute_all_strategies
-from graph_utils import (
-    build_indices,
-    get_post_cutoff_coauthor_pairs,
-    get_pre_cutoff_works_for_author,
-    get_text,
-)
-from metrics import evaluate_strategy, sample_negative_pairs
-from pyalex.embeddings.data_loader import load_graphml_to_rx
-from pyalex.embeddings.embed import generate_embeddings
+import pipeline
 
 app = typer.Typer(
     name="collaboration-prediction",
-    help="Evaluate embedding aggregation strategies for collaboration prediction.",
+    help="Prepare and evaluate collaboration prediction datasets.",
     no_args_is_help=True,
 )
 
 
 @app.command()
-def prepare(
+def sample(
     input_graphml: Annotated[
         Path,
         typer.Argument(help="GraphML file from `pyalex network build`.", exists=True),
     ],
-    output_file: Annotated[
+    positive_output: Annotated[
         Path,
-        typer.Option("--output", "-o", help="Path to save results JSON."),
-    ] = Path("results.json"),
+        typer.Option("--positive-output", help="CSV file for positive (post-cutoff) pairs."),
+    ] = Path("positive_pairs.csv"),
+    negative_output: Annotated[
+        Path,
+        typer.Option("--negative-output", help="CSV file for sampled negative pairs."),
+    ] = Path("negative_pairs.csv"),
     cutoff_year: Annotated[
         int,
         typer.Option("--cutoff-year", "-y", help="Temporal split year."),
     ] = 2016,
-    min_works: Annotated[
-        int,
-        typer.Option("--min-works", "-n", help="Minimum pre-cutoff works per author."),
-    ] = 3,
     neg_ratio: Annotated[
         int,
         typer.Option("--neg-ratio", help="Negative-to-positive sampling ratio."),
     ] = 10,
-    model: Annotated[
+    neg_strategy: Annotated[
         str,
-        typer.Option("--model", "-m", help="SentenceTransformer model name."),
-    ] = "all-MiniLM-L6-v2",
-    batch_size: Annotated[
-        int,
-        typer.Option("--batch-size", "-b", help="Embedding batch size."),
-    ] = 32,
+        typer.Option("--neg-strategy", help="Negative sampling strategy: 'random' or 'hard_graph'."),
+    ] = "random",
     seed: Annotated[
         int,
         typer.Option("--seed", help="Random seed for negative sampling."),
     ] = 42,
 ):
-    """Prepare and evaluate all aggregation strategies in one pass."""
+    """Sample positive and negative author pairs for link-prediction evaluation."""
     typer.echo(f"Loading graph from {input_graphml}...")
-    graph = load_graphml_to_rx(str(input_graphml))
-    typer.echo(f"Graph: {graph.num_nodes()} nodes, {graph.num_edges()} edges")
+    graph, type_map, idx_to_id = pipeline.load_graph(str(input_graphml))
+    typer.echo(f"  {graph.num_nodes()} nodes, {graph.num_edges()} edges")
+    typer.echo(f"  Node types: { {k: len(v) for k, v in type_map.items()} }")
 
-    type_map, idx_to_id = build_indices(graph)
-    typer.echo(f"Node types: { {k: len(v) for k, v in type_map.items()} }")
-
-    # Step 1: Author -> pre-cutoff works mapping
-    typer.echo(f"\nStep 1: Building author-work mapping (cutoff={cutoff_year})...")
-    author_work_map: dict[str, list[int]] = {}
-    for author_idx in type_map.get("author", []):
-        aid = idx_to_id[author_idx]
-        works = get_pre_cutoff_works_for_author(graph, author_idx, cutoff_year)
-        if len(works) >= min_works:
-            author_work_map[aid] = works
-    typer.echo(f"  {len(author_work_map)} authors with >= {min_works} pre-cutoff works")
-
-    if not author_work_map:
-        typer.echo("Error: No eligible authors found.", err=True)
+    eligible = set(idx_to_id[idx] for idx in type_map.get("author", []))
+    if not eligible:
+        typer.echo("Error: No author nodes found in graph.", err=True)
         raise typer.Exit(1)
+    typer.echo(f"\n{len(eligible)} eligible authors found")
 
-    # Step 2: Work-level embeddings
-    typer.echo("\nStep 2: Generating work-level embeddings...")
-    all_work_indices = sorted(set(wi for wis in author_work_map.values() for wi in wis))
-    texts = [get_text(graph.get_node_data(wi) or {}) for wi in all_work_indices]
-    typer.echo(f"  Embedding {len(texts)} unique pre-cutoff works...")
-    raw_embs = generate_embeddings(texts, model_name=model, batch_size=batch_size)
-
-    work_embeddings: dict[int, np.ndarray] = {
-        wi: np.array(emb, dtype=np.float32)
-        for wi, emb in zip(all_work_indices, raw_embs)
-        if emb is not None
-    }
-    typer.echo(f"  {len(work_embeddings)}/{len(all_work_indices)} works embedded")
-
-    # Step 3: Author embeddings per strategy
-    typer.echo("\nStep 3: Computing author embeddings (5 strategies)...")
-    strategy_embeddings = compute_all_strategies(
-        graph, author_work_map, work_embeddings, cutoff_year, model,
-    )
-    for name, embs in strategy_embeddings.items():
-        typer.echo(f"  {name}: {len(embs)} authors")
-
-    # Step 4: Evaluation pairs
-    typer.echo("\nStep 4: Building evaluation pairs...")
-    eligible = set(author_work_map.keys())
-    positive_pairs = get_post_cutoff_coauthor_pairs(
-        graph, type_map, idx_to_id, cutoff_year, eligible,
-    )
-    typer.echo(f"  Positive pairs: {len(positive_pairs)}")
-
-    negative_pairs = sample_negative_pairs(list(eligible), positive_pairs, ratio=neg_ratio, seed=seed)
-    typer.echo(f"  Negative pairs: {len(negative_pairs)}")
-
-    # Step 5: Metrics
-    typer.echo("\nStep 5: Evaluating strategies...")
-    results: dict[str, dict] = {}
-    for name in STRATEGY_NAMES:
-        metrics = evaluate_strategy(strategy_embeddings[name], positive_pairs, negative_pairs)
-        results[name] = metrics
-        typer.echo(
-            f"  {name:>25s} | AUC={metrics['auc_roc']:.4f}  "
-            f"AP={metrics['avg_precision']:.4f}  "
-            f"P@K={metrics['precision_at_k']:.4f}  "
-            f"ρ={metrics['spearman_rho']:.4f}"
+    typer.echo("Sampling pairs...")
+    try:
+        positive_pairs, negative_pairs = pipeline.sample_pairs(
+            graph, type_map, idx_to_id, eligible,
+            cutoff_year, neg_ratio, neg_strategy, seed,
         )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"  Positive: {len(positive_pairs)}, Negative: {len(negative_pairs)}")
 
-    output = {
-        "config": {
-            "cutoff_year": cutoff_year,
-            "min_works": min_works,
-            "neg_ratio": neg_ratio,
-            "model": model,
-            "seed": seed,
-            "n_eligible_authors": len(author_work_map),
-            "n_pre_cutoff_works": len(work_embeddings),
-            "n_positive_pairs": len(positive_pairs),
-            "n_negative_pairs": len(negative_pairs),
-        },
-        "results": results,
-    }
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, "w") as f:
-        json.dump(output, f, indent=2)
-    typer.echo(f"\nResults saved to {output_file}")
+    positive_output.parent.mkdir(parents=True, exist_ok=True)
+    negative_output.parent.mkdir(parents=True, exist_ok=True)
+    pipeline.write_pairs_csv(
+        positive_pairs, negative_pairs,
+        str(positive_output), str(negative_output),
+        cutoff_year, neg_strategy, seed,
+    )
+    typer.echo(f"  Positive pairs → {positive_output}")
+    typer.echo(f"  Negative pairs → {negative_output}")
 
 
 @app.command()
 def evaluate(
-    results_file: Annotated[
+    input_graphml: Annotated[
         Path,
-        typer.Argument(help="JSON results file from `prepare`.", exists=True),
+        typer.Argument(help="GraphML file from `pyalex network build`.", exists=True),
     ],
+    positive_pairs_file: Annotated[
+        Path,
+        typer.Option("--positive-pairs", help="Positive-pairs CSV from `sample`.", exists=True),
+    ] = Path("positive_pairs.csv"),
+    negative_pairs_file: Annotated[
+        Path,
+        typer.Option("--negative-pairs", help="Negative-pairs CSV from `sample`.", exists=True),
+    ] = Path("negative_pairs.csv"),
+    embeddings_file: Annotated[
+        Path,
+        typer.Option("--embeddings-file", help="Parquet file from `pyalex embedding generate`.", exists=True),
+    ] = Path("embeddings.parquet"),
+    output_file: Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Path to save final results JSON."),
+    ] = None,
+    predictions_output: Annotated[
+        Optional[Path],
+        typer.Option("--predictions-output", help="Path to save all pair predictions and scores as JSON."),
+    ] = None,
+    model_name: Annotated[
+        str,
+        typer.Option("--model", "-m", help="SentenceTransformer model for the concat_abstracts strategy."),
+    ] = "all-MiniLM-L6-v2",
 ):
-    """Display a formatted comparison table from saved results."""
-    with open(results_file) as f:
-        data = json.load(f)
+    """Run evaluation and display comparison table from a network graph and pair CSVs."""
+    from aggregations import STRATEGY_NAMES, compute_all_strategies
+    from metrics import evaluate_strategy
 
-    config = data["config"]
-    results = data["results"]
+    typer.echo(f"Loading graph from {input_graphml}...")
+    graph, type_map, idx_to_id = pipeline.load_graph(str(input_graphml))
+    typer.echo(f"  {graph.num_nodes()} nodes, {graph.num_edges()} edges")
+
+    positive_pairs, negative_pairs, cutoff_year, neg_strategy = pipeline.read_pairs_csv(
+        str(positive_pairs_file), str(negative_pairs_file),
+    )
+    typer.echo(f"  Positive: {len(positive_pairs)}, Negative: {len(negative_pairs)}, Cutoff: {cutoff_year}")
+
+    work_embeddings, work_texts_data = pipeline.extract_work_data(
+        graph,
+        embeddings_parquet=str(embeddings_file),
+    )
+    typer.echo(f"  Work nodes: {len(work_texts_data)}, with embeddings: {len(work_embeddings)}")
+
+    author_work_map = pipeline.build_author_work_map(graph, type_map, idx_to_id, cutoff_year)
+    typer.echo(f"  Authors with pre-cutoff works: {len(author_work_map)}")
+
+    typer.echo("\nComputing strategy embeddings and evaluating...")
+    strategy_embeddings = compute_all_strategies(
+        author_work_map, work_embeddings, work_texts_data, cutoff_year, model_name,
+    )
+
+    results: dict[str, dict] = {}
+    all_predictions: dict[str, list[dict]] = {}
+    for name in STRATEGY_NAMES:
+        embs = strategy_embeddings.get(name, {})
+        if not embs:
+            typer.echo(f"  Skipping '{name}' — no embeddings computed.")
+            continue
+        
+        eval_result = evaluate_strategy(
+            embs, positive_pairs, negative_pairs, return_predictions=bool(predictions_output)
+        )
+        if bool(predictions_output) and "predictions" in eval_result:
+            all_predictions[name] = eval_result.pop("predictions")
+            
+        results[name] = eval_result
 
     typer.echo("=" * 72)
     typer.echo("  Collaboration Prediction — Embedding Aggregation Comparison")
     typer.echo("=" * 72)
-    typer.echo(f"  Cutoff year          : {config['cutoff_year']}")
-    typer.echo(f"  Min pre-cutoff works : {config['min_works']}")
-    typer.echo(f"  Embedding model      : {config['model']}")
-    typer.echo(f"  Eligible authors     : {config['n_eligible_authors']}")
-    typer.echo(f"  Pre-cutoff works     : {config['n_pre_cutoff_works']}")
-    typer.echo(f"  Positive pairs       : {config['n_positive_pairs']}")
-    typer.echo(f"  Negative pairs       : {config['n_negative_pairs']}")
+    typer.echo(f"  Input file           : {input_graphml}")
+    typer.echo(f"  Cutoff year          : {cutoff_year}")
+    typer.echo(f"  Embedding model      : {model_name}")
+    typer.echo(f"  Authors w/ works     : {len(author_work_map)}")
+    typer.echo(f"  Negative strategy    : {neg_strategy}")
+    typer.echo(f"  Positive pairs       : {len(positive_pairs)}")
+    typer.echo(f"  Negative pairs       : {len(negative_pairs)}")
     typer.echo("-" * 72)
-    typer.echo(f"  {'Strategy':>25s} | {'AUC-ROC':>8s} | {'Avg Prec':>8s} | {'P@K':>8s} | {'Spearman':>8s}")
+    typer.echo(f"  {'Strategy':>25s} | {'AUC-ROC':>8s} | {'Avg Prec':>8s} | {'P@K':>8s} | {'Hits@10':>8s} | {'Hits@100':>8s}")
     typer.echo("-" * 72)
-
-    for name, metrics in sorted(results.items(), key=lambda x: x[1].get("auc_roc", 0), reverse=True):
+    for name, m in sorted(results.items(), key=lambda x: x[1].get("auc_roc", 0), reverse=True):
         typer.echo(
-            f"  {name:>25s} | {metrics['auc_roc']:>8.4f} | {metrics['avg_precision']:>8.4f} | "
-            f"{metrics['precision_at_k']:>8.4f} | {metrics['spearman_rho']:>8.4f}"
+            f"  {name:>25s} | {m['auc_roc']:>8.4f} | {m['avg_precision']:>8.4f} | "
+            f"{m['precision_at_k']:>8.4f} | {m.get('hits_at_10', 0):>8.4f} | {m.get('hits_at_100', 0):>8.4f}"
         )
     typer.echo("=" * 72)
 
+    if output_file:
+        with open(output_file, "w") as f:
+            json.dump({
+                "config": {
+                    "input_file": str(input_graphml),
+                    "embeddings_file": str(embeddings_file),
+                    "positive_pairs_file": str(positive_pairs_file),
+                    "negative_pairs_file": str(negative_pairs_file),
+                    "cutoff_year": cutoff_year,
+                    "model": model_name,
+                    "n_authors_with_works": len(author_work_map),
+                    "neg_strategy": neg_strategy,
+                    "n_positive_pairs": len(positive_pairs),
+                    "n_negative_pairs": len(negative_pairs),
+                },
+                "results": results,
+            }, f, indent=2)
+        typer.echo(f"\nResults saved to {output_file}")
+
+    if predictions_output:
+        with open(predictions_output, "w") as f:
+            json.dump(all_predictions, f, indent=2)
+        typer.echo(f"\nPredictions saved to {predictions_output}")
 
 if __name__ == "__main__":
     app()

@@ -717,6 +717,88 @@ class BatchProcessor:
 
         return batch_results
 
+    async def _execute_concurrent_batches_async(
+        self,
+        id_list: list[str],
+        create_query_func: Callable[[list[str]], Any],
+        entity_name: str,
+        all_results: bool,
+        limit: int | None,
+        progress=None,
+        batch_task_id=None,
+        num_batches=None,
+    ):
+        """Execute batches concurrently using asyncio."""
+        from .utils import _add_abstract_to_work
+        
+        async def process_batch(batch_ids, batch_index):
+            # We must use async-compatible execution inside
+            batch_query = create_query_func(batch_ids)
+            
+            self._log_batch_execution("start", batch_index)
+            self._log_batch_execution("batch_size", batch_index, batch_size=len(batch_ids))
+            self._log_batch_execution("entity_type", batch_index, entity_name=entity_name)
+            self._log_batch_execution("api_url", batch_index, url=batch_query.url)
+            self._log_batch_execution("execution_mode", batch_index, all_results=all_results, limit=limit)
+
+            try:
+                # We do not use asyncio.run() here because we are already inside an event loop
+                if all_results:
+                    from .utils import _async_simple_paginate_all
+                    batch_results = await _async_simple_paginate_all(batch_query)
+                elif limit is not None:
+                    batch_results = await batch_query.get(limit=limit)
+                else:
+                    batch_results = await batch_query.get()
+            except Exception as e:
+                self._log_batch_execution("error", batch_index)
+                self._log_batch_execution("error_details", batch_index, error_msg=str(e))
+                if self.config.debug_mode:
+                    self._log_batch_execution("traceback", batch_index)
+                raise
+                
+            import pandas as pd
+            if isinstance(batch_results, pd.DataFrame):
+                batch_results = batch_results.to_dict("records")
+            elif hasattr(batch_results, "results"):
+                # Handle OpenAlexResponseList
+                res_list = []
+                for item in batch_results:
+                    if isinstance(item, pd.DataFrame):
+                        res_list.extend(item.to_dict("records"))
+                    else:
+                        res_list.append(item)
+                batch_results = res_list
+
+            batch_count = len(batch_results) if batch_results is not None else 0
+            self._log_batch_execution("summary", batch_index)
+            self._log_batch_execution("results", batch_index, result_count=batch_count)
+            self._log_batch_execution("complete", batch_index)
+            
+            if progress and batch_task_id is not None:
+                progress.update(batch_task_id, advance=1)
+                if num_batches:
+                    batch_desc = f"Processing batch {batch_index + 1}/{num_batches}: {len(batch_ids)} {entity_name}"
+                    progress.update(batch_task_id, description=batch_desc)
+                
+            return batch_results, batch_index
+
+        tasks = []
+        # Create sempahore to control concurrency
+        sem = asyncio.Semaphore(self.config.max_concurrent)
+        
+        async def bounded_process_batch(b_ids, b_idx):
+            async with sem:
+                return await process_batch(b_ids, b_idx)
+                
+        for i in range(0, len(id_list), self.config.batch_size):
+            batch_ids = id_list[i : i + self.config.batch_size]
+            batch_index = i // self.config.batch_size
+            tasks.append(bounded_process_batch(batch_ids, batch_index))
+            
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+        return [res for res in results if res[0] is not None and len(res[0]) > 0]
+        
     def _execute_concurrent_batches(
         self,
         id_list: list[str],
@@ -786,65 +868,20 @@ class BatchProcessor:
                     f"Processing {entity_name} batches", total=num_batches
                 )
 
-                # Process in batches with simple progress
-                for i in range(0, len(id_list), self.config.batch_size):
-                    batch_ids = id_list[i : i + self.config.batch_size]
-                    batch_index = i // self.config.batch_size
-
-                    # Update progress description for current batch
-                    batch_desc = (
-                        f"Processing batch {batch_index + 1}/{num_batches}: "
-                        f"{len(batch_ids)} {entity_name}"
+                # Run async event loop
+                batch_results_list = asyncio.run(
+                    self._execute_concurrent_batches_async(
+                        id_list, create_query_func, entity_name, all_results, limit,
+                        progress, batch_task_id, num_batches
                     )
-                    progress.update(batch_task_id, description=batch_desc)
-
-                    batch_results = self._execute_single_batch(
-                        batch_ids,
-                        batch_index,
-                        create_query_func,
-                        entity_name,
-                        all_results,
-                        limit,
-                    )
-
-                    if batch_results is not None and len(batch_results) > 0:
-                        batch_results_list.append((batch_results, batch_index))
-
-                    # Update progress after batch completion
-                    progress.update(batch_task_id, advance=1)
+                )
         else:
             # Fallback to simple text progress or debug mode
-            for i in range(0, len(id_list), self.config.batch_size):
-                batch_ids = id_list[i : i + self.config.batch_size]
-                batch_index = i // self.config.batch_size
-
-                if self.config.debug_mode:
-                    from .utils import _debug_print
-
-                    _debug_print(
-                        f"Processing batch {batch_index + 1}: "
-                        f"{len(batch_ids)} {entity_name}",
-                        "BATCH",
-                    )
-                else:
-                    # Non-debug mode: show progress for large batch operations
-                    if num_batches > 5:
-                        typer.echo(
-                            f"Processing batch {batch_index + 1}/{num_batches}...",
-                            err=True,
-                        )
-
-                batch_results = self._execute_single_batch(
-                    batch_ids,
-                    batch_index,
-                    create_query_func,
-                    entity_name,
-                    all_results,
-                    limit,
+            batch_results_list = asyncio.run(
+                self._execute_concurrent_batches_async(
+                    id_list, create_query_func, entity_name, all_results, limit
                 )
-
-                if batch_results is not None and len(batch_results) > 0:
-                    batch_results_list.append((batch_results, batch_index))
+            )
 
         # Merge results after all batches are processed
         if has_group_by:

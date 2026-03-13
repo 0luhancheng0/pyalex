@@ -5,6 +5,7 @@ Provides:
 - Per-strategy metric computation (AUC-ROC, AP, Precision@K, Spearman ρ)
 """
 
+from typing import Any
 import numpy as np
 
 
@@ -42,11 +43,39 @@ def sample_negative_pairs(
     return negatives
 
 
+def sample_hard_negative_pairs(
+    candidates: list[tuple[str, str]],
+    positive_pairs: set[tuple[str, str]],
+    n_target: int,
+    seed: int = 42,
+) -> list[tuple[str, str]]:
+    """Sample hard negative pairs from a candidate pool.
+
+    Args:
+        candidates: List of pre-computed hard negative candidate pairs.
+        positive_pairs: Known positive pairs to exclude.
+        n_target: Number of negatives to sample.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        List of (id_A, id_B) negative pairs.
+    """
+    rng = np.random.default_rng(seed)
+    valid_candidates = [p for p in candidates if p not in positive_pairs]
+    
+    if len(valid_candidates) <= n_target:
+        return valid_candidates
+        
+    indices = rng.choice(len(valid_candidates), size=n_target, replace=False)
+    return [valid_candidates[i] for i in indices]
+
+
 def evaluate_strategy(
     embeddings: dict[str, np.ndarray],
     positive_pairs: set[tuple[str, str]],
     negative_pairs: list[tuple[str, str]],
-) -> dict[str, float]:
+    return_predictions: bool = False,
+) -> dict[str, Any]:
     """Compute evaluation metrics for one embedding strategy.
 
     Metrics:
@@ -54,6 +83,8 @@ def evaluate_strategy(
     - avg_precision: average precision (area under PR curve)
     - precision_at_k: precision at K where K = number of positive pairs
     - spearman_rho: Spearman rank correlation between similarity and label
+    - hits_at_10: ratio of positive edges ranked in top 10 against all negatives
+    - hits_at_100: ratio of positive edges ranked in top 100 against all negatives
 
     Args:
         embeddings: Maps author ID -> embedding vector.
@@ -74,10 +105,13 @@ def evaluate_strategy(
     similarities = []
     labels = []
     skipped = 0
+    predictions = []
 
     for a, b, label in all_pairs:
         if a not in embeddings or b not in embeddings:
             skipped += 1
+            if return_predictions:
+                predictions.append({"author_1": a, "author_2": b, "label": label, "score": None})
             continue
         sim = cos_sim(
             embeddings[a].reshape(1, -1),
@@ -85,18 +119,25 @@ def evaluate_strategy(
         )[0, 0]
         similarities.append(float(sim))
         labels.append(label)
+        if return_predictions:
+            predictions.append({"author_1": a, "author_2": b, "label": label, "score": float(sim)})
 
     if not labels or sum(labels) == 0 or sum(labels) == len(labels):
-        return {
+        result: dict[str, Any] = {
             "auc_roc": 0.0,
             "avg_precision": 0.0,
             "precision_at_k": 0.0,
             "spearman_rho": 0.0,
+            "hits_at_10": 0.0,
+            "hits_at_100": 0.0,
             "n_positive": 0,
             "n_negative": 0,
             "n_pairs": 0,
             "skipped": skipped,
         }
+        if return_predictions:
+            result["predictions"] = predictions
+        return result
 
     sims = np.array(similarities)
     labs = np.array(labels)
@@ -109,13 +150,29 @@ def evaluate_strategy(
     top_k_indices = np.argsort(sims)[::-1][:k]
     precision_at_k = float(labs[top_k_indices].mean())
 
-    return {
+    pos_sims = sims[labs == 1]
+    neg_sims = sims[labs == 0]
+    
+    hits_10 = sum(1 for ps in pos_sims if np.sum(neg_sims >= ps) + 1 <= 10)
+    hits_100 = sum(1 for ps in pos_sims if np.sum(neg_sims >= ps) + 1 <= 100)
+    
+    hits_at_10 = float(hits_10 / len(pos_sims)) if len(pos_sims) > 0 else 0.0
+    hits_at_100 = float(hits_100 / len(pos_sims)) if len(pos_sims) > 0 else 0.0
+
+    result: dict[str, Any] = {
         "auc_roc": round(auc, 4),
         "avg_precision": round(ap, 4),
         "precision_at_k": round(precision_at_k, 4),
         "spearman_rho": round(float(rho), 4),
+        "hits_at_10": round(hits_at_10, 4),
+        "hits_at_100": round(hits_at_100, 4),
         "n_positive": int(labs.sum()),
         "n_negative": int((1 - labs).sum()),
         "n_pairs": len(labs),
         "skipped": skipped,
     }
+
+    if return_predictions:
+        result["predictions"] = predictions
+
+    return result

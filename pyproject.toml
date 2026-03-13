@@ -12,6 +12,7 @@ dependencies = [
     "httpx[http2]>=0.28.1",
     "ipython>=9.7.0",
     "jupyter>=1.1.1",
+    "kaleido>=1.2.0",
     "langchain>=1.0.8",
     "langchain-openai>=1.0.3",
     "langextract>=1.1.1",

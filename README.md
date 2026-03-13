@@ -175,8 +175,15 @@ PyAlex provides a utility to generate embeddings for OpenAlex entities and expor
 # Generate embeddings from a network graph
 pyalex embedding generate network.graphml output.parquet
 
+# Restrict author aggregation to pre-cutoff works
+pyalex embedding generate network.graphml output.parquet --author-cutoff-year 2016
+
+# Author aggregation strategies: mean, recency_weighted, citation_weighted,
+# concat_abstracts, max_pool
+pyalex embedding generate network.graphml output.parquet --author-aggregation-strategy citation_weighted
+
 # Launch visualization (requires embedding-atlas installed separately)
-embedding-atlas output.parquet --vector embedding
+embedding-atlas output.parquet --vector embedding --x projection_x --y projection_y
 ```
 
 See `docs/embeddings.md` for full documentation.
