@@ -476,15 +476,44 @@ def expand(
             )
 
         else:
-            # work_backward and work_related expansion means fetching these specific Work IDs
-            results = asyncio.run(
-                _async_retrieve_entities(Works, formatted_ids, "Works")
-            )
-            _output_results(
-                results,
-                jsonl_path=effective_jsonl_path,
-                normalize=normalize,
-            )
+            # work_backward and work_related
+            if publication_year:
+                query = Works()
+                id_string = ",".join(formatted_ids)
+                # Use openalex_id filter for direct ID matches
+                from ..batch import add_id_list_option_to_command
+                query = add_id_list_option_to_command(query, id_string, "openalex_id", Works)
+                query = apply_publication_year_filter(query, publication_year)
+
+                if effective_limit is not None:
+                    query = query.sort(cited_by_count="desc")
+
+                results = handle_large_id_list_if_needed(
+                    query,
+                    Works,
+                    effective_limit is None,
+                    effective_limit,
+                    effective_jsonl_path,
+                    normalize=normalize,
+                )
+
+                if results is None:
+                    results = execute_standard_query(
+                        query, "Works",
+                        all_results=effective_limit is None,
+                        limit=effective_limit,
+                    )
+                    _output_results(results, jsonl_path=effective_jsonl_path, normalize=normalize)
+            else:
+                # Existing behavior: direct batch retrieval by ID
+                results = asyncio.run(
+                    _async_retrieve_entities(Works, formatted_ids, "Works")
+                )
+                _output_results(
+                    results,
+                    jsonl_path=effective_jsonl_path,
+                    normalize=normalize,
+                )
     except Exception as e:
         _handle_cli_exception(e)
 
