@@ -59,6 +59,37 @@ _ENTITY_PREFIX_MAP: dict[str, str] = {
 }
 
 
+def apply_publication_year_filter(query, publication_year: str):
+    """Apply publication year filter to a query object."""
+    import typer
+
+    if ":" in publication_year:
+        try:
+            start_year, end_year = publication_year.split(":")
+            s_year = int(start_year.strip()) if start_year.strip() else None
+            e_year = int(end_year.strip()) if end_year.strip() else None
+            query = query.filter_by_publication_year(start_year=s_year, end_year=e_year)
+        except ValueError:
+            typer.echo(
+                "Error: Invalid year range format. Use 'start:end' "
+                "(e.g., '2019:2020')",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+    else:
+        try:
+            year = int(publication_year.strip())
+            query = query.filter_by_publication_year(year=year)
+        except ValueError:
+            typer.echo(
+                "Error: Invalid year format. Use a single year or range "
+                "(e.g., '2020' or '2019:2020')",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+    return query
+
+
 def _load_entity_class_from_prefix(openalex_id: str) -> tuple[type, str]:
     """Resolve the entity class based on an OpenAlex ID prefix."""
 
