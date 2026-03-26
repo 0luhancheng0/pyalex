@@ -27,6 +27,7 @@ from ..utils import _output_results
 from .help_panels import METADATA_PANEL
 from .help_panels import OUTPUT_PANEL
 from .rehydrate import rehydrate_ids
+from .utils import apply_publication_year_filter
 
 
 def _sample_ids(id_counts: Counter, limit: int | None, seed: int = 42) -> list[str]:
@@ -377,6 +378,8 @@ def expand(
             query = Works()
             id_string = ",".join(formatted_ids)
             query = add_id_list_option_to_command(query, id_string, "works_cites", Works)
+            if publication_year:
+                query = apply_publication_year_filter(query, publication_year)
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
@@ -401,6 +404,8 @@ def expand(
             query = Works()
             id_string = ",".join(formatted_ids)
             query = add_id_list_option_to_command(query, id_string, "works_author", Works)
+            if publication_year:
+                query = apply_publication_year_filter(query, publication_year)
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
@@ -431,6 +436,8 @@ def expand(
             query = Works()
             id_string = ",".join(formatted_ids)
             query = add_id_list_option_to_command(query, id_string, "works_topic", Works)
+            if publication_year:
+                query = apply_publication_year_filter(query, publication_year)
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
