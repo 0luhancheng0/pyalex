@@ -9,12 +9,17 @@ from typing import Any
 
 import pyalex.cli.utils as cli_utils
 from pyalex import Works
-from pyalex.cli.commands.utils import _parse_ids_from_json_input
+from pyalex.cli.commands.utils import _parse_ids_from_json_input, apply_publication_year_filter
 
 try:  # pragma: no cover - ensure pytest required for test execution
     import pytest  # type: ignore[import-not-found]
 except ImportError as exc:  # pragma: no cover
     raise ImportError("pytest is required to run tests") from exc
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 class DummyQuery:
@@ -90,7 +95,7 @@ class TestSortOptionHandling:
 class TestDefaultParameterPropagation:
     """Ensure helper functions include default query parameters."""
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_async_retrieve_single_includes_default_params(self, monkeypatch):
         """Single-entity retrieval URLs should include default query params."""
 
@@ -421,6 +426,27 @@ def test_output_results_normalize_flattens(monkeypatch):
 
     assert captured["normalize"] is True
     assert captured["results"][0]["metadata.country"] == "US"
+
+
+def test_apply_publication_year_filter_single_year():
+    query = Works()
+    query = apply_publication_year_filter(query, "2020")
+    assert "publication_year:2020" in query.url
+
+
+def test_apply_publication_year_filter_range():
+    query = Works()
+    query = apply_publication_year_filter(query, "2017:2018")
+    assert "publication_year:>2016" in query.url
+    assert "publication_year:<2019" in query.url
+
+
+def test_apply_publication_year_filter_invalid():
+    query = Works()
+    import typer
+
+    with pytest.raises((SystemExit, typer.Exit)):
+        apply_publication_year_filter(query, "invalid")
 
 
 if __name__ == "__main__":
