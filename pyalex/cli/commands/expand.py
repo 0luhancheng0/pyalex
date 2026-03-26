@@ -24,6 +24,7 @@ from ..command_patterns import validate_output_format_options
 from ..utils import _async_retrieve_entities
 from ..utils import _handle_cli_exception
 from ..utils import _output_results
+from .help_panels import METADATA_PANEL
 from .help_panels import OUTPUT_PANEL
 from .rehydrate import rehydrate_ids
 
@@ -164,6 +165,14 @@ def expand(
             ),
         ),
     ] = AuthorPosition.all,
+    publication_year: Annotated[
+        Optional[str],
+        typer.Option(
+            "--year",
+            help="Filter by publication year (e.g. '2020' or range '2019:2021'). Only applies to modes returning Works.",
+            rich_help_panel=METADATA_PANEL,
+        ),
+    ] = None,
 ):
     """
     Expand a set of entities by fetching related entities.
@@ -183,6 +192,17 @@ def expand(
     if author_position != AuthorPosition.all and mode != ExpandMode.work_author:
         typer.echo(
             "Warning: --author-position is only used in work_author mode; ignored.",
+            err=True,
+        )
+    if publication_year and mode not in {
+        ExpandMode.author_work,
+        ExpandMode.work_forward,
+        ExpandMode.work_related,
+        ExpandMode.work_backward,
+        ExpandMode.topic_work,
+    }:
+        typer.echo(
+            f"Warning: --year is only used in modes returning Works (not {mode.value}); ignored.",
             err=True,
         )
     effective_limit: int | None = limit
