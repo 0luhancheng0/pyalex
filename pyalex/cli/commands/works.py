@@ -31,7 +31,7 @@ from .help_panels import OUTPUT_PANEL
 from .help_panels import PAGINATION_PANEL
 from .help_panels import RESULT_PANEL
 from .help_panels import SEARCH_PANEL
-from .utils import StdinSentinelCommand
+from .utils import StdinSentinelCommand, apply_publication_year_filter
 
 
 class _WorksCommand(StdinSentinelCommand):
@@ -646,33 +646,7 @@ def create_works_command(app):
                 )
 
             if publication_year:
-                # Handle publication year ranges (e.g., "2019:2020") or single years
-                if ":" in publication_year:
-                    try:
-                        start_year, end_year = publication_year.split(":")
-                        start_year = int(start_year.strip())
-                        end_year = int(end_year.strip())
-                        query = query.filter_by_publication_year(
-                            start_year=start_year, end_year=end_year
-                        )
-                    except ValueError:
-                        typer.echo(
-                            "Error: Invalid year range format. Use 'start:end' "
-                            "(e.g., '2019:2020')",
-                            err=True,
-                        )
-                        raise typer.Exit(1) from None
-                else:
-                    try:
-                        year = int(publication_year.strip())
-                        query = query.filter_by_publication_year(year=year)
-                    except ValueError:
-                        typer.echo(
-                            "Error: Invalid year format. Use a single year or range "
-                            "(e.g., '2020' or '2019:2020')",
-                            err=True,
-                        )
-                        raise typer.Exit(1) from None
+                query = apply_publication_year_filter(query, publication_year)
 
             if publication_date:
                 # Handle publication date ranges (e.g., "2019-01-01:2020-12-31")
