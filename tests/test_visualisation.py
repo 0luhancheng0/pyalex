@@ -1,7 +1,8 @@
 import numpy as np
+import pandas as pd
 import pytest
 import matplotlib.pyplot as plt
-from experiments.visualisation import plot_calibration
+from experiments.visualisation import plot_calibration, plot_stratified_errors
 
 def test_plot_calibration_single():
     """Test plot_calibration with a single probability array."""
@@ -40,3 +41,25 @@ def test_plot_calibration_invalid_input():
     
     with pytest.raises(TypeError):
         plot_calibration(y_true, y_prob)
+
+
+def test_plot_stratified_errors():
+    """Test plot_stratified_errors with categorical and numeric strata."""
+    df = pd.DataFrame(
+        {
+            "y_true": [0, 0, 1, 1, 0, 1],
+            "y_prob": [0.1, 0.8, 0.2, 0.9, 0.7, 0.3],
+            "category": ["A", "A", "A", "B", "B", "B"],
+            "numeric": [1, 2, 3, 10, 20, 30],
+        }
+    )
+
+    # Test categorical
+    fig = plot_stratified_errors(df, "y_true", "y_prob", "category")
+    assert isinstance(fig, plt.Figure)
+    plt.close(fig)
+
+    # Test numeric with binning
+    fig = plot_stratified_errors(df, "y_true", "y_prob", "numeric", n_bins=2)
+    assert isinstance(fig, plt.Figure)
+    plt.close(fig)
