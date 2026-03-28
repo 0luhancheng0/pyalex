@@ -34,7 +34,7 @@ def test_sample_pairs_subtraction():
     eligible = {"A1", "A2", "A3", "A4"}
     
     # sample_pairs(graph, type_map, idx_to_id, eligible, cutoff_year, neg_ratio, neg_strategy, seed)
-    positives, negatives = sample_pairs(
+    positives, negatives, counts = sample_pairs(
         graph, type_map, idx_to_id, eligible,
         cutoff_year=2020,
         neg_ratio=1,
@@ -49,6 +49,9 @@ def test_sample_pairs_subtraction():
     assert ("A1", "A3") in positives
     assert ("A1", "A2") not in positives
     assert len(positives) == 1
+    assert counts["total_post_cutoff"] == 2
+    assert counts["repeat"] == 1
+    assert counts["new"] == 1
     
     # We requested neg_ratio=1, so we should have 1 negative pair.
     assert len(negatives) == 1
