@@ -10,7 +10,7 @@ from pyalex import Works
 
 from ..batch import add_id_list_option_to_command
 from ..command_patterns import execute_standard_query
-from ..command_patterns import handle_large_id_list_if_needed
+from ..command_patterns import handle_large_id_list
 from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
 from ..constants import STDIN_SENTINEL
@@ -871,13 +871,13 @@ def create_works_command(app):
                 query = query.group_by(group_by)
 
             # Check for and handle large ID lists (batch processing)
-            results = handle_large_id_list_if_needed(
+            results = handle_large_id_list(
                 query,
                 Works,
                 all_results,
                 limit,
                 effective_jsonl_path,
-                group_by,
+                group_by=group_by,
                 selected_fields=cli_selected_fields,
                 normalize=normalize,
             )

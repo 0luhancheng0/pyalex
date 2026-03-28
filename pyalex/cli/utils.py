@@ -625,7 +625,7 @@ async def _async_retrieve_entities(entity_class, ids, class_name):
         else:
             # Multiple IDs - use OR operator for batch retrieval
             id_filter = "|".join(batch_ids)
-            query = entity_class().filter(openalex_id=id_filter)
+            query = entity_class().filter(openalex=id_filter)
             urls.append(query.url)
 
     # Show progress feedback for multiple batches

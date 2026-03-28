@@ -158,6 +158,8 @@ class BatchFilterRegistry:
                 "authors_works": BatchFilterConfig("", "works"),
                 "institutions_works": BatchFilterConfig("", "works"),
                 "sources_works": BatchFilterConfig("", "works"),
+                # ID-based retrieval
+                "openalex_id": BatchFilterConfig("", "openalex"),
             }
         )
 
@@ -921,6 +923,81 @@ class BatchProcessor:
         return results
 
 
+    def handle_large_id_list(
+        self,
+        query,
+        entity_class,
+        all_results: bool,
+        limit: int | None,
+        jsonl_path: str | None,
+        group_by: str | None = None,
+        selected_fields: list[str] | None = None,
+        normalize: bool = False,
+    ):
+        """
+        Check for and handle large ID lists attached to query.
+
+        Args:
+            query: Query object to check
+            entity_class: Entity class (Works, Authors, etc.)
+            all_results: Whether to fetch all results
+            limit: Maximum number of results
+            jsonl_path: Path for JSON Lines output
+            group_by: Field to group by (if any)
+            selected_fields: Fields to include in output
+            normalize: Whether to normalize output
+
+        Returns:
+            Results if large ID list was handled, None otherwise.
+        """
+        from .utils import _output_grouped_results
+        from .utils import _output_results
+
+        # Check for large ID list attributes
+        large_id_attrs = [attr for attr in dir(query) if attr.startswith("_large_")]
+
+        if not large_id_attrs:
+            return None
+
+        # Handle large ID list using batch processing
+        attr_name = large_id_attrs[0]
+        large_id_list = getattr(query, attr_name)
+        delattr(query, attr_name)
+
+        # Extract filter config key from attribute name
+        # e.g., '_large_works_funder_list' -> 'works_funder'
+        filter_config_key = attr_name.replace("_large_", "").replace("_list", "")
+
+        # Execute batch processing
+        results = self.process_id_list(
+            query,
+            large_id_list,
+            filter_config_key,
+            entity_class,
+            filter_config_key.split("_")[1] + " IDs",
+            all_results,
+            limit,
+            json_path=jsonl_path,
+        )
+
+        if results is None:
+            typer.echo("No results returned from API", err=True)
+            return results
+
+        # Output results
+        if group_by:
+            _output_grouped_results(results, jsonl_path, normalize=normalize)
+        else:
+            _output_results(
+                results,
+                jsonl_path,
+                selected_fields=selected_fields,
+                normalize=normalize,
+            )
+
+        return results
+
+
 # Global instances for backward compatibility
 _global_config = BatchConfig()
 _global_processor = BatchProcessor(_global_config)
@@ -968,6 +1045,29 @@ def _handle_large_id_list(
         all_results,
         limit,
         json_path,
+    )
+
+
+def handle_large_id_list(
+    query,
+    entity_class,
+    all_results: bool,
+    limit: int | None,
+    jsonl_path: str | None,
+    group_by: str | None = None,
+    selected_fields: list[str] | None = None,
+    normalize: bool = False,
+):
+    """Global wrapper for handle_large_id_list."""
+    return _global_processor.handle_large_id_list(
+        query,
+        entity_class,
+        all_results,
+        limit,
+        jsonl_path,
+        group_by,
+        selected_fields,
+        normalize,
     )
 
 

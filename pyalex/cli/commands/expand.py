@@ -19,7 +19,7 @@ from pyalex import Works
 
 from ..batch import add_id_list_option_to_command
 from ..command_patterns import execute_standard_query
-from ..command_patterns import handle_large_id_list_if_needed
+from ..command_patterns import handle_large_id_list
 from ..command_patterns import validate_output_format_options
 from ..utils import _async_retrieve_entities
 from ..utils import _handle_cli_exception
@@ -383,7 +383,7 @@ def expand(
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
-            results = handle_large_id_list_if_needed(
+            results = handle_large_id_list(
                 query,
                 Works,
                 effective_limit is None,  # all_results
@@ -409,7 +409,7 @@ def expand(
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
-            results = handle_large_id_list_if_needed(
+            results = handle_large_id_list(
                 query,
                 Works,
                 effective_limit is None,  # all_results
@@ -441,7 +441,7 @@ def expand(
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
-            results = handle_large_id_list_if_needed(
+            results = handle_large_id_list(
                 query,
                 Works,
                 effective_limit is None,  # all_results
@@ -481,14 +481,13 @@ def expand(
                 query = Works()
                 id_string = ",".join(formatted_ids)
                 # Use openalex_id filter for direct ID matches
-                from ..batch import add_id_list_option_to_command
                 query = add_id_list_option_to_command(query, id_string, "openalex_id", Works)
                 query = apply_publication_year_filter(query, publication_year)
 
                 if effective_limit is not None:
                     query = query.sort(cited_by_count="desc")
 
-                results = handle_large_id_list_if_needed(
+                results = handle_large_id_list(
                     query,
                     Works,
                     effective_limit is None,

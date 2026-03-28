@@ -311,7 +311,7 @@ class BaseOpenAlex:
             )
 
         return _run_async_safely(
-            self.filter_or(openalex_id=record_id).get(per_page=len(record_id))
+            self.filter_or(openalex=record_id).get(per_page=len(record_id))
         )
 
     def _handle_string_id(self, record_id):
@@ -375,7 +375,7 @@ class BaseOpenAlex:
 
     def _url_query(self):
         if isinstance(self.params, list):
-            return self.filter_or(openalex_id=self.params)
+            return self.filter_or(openalex=self.params)
         elif isinstance(self.params, dict):
             l_params = []
             for k, v in self.params.items():

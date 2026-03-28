@@ -21,9 +21,9 @@ except ImportError:
     Node = None
     Relationship = None
 
+from pyalex.utils import get_entity_type
 from ..utils import _handle_cli_exception
 from .help_panels import VISUALIZATION_PANEL
-
 
 
 def _load_works(input_files: List[Path]) -> Tuple[List[Dict], Dict[str, str], Set[str]]:
@@ -45,7 +45,7 @@ def _load_works(input_files: List[Path]) -> Tuple[List[Dict], Dict[str, str], Se
         # Use stem (filename without extension) as the source label
         source_name = file_path.stem
         source_files.add(source_name)
-        typer.echo(f"Reading works from {file_path} (labeled as '{source_name}')...")
+        typer.echo(f"Reading entities from {file_path} (labeled as '{source_name}')...")
         with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
@@ -63,7 +63,7 @@ def _load_works(input_files: List[Path]) -> Tuple[List[Dict], Dict[str, str], Se
                 except json.JSONDecodeError:
                     continue
     
-    typer.echo(f"Loaded {len(works_data)} works from {len(source_files)} files.")
+    typer.echo(f"Loaded {len(works_data)} entities from {len(source_files)} files.")
     return works_data, work_source_map, source_files
 
 
@@ -105,14 +105,20 @@ def _build_graph(
     graph = rx.PyDiGraph()
     id_to_idx = {}
 
-    # Pass 1: Add nodes for all works in the file (Sources)
+    # Pass 1: Add nodes for all works/entities in the file (Sources)
     for work in works_data:
         work_id = work.get("id")
         if work_id:
             # Clean ID if it's a URL
-            work_id = work_id.replace("https://openalex.org/", "")
-            if work_id not in id_to_idx:
-                source_name = work_source_map.get(work.get("id"), "Unknown")
+            short_id = work_id.replace("https://openalex.org/", "")
+            if short_id not in id_to_idx:
+                source_name = work_source_map.get(work_id, "Unknown")
+
+                # Determine entity type
+                try:
+                    entity_type = get_entity_type(work_id)
+                except ValueError:
+                    entity_type = "work"
 
                 # Extract citation_normalized_percentile
                 percentile = 0.0
@@ -128,11 +134,11 @@ def _build_graph(
                 node_data.pop("fwci", None)
 
                 # Override / add graph-specific fields
-                node_data["id"] = work_id
-                node_data["type"] = "work"
+                node_data["id"] = short_id
+                node_data["type"] = entity_type
                 node_data["source_file"] = source_name
                 
-                # Safe year conversion
+                # Safe year conversion (works only)
                 year_val = work.get("publication_year")
                 if year_val is None or (isinstance(year_val, float) and math.isnan(year_val)):
                     node_data["year"] = 0
@@ -142,7 +148,7 @@ def _build_graph(
                 node_data["percentile"] = percentile
 
                 idx = graph.add_node(node_data)
-                id_to_idx[work_id] = idx
+                id_to_idx[short_id] = idx
 
     external_node_count = 0
 
@@ -556,12 +562,12 @@ network_app = typer.Typer(
 
 @network_app.command(name="build")
 def build(
-    input_path: Annotated[
-        Path,
+    input_paths: Annotated[
+        List[Path],
         typer.Option(
             "--input-path",
             "-i",
-            help="Path to the works JSONL file or directory containing JSONL files",
+            help="Path to the works JSONL file or directory containing JSONL files (can be specified multiple times)",
             exists=True,
             file_okay=True,
             dir_okay=True,
@@ -617,13 +623,19 @@ def build(
 
     try:
         # 1. Determine Input Files
-        if input_path.is_dir():
-            input_files = list(input_path.glob("*.jsonl"))
-            if not input_files:
-                typer.echo(f"No .jsonl files found in {input_path}", err=True)
-                raise typer.Exit(1)
-        else:
-            input_files = [input_path]
+        input_files = []
+        for path in input_paths:
+            if path.is_dir():
+                found = list(path.glob("*.jsonl"))
+                if not found:
+                    typer.echo(f"No .jsonl files found in {path}", err=True)
+                input_files.extend(found)
+            else:
+                input_files.append(path)
+
+        if not input_files:
+            typer.echo("Error: No input files specified or found.", err=True)
+            raise typer.Exit(1)
 
         # 2. Load Works
         works_data, work_source_map, _ = _load_works(input_files)

@@ -193,7 +193,7 @@ def execute_standard_query(
     return results
 
 
-def handle_large_id_list_if_needed(
+def handle_large_id_list(
     query,
     entity_class,
     all_results: bool,
@@ -205,82 +205,24 @@ def handle_large_id_list_if_needed(
 ):
     """Check for and handle large ID lists attached to query.
 
-    Large ID lists are detected by checking for attributes starting with '_large_'
-    on the query object. If found, delegates to batch processing.
-
-    Parameters
-    ----------
-    query : BaseOpenAlex
-        Query object to check
-    entity_class : type
-        Entity class (Works, Authors, etc.)
-    all_results : bool
-        Whether to fetch all results
-    limit : Optional[int]
-        Maximum number of results
-    jsonl_path : Optional[str]
-        Path for JSON Lines output (or "-" for stdout)
-    group_by : Optional[str], optional
-        Field to group by (if any)
-
-    Returns
-    -------
-    Optional[results]
-        Results if large ID list was handled, None otherwise.
-        If not None, caller should return immediately (results already output).
+    Delegates to pyalex.cli.batch.handle_large_id_list.
     """
-    from .batch import _handle_large_id_list
-    from .utils import _output_grouped_results
-    from .utils import _output_results
+    from .batch import handle_large_id_list as batch_handle_large_id_list
 
-    # Check for large ID list attributes
-    large_id_attrs = [attr for attr in dir(query) if attr.startswith("_large_")]
-
-    if not large_id_attrs:
-        return None  # No large ID list, continue with normal query
-
-    # Handle large ID list using batch processing
-    attr_name = large_id_attrs[0]  # Take the first one found
-    large_id_list = getattr(query, attr_name)
-    delattr(query, attr_name)
-
-    # Extract filter config key from attribute name
-    # e.g., '_large_works_funder_list' -> 'works_funder'
-    filter_config_key = attr_name.replace("_large_", "").replace("_list", "")
-
-    # Execute batch processing
-    results = _handle_large_id_list(
+    return batch_handle_large_id_list(
         query,
-        large_id_list,
-        filter_config_key,
         entity_class,
-        filter_config_key.split("_")[1] + " IDs",  # e.g., "funder IDs"
         all_results,
         limit,
-        json_path=jsonl_path,
+        jsonl_path,
+        group_by,
+        selected_fields,
+        normalize,
     )
 
-    # Check if results is None or empty
-    if results is None:
-        typer.echo("No results returned from API", err=True)
-        return results
 
-    # Output results based on type
-    if group_by:
-        _output_grouped_results(
-            results,
-            jsonl_path,
-            normalize=normalize,
-        )
-    else:
-        _output_results(
-            results,
-            jsonl_path,
-            selected_fields=selected_fields,
-            normalize=normalize,
-        )
-
-    return results  # Return results to signal they were handled
+# Legacy alias
+handle_large_id_list_if_needed = handle_large_id_list
 
 
 class CommandContext:

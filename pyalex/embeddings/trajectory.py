@@ -89,6 +89,13 @@ def trajectory(
             help="Comma-separated list of author IDs to analyze. If omitted, analyzes all authors in the graph.",
         ),
     ] = None,
+    bin_size: Annotated[
+        Optional[int],
+        typer.Option(
+            "--bin-size",
+            help="Number of works to group per semantic data point.",
+        ),
+    ] = None,
     tau: Annotated[
         float,
         typer.Option(
@@ -185,7 +192,8 @@ def trajectory(
     for a_node_idx, a_id, a_name in author_nodes:
         work_indices = graph.predecessor_indices(a_node_idx)
 
-        yearly_works = {}
+        # 1. Collect ALL valid works into a list of tuples (year, embedding)
+        valid_works = []
         for w_idx in work_indices:
             w_data = graph.get_node_data(w_idx)
             w_id = w_data.get("id")
@@ -203,32 +211,70 @@ def trajectory(
             except (ValueError, TypeError):
                 continue
 
-            yearly_works.setdefault(year, []).append(id_to_emb[w_id])
+            valid_works.append((year, id_to_emb[w_id]))
 
-        if not yearly_works:
+        if not valid_works:
             continue
 
+        # 2. Sort that list by year
+        valid_works.sort(key=lambda x: x[0])
+
         author_trajectory = []
-        for year in sorted(yearly_works.keys()):
-            works = yearly_works[year]
-            if len(works) < min_works_per_year:
-                continue
 
-            # Compute mean embedding for the year
-            year_emb = np.mean(works, axis=0).astype(np.float32)
+        if bin_size is not None:
+            # 3. If bin_size is provided: Iterate through the sorted list in chunks of size bin_size
+            for i in range(0, len(valid_works), bin_size):
+                chunk = valid_works[i : i + bin_size]
+                chunk_years = [w[0] for w in chunk]
+                chunk_embs = [w[1] for w in chunk]
+                
+                min_year = min(chunk_years)
+                max_year = max(chunk_years)
+                label = f"{min_year}-{max_year}" if min_year != max_year else str(min_year)
+                
+                # Compute mean embedding for the bin
+                bin_emb = np.mean(chunk_embs, axis=0).astype(np.float32)
+                
+                # Cosine similarity to each topic
+                similarities = np.array([cosine_similarity(bin_emb, te) for te in topic_embs])
+                
+                # Project onto ternary coordinates using softmax
+                coords = softmax(similarities, tau=tau).tolist()
 
-            # Cosine similarity to each topic
-            similarities = np.array([cosine_similarity(year_emb, te) for te in topic_embs])
-            
-            # Project onto ternary coordinates using softmax
-            coords = softmax(similarities, tau=tau).tolist()
+                author_trajectory.append({
+                    "year": label,
+                    "sort_key": min_year,
+                    "coordinates": coords,
+                    "n_works": len(chunk),
+                    "similarities": similarities.tolist(),
+                })
+        else:
+            # 4. If bin_size is None, use the current yearly grouping logic
+            yearly_works = {}
+            for year, emb in valid_works:
+                yearly_works.setdefault(year, []).append(emb)
 
-            author_trajectory.append({
-                "year": year,
-                "coordinates": coords,
-                "n_works": len(works),
-                "similarities": similarities.tolist(),
-            })
+            for year in sorted(yearly_works.keys()):
+                works = yearly_works[year]
+                if len(works) < min_works_per_year:
+                    continue
+
+                # Compute mean embedding for the year
+                year_emb = np.mean(works, axis=0).astype(np.float32)
+
+                # Cosine similarity to each topic
+                similarities = np.array([cosine_similarity(year_emb, te) for te in topic_embs])
+                
+                # Project onto ternary coordinates using softmax
+                coords = softmax(similarities, tau=tau).tolist()
+
+                author_trajectory.append({
+                    "year": year,
+                    "sort_key": year,
+                    "coordinates": coords,
+                    "n_works": len(works),
+                    "similarities": similarities.tolist(),
+                })
 
         if author_trajectory:
             results.append({
@@ -266,13 +312,14 @@ def trajectory(
             rows.append({
                 "author": name,
                 "year": point["year"],
+                "sort_key": point["sort_key"],
                 "n_works": point["n_works"],
                 "topic_a": coords[0],
                 "topic_b": coords[1],
                 "topic_c": coords[2],
             })
 
-    plot_df = pd.DataFrame(rows).sort_values(["author", "year"])
+    plot_df = pd.DataFrame(rows).sort_values(["author", "sort_key"])
 
     # Create ternary scatter plot
     fig = px.scatter_ternary(
@@ -285,6 +332,7 @@ def trajectory(
         hover_name="author",
         hover_data={"year": True, "n_works": True, "topic_a": ":.2f", "topic_b": ":.2f", "topic_c": ":.2f"},
         labels={
+            "year": "Year Range" if bin_size is not None else "Year",
             "topic_a": topic_names[0],
             "topic_b": topic_names[1],
             "topic_c": topic_names[2],
