@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-from experiments.aggregations import aggregate_recency_weighted
+from unittest.mock import patch
+from experiments.aggregations import aggregate_recency_weighted, aggregate_concat_abstracts
 
 def test_aggregate_recency_weighted_exponential():
     # Setup: 3 embeddings of size 2
@@ -54,3 +55,27 @@ def test_aggregate_recency_weighted_future_years():
     
     result = aggregate_recency_weighted(embeddings, years, cutoff_year)
     assert result[0] == 1.5
+
+def test_aggregate_concat_abstracts_truncation():
+    # Setup: 3 abstracts of roughly equal length
+    # Sorting by year DESC should be: Abstract 2, Abstract 3, Abstract 1
+    texts = ["Abstract 1", "Abstract 2", "Abstract 3"]
+    years = [2020, 2022, 2021]
+    
+    # 1 token approx 4 chars.
+    # "Abstract 2" -> 10 chars -> 2.5 tokens
+    # "Abstract 2 | Abstract 3" -> (10 + 3 + 10) = 23 chars -> 5.75 tokens
+    # "Abstract 2 | Abstract 3 | Abstract 1" -> (10 + 3 + 10 + 3 + 10) = 36 chars -> 9 tokens
+    
+    with patch("experiments.aggregations.generate_embeddings") as mock_gen:
+        # Mock returns a list containing one list (the embedding)
+        mock_gen.return_value = [[0.1, 0.2]]
+        
+        # Test with max_tokens=6. Should take Abstract 2 and Abstract 3.
+        result = aggregate_concat_abstracts(texts, years=years, max_tokens=6)
+        
+        mock_gen.assert_called_once()
+        called_args = mock_gen.call_args[0][0]
+        # Should be sorted by year DESC and truncated
+        assert called_args == ["Abstract 2 | Abstract 3"]
+        assert result.tolist() == pytest.approx([0.1, 0.2])
