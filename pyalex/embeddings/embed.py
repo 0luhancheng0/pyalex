@@ -13,7 +13,6 @@ the `embedding-atlas` CLI for interactive visualisation.
 import functools
 import json
 import logging
-from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -96,16 +95,6 @@ def generate_embeddings(
 # ---------------------------------------------------------------------------
 
 
-class AuthorAggregationStrategy(str, Enum):
-    """Supported author embedding aggregation strategies."""
-
-    mean = "mean"
-    recency_weighted = "recency_weighted"
-    citation_weighted = "citation_weighted"
-    concat_abstracts = "concat_abstracts"
-    max_pool = "max_pool"
-
-
 def _parse_int_or_none(value) -> Optional[int]:
     """Parse integer-like values from GraphML attributes.
 
@@ -119,57 +108,6 @@ def _parse_int_or_none(value) -> Optional[int]:
         return int(float(value))
     except (TypeError, ValueError):
         return None
-
-
-def _aggregate_mean(embeddings: list[np.ndarray]) -> np.ndarray:
-    """Simple unweighted mean of work embeddings."""
-    return np.mean(embeddings, axis=0).astype(np.float32)
-
-
-def _aggregate_recency_weighted(
-    embeddings: list[np.ndarray],
-    years: list[int],
-    cutoff_year: int,
-) -> np.ndarray:
-    """Weight each work by 1 / (cutoff_year - year + 1)."""
-    weights = np.array(
-        [1.0 / (cutoff_year - y + 1) if y <= cutoff_year else 1.0 for y in years],
-        dtype=np.float32,
-    )
-    weights /= weights.sum()
-    return (weights[:, None] * np.stack(embeddings)).sum(axis=0).astype(np.float32)
-
-
-def _aggregate_citation_weighted(
-    embeddings: list[np.ndarray],
-    citations: list[int],
-) -> np.ndarray:
-    """Weight each work by log1p(cited_by_count)."""
-    weights = np.array([np.log1p(c) for c in citations], dtype=np.float32)
-    total = weights.sum()
-    if total == 0:
-        return _aggregate_mean(embeddings)
-    weights /= total
-    return (weights[:, None] * np.stack(embeddings)).sum(axis=0).astype(np.float32)
-
-
-def _aggregate_max_pool(embeddings: list[np.ndarray]) -> np.ndarray:
-    """Element-wise maximum across all work embeddings."""
-    return np.max(np.stack(embeddings), axis=0).astype(np.float32)
-
-
-def _aggregate_concat_abstracts(
-    texts: list[str],
-    model_name: str,
-) -> Optional[np.ndarray]:
-    """Concatenate all work texts and embed jointly."""
-    composite = " | ".join(t for t in texts if t and t.strip())
-    if not composite.strip():
-        return None
-    result = generate_embeddings([composite], model_name=model_name)
-    if result and result[0] is not None:
-        return np.array(result[0], dtype=np.float32)
-    return None
 
 
 def _embed_works(
@@ -205,112 +143,34 @@ def _embed_authors(
     graph: rx.PyDiGraph,
     node_type_map: dict[str, list[int]],
     work_embeddings: dict[int, np.ndarray],
-    cutoff_year: Optional[int] = None,
-    aggregation_strategy: AuthorAggregationStrategy = AuthorAggregationStrategy.mean,
-    model_name: str = "all-MiniLM-L6-v2",
 ) -> dict[int, np.ndarray]:
     """Compute author embeddings from connected work embeddings.
 
     Only works present in *work_embeddings* (i.e. those that exist in the
     input graph and received a valid embedding) are considered.
-
-    When *cutoff_year* is provided, only works with parseable year <= cutoff
-    are included for author aggregation. Works with missing/invalid year are
-    excluded under cutoff mode.
     """
     author_indices = node_type_map.get("author", [])
     if not author_indices:
         typer.echo("  No author nodes found in the graph.")
         return {}
 
-    if (
-        aggregation_strategy == AuthorAggregationStrategy.recency_weighted
-        and cutoff_year is None
-    ):
-        raise ValueError("--author-cutoff-year is required for recency_weighted strategy")
-
     result: dict[int, np.ndarray] = {}
-    skipped_due_to_missing_year = 0
-    skipped_due_to_cutoff = 0
 
     for author_idx in author_indices:
         # Edges are  work -> author  so we look at predecessors of the author node
         neighbour_embs: list[np.ndarray] = []
-        neighbour_years: list[int] = []
-        neighbour_citations: list[int] = []
-        neighbour_texts: list[str] = []
 
-        for work_idx, _, edge_data in graph.in_edges(author_idx):
-            if work_idx not in work_embeddings:
-                continue
-
-            work_attrs = graph.get_node_data(work_idx) or {}
-
-            if cutoff_year is not None:
-                year = _parse_int_or_none(work_attrs.get("year", work_attrs.get("publication_year")))
-                if year is None:
-                    edge_data = edge_data or {}
-                    year = _parse_int_or_none(edge_data.get("year", edge_data.get("publication_year")))
-
-                if year is None:
-                    skipped_due_to_missing_year += 1
-                    continue
-                if year > cutoff_year:
-                    skipped_due_to_cutoff += 1
-                    continue
-
-            year = _parse_int_or_none(work_attrs.get("year", work_attrs.get("publication_year")))
-            if year is None:
-                edge_data = edge_data or {}
-                year = _parse_int_or_none(edge_data.get("year", edge_data.get("publication_year")))
-
-            citation_count = _parse_int_or_none(work_attrs.get("cited_by_count"))
-            citation_count = citation_count if citation_count is not None else 0
-
-            title = work_attrs.get("title", "") or ""
-            abstract = work_attrs.get("abstract", "") or ""
-            text = f"{title} {abstract}".strip()
-
-            neighbour_embs.append(work_embeddings[work_idx])
-            neighbour_years.append(year if year is not None else 0)
-            neighbour_citations.append(citation_count)
-            neighbour_texts.append(text)
+        for work_idx in graph.predecessor_indices(author_idx):
+            if work_idx in work_embeddings:
+                neighbour_embs.append(work_embeddings[work_idx])
 
         if neighbour_embs:
-            if aggregation_strategy == AuthorAggregationStrategy.mean:
-                result[author_idx] = _aggregate_mean(neighbour_embs)
-            elif aggregation_strategy == AuthorAggregationStrategy.recency_weighted:
-                result[author_idx] = _aggregate_recency_weighted(
-                    neighbour_embs,
-                    years=neighbour_years,
-                    cutoff_year=cutoff_year,
-                )
-            elif aggregation_strategy == AuthorAggregationStrategy.citation_weighted:
-                result[author_idx] = _aggregate_citation_weighted(
-                    neighbour_embs,
-                    citations=neighbour_citations,
-                )
-            elif aggregation_strategy == AuthorAggregationStrategy.max_pool:
-                result[author_idx] = _aggregate_max_pool(neighbour_embs)
-            elif aggregation_strategy == AuthorAggregationStrategy.concat_abstracts:
-                concat_embedding = _aggregate_concat_abstracts(
-                    neighbour_texts,
-                    model_name=model_name,
-                )
-                if concat_embedding is not None:
-                    result[author_idx] = concat_embedding
-            else:
-                raise ValueError(f"Unsupported author aggregation strategy: {aggregation_strategy}")
+            result[author_idx] = np.mean(neighbour_embs, axis=0).astype(np.float32)
 
     typer.echo(
         f"  Computed embeddings for {len(result)}/{len(author_indices)} authors "
         f"(skipped {len(author_indices) - len(result)} without embedded works)."
     )
-    if cutoff_year is not None:
-        typer.echo(
-            f"  Cutoff filtering ({cutoff_year}) skipped {skipped_due_to_cutoff} work links; "
-            f"excluded {skipped_due_to_missing_year} links with missing/invalid year."
-        )
     return result
 
 
@@ -497,23 +357,6 @@ def generate(
         int,
         typer.Option("--batch-size", "-b", help="Batch size for embedding generation."),
     ] = 32,
-    author_cutoff_year: Annotated[
-        Optional[int],
-        typer.Option(
-            "--author-cutoff-year",
-            help="Only aggregate author embeddings from works with year <= this cutoff.",
-        ),
-    ] = None,
-    author_aggregation_strategy: Annotated[
-        AuthorAggregationStrategy,
-        typer.Option(
-            "--author-aggregation-strategy",
-            help=(
-                "Aggregation strategy used for author embeddings: "
-                "mean, recency_weighted, citation_weighted, concat_abstracts, max_pool."
-            ),
-        ),
-    ] = AuthorAggregationStrategy.mean,
     umap_n_neighbors: Annotated[
         int,
         typer.Option(
@@ -538,7 +381,7 @@ def generate(
 
     Strategy per entity type:
     - **Works**: text embedding from title + abstract via SentenceTransformer.
-    - **Authors**: configurable aggregation over connected works' embeddings.
+    - **Authors**: mean aggregation over connected works' embeddings.
     - **Topics**: mean of their connected works' embeddings.
     - **Institutions**: mean of their connected authors' embeddings.
 
@@ -547,15 +390,6 @@ def generate(
     - `embedding`
     - `projection_x` / `projection_y` (2D UMAP coordinates)
     """
-    if (
-        author_aggregation_strategy == AuthorAggregationStrategy.recency_weighted
-        and author_cutoff_year is None
-    ):
-        typer.echo(
-            "Error: --author-cutoff-year is required when --author-aggregation-strategy recency_weighted is used.",
-            err=True,
-        )
-        raise typer.Exit(1)
 
     typer.echo(f"Loading graph from {input_graphml}...")
     graph = load_graphml_to_rx(str(input_graphml))
@@ -584,9 +418,6 @@ def generate(
         graph,
         node_type_map,
         work_embeddings,
-        cutoff_year=author_cutoff_year,
-        aggregation_strategy=author_aggregation_strategy,
-        model_name=model,
     )
     all_entities.extend(_collect_entities(graph, node_type_map.get("author", []), author_embeddings, "author"))
 

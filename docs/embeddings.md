@@ -52,22 +52,6 @@ embedding-atlas output.parquet --vector embedding --x projection_x --y projectio
 pyalex embedding generate network.graphml output.parquet \
 	--umap-n-neighbors 15 \
 	--umap-metric cosine
-
-# Optional: restrict author aggregation to pre-cutoff works
-pyalex embedding generate network.graphml output.parquet \
-	--author-cutoff-year 2016
-
-# Optional: choose author aggregation strategy
-pyalex embedding generate network.graphml output.parquet \
-	--author-aggregation-strategy mean
-
-# Supported strategies: mean, recency_weighted, citation_weighted,
-# concat_abstracts, max_pool
-
-# recency_weighted requires author cutoff year
-pyalex embedding generate network.graphml output.parquet \
-	--author-aggregation-strategy recency_weighted \
-	--author-cutoff-year 2016
 ```
 
 ## Network Visualization (Plotly & UMAP)
