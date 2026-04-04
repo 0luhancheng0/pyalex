@@ -1,0 +1,23 @@
+{
+  "skill_name": "pyalex-cli-agent",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Find the 5 most cited papers about 'reinforcement learning' published in 2023.",
+      "expected_output": "The agent should construct a 'pyalex works' command with filters for search query, year 2023, sort by cited_by_count, and limit 5.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "What is the distribution of open access status for works by author A5000000000?",
+      "expected_output": "The agent should construct a 'pyalex works' command with --author-ids A5000000000 and --group-by oa_status.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Take the DOI '10.1038/s41586-020-2169-x' and save its metadata to 'paper.jsonl'.",
+      "expected_output": "The agent should use 'echo ... | pyalex from-ids --jsonl-file paper.jsonl'.",
+      "files": []
+    }
+  ]
+}
