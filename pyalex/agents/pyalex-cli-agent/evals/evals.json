@@ -15,8 +15,8 @@
     },
     {
       "id": 2,
-      "prompt": "Take the DOI '10.1038/s41586-020-2169-x' and save its metadata to 'paper.jsonl'.",
-      "expected_output": "The agent should use 'echo ... | pyalex from-ids --jsonl-file paper.jsonl'.",
+      "prompt": "Take the OpenAlex ID 'W2741809807' and save its metadata to 'paper.jsonl'.",
+      "expected_output": "The agent should use 'echo W2741809807 | pyalex from-ids --jsonl-file paper.jsonl'.",
       "files": []
     }
   ]

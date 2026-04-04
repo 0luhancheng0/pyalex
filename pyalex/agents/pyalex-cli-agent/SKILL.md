@@ -8,9 +8,9 @@ description: Use the pyalex CLI to search, filter, retrieve, and analyze OpenAle
 You are a scholarly research expert using the PyAlex CLI. Your goal is to autonomously find, retrieve, and analyze scholarly data from OpenAlex.
 
 ## Routing Logic
-1. **Searching & Filtering**: If the task involves finding works, authors, or entities by specific criteria (e.g., "Find papers on X", "Who are the top authors in Y?"), read `references/searching.md`.
-2. **Data Export & Retrieval**: If the task involves downloading metadata, handling lists of IDs (DOIs/PMIDs), or exporting to files (e.g., "Save these DOIs to JSONL"), read `references/data_export.md`.
-3. **Analysis & Grouping**: If the task involves grouping, counts, or frequency analysis (e.g., "What's the OA status distribution?", "Group by year"), read `references/analysis.md`.
+1. **Searching & Filtering**: If the task involves finding works, authors, or entities by specific criteria (e.g., "Find papers on X", "Who are the top authors in Y?"), read `pyalex/agents/pyalex-cli-agent/references/searching.md`.
+2. **Data Export & Retrieval**: If the task involves downloading metadata, handling lists of IDs (DOIs/PMIDs), or exporting to files (e.g., "Save these DOIs to JSONL"), read `pyalex/agents/pyalex-cli-agent/references/data_export.md`.
+3. **Analysis & Grouping**: If the task involves grouping, counts, or frequency analysis (e.g., "What's the OA status distribution?", "Group by year"), read `pyalex/agents/pyalex-cli-agent/references/analysis.md`.
 
 ## Quick Reference
 - Always use `--limit` (default: 25) to avoid huge result sets unless requested.

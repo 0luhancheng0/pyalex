@@ -3,10 +3,10 @@
 Use this reference for bulk processing, ID resolution, and exporting to files.
 
 ## Bulk Processing from IDs
-The `from-ids` command accepts OpenAlex IDs, DOIs, or PMIDs from stdin.
+The `from-ids` command accepts OpenAlex IDs from stdin.
 
-- **Example**: `echo "https://doi.org/10.1038/s41586-020-2169-x" | pyalex from-ids`
-- **Example**: `cat doi_list.txt | pyalex from-ids --jsonl-file results.jsonl`
+- **Example**: `echo "W2741809807" | pyalex from-ids`
+- **Example**: `cat ids_list.txt | pyalex from-ids --jsonl-file results.jsonl`
 
 ## Export Formats
 - `--jsonl-file output.jsonl`: Preferred for large datasets.

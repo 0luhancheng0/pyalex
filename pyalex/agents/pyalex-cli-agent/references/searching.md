@@ -9,7 +9,7 @@ Use this reference when discovery or filtering is required.
 
 ## Filter Cheat Sheet (Works)
 - `--year "2020:2023"`: Range.
-- `--cited-by-count ">100"`: Citation threshold.
+- `--cited-by-count "101:"`: More than 100 citations.
 - `--type "article"`: Work type.
 - `--author-ids "A123,A456"`: Works by specific authors.
 - `--oa-status "gold"`: Open access status.
