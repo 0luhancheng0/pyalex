@@ -237,7 +237,7 @@ def test_show_help():
         ["pyalex", "show", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
-    assert "Display a JSON or Parquet file containing OpenAlex data" in result.stdout
+    assert "Display a JSON/JSONL or Parquet file containing OpenAlex data" in result.stdout
 
 
 def test_works_search():

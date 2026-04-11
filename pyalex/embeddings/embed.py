@@ -21,11 +21,11 @@ import pandas as pd
 import rustworkx as rx
 import typer
 
-from pyalex.embeddings.data_loader import load_graphml_to_rx
-from pyalex.embeddings.trajectory import trajectory as trajectory_command
+from .data_loader import load_graphml_to_rx
+from .trajectory import trajectory as trajectory_command
 
 try:
-    from pyalex.logger import get_logger
+    from ..logger import get_logger
 
     logger = get_logger()
 except ImportError:

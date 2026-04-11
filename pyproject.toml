@@ -40,8 +40,12 @@ dependencies = [
 [project.scripts]
 pyalex = "pyalex.cli:app"
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools]
-packages = {find = {include = ["pyalex*"]}}
+packages = {find = {where = ["."], include = ["pyalex", "pyalex.*"]}}
 
 [dependency-groups]
 dev = [

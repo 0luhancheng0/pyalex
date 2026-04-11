@@ -11,6 +11,7 @@ from pyalex import Works
 from ..batch import add_id_list_option_to_command
 from ..command_patterns import execute_standard_query
 from ..command_patterns import handle_large_id_list
+from ..command_patterns import handle_large_id_list_if_needed
 from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
 from ..constants import STDIN_SENTINEL
@@ -50,6 +51,7 @@ class _WorksCommand(StdinSentinelCommand):
         "--source-issn": STDIN_SENTINEL,
         "--source-host-org-ids": STDIN_SENTINEL,
         "--cites": STDIN_SENTINEL,
+        "--cited-by": STDIN_SENTINEL,
     }
 
 
@@ -381,12 +383,23 @@ def create_works_command(app):
                 rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
-        cited_by_ids: Annotated[
+        cites_ids: Annotated[
             str | None,
             typer.Option(
                 "--cites",
                 help=(
                     "Filter works cited by the provided work ID(s). Use "
+                    "comma-separated IDs or omit the value to read JSON from stdin."
+                ),
+                rich_help_panel=ID_FILTERS_PANEL,
+            ),
+        ] = None,
+        cited_by_ids: Annotated[
+            str | None,
+            typer.Option(
+                "--cited-by",
+                help=(
+                    "Filter by works that are cited by the provided work ID(s). Use "
                     "comma-separated IDs or omit the value to read JSON from stdin."
                 ),
                 rich_help_panel=ID_FILTERS_PANEL,
@@ -598,6 +611,7 @@ def create_works_command(app):
             source_host_org_ids = resolve_ids_option(
                 source_host_org_ids, "--source-host-org-ids"
             )
+            cites_ids = resolve_ids_option(cites_ids, "--cites")
             cited_by_ids = resolve_ids_option(cited_by_ids, "--cited-by")
 
             # Build query
@@ -763,9 +777,14 @@ def create_works_command(app):
                     typer.echo(f"Error: {exc}", err=True)
                     raise typer.Exit(1) from exc
 
+            if cites_ids:
+                query = add_id_list_option_to_command(
+                    query, cites_ids, "works_cites", Works
+                )
+
             if cited_by_ids:
                 query = add_id_list_option_to_command(
-                    query, cited_by_ids, "works_cites", Works
+                    query, cited_by_ids, "works_cited_by", Works
                 )
 
             if funder_ids:

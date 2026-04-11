@@ -9,6 +9,7 @@ from pyalex import Authors
 from ..batch import add_id_list_option_to_command
 from ..command_patterns import execute_standard_query
 from ..command_patterns import handle_large_id_list
+from ..command_patterns import handle_large_id_list_if_needed
 from ..command_patterns import validate_output_format_options
 from ..command_patterns import validate_pagination_options
 from ..constants import STDIN_SENTINEL

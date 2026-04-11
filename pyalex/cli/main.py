@@ -8,7 +8,7 @@ from typing import Annotated
 
 import typer
 
-from pyalex import config
+from .. import config
 
 from . import batch
 from . import utils
@@ -25,7 +25,7 @@ from .commands.expand import create_expand_command
 from .commands.network import create_network_command
 from .commands.rehydrate import create_rehydrate_command
 from .commands.visualize_topics import create_topic_treemap_command
-from pyalex.embeddings.embed import app as embed_app
+from ..embeddings.embed import app as embed_app
 
 # Create the main typer app
 app = typer.Typer(

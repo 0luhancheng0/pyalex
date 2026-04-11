@@ -275,10 +275,10 @@ class TestUtilityFunctions:
             return {"id": "W1234567890", "title": "Test"}
 
         with patch(
-            "pyalex.client.async_session.async_get_with_retry",
+            "pyalex.client.httpx_session.async_get_with_retry",
             side_effect=mock_get_with_retry,
         ):
-            with patch("pyalex.client.async_session.get_async_session") as mock_session:
+            with patch("pyalex.client.httpx_session.get_async_client") as mock_session:
                 mock_session.return_value.__aenter__.return_value = Mock()
                 mock_session.return_value.__aexit__.return_value = None
 
@@ -293,10 +293,10 @@ class TestUtilityFunctions:
             return {"id": "W1234567890", "title": "Test"}
 
         with patch(
-            "pyalex.client.async_session.async_get_with_retry",
+            "pyalex.client.httpx_session.async_get_with_retry",
             side_effect=mock_get_with_retry,
         ):
-            with patch("pyalex.client.async_session.get_async_session") as mock_session:
+            with patch("pyalex.client.httpx_session.get_async_client") as mock_session:
                 mock_session.return_value.__aenter__.return_value = Mock()
                 mock_session.return_value.__aexit__.return_value = None
 
