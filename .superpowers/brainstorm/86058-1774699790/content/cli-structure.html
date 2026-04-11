@@ -1,0 +1,50 @@
+<h2>CLI Architecture: <code>pyalex experiments plot</code></h2>
+<p class="subtitle">Organizing visualization tools as subcommands of the main experiment script.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Proposed Command Hierarchy</div>
+  <div class="mockup-body">
+    <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; font-family: monospace;">
+python collaboration_prediction.py plot
+├── calibration
+│   ├── --predictions-file (JSON)
+│   ├── --strategy (e.g., "recency_weighted")
+│   └── --output (PNG/PDF)
+├── stratified
+│   ├── --predictions-file (JSON)
+│   ├── --graphml (optional, for network features)
+│   ├── --strata (e.g., "productivity", "recency")
+│   └── --output (PNG/PDF)
+└── diagnostics
+    ├── --predictions-file (JSON)
+    ├── --top-errors (N)
+    └── --output (directory)
+    </pre>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Key Design Decisions</h3>
+  <ul>
+    <li><strong>Decoupled Input:</strong> Most plots consume the <code>--predictions-output</code> JSON from the <code>evaluate</code> command, avoiding costly re-evaluation.</li>
+    <li><strong>Optional Graph Context:</strong> Advanced stratification (e.g., network centrality) can optionally reload the GraphML file if needed.</li>
+    <li><strong>Strategy Scoping:</strong> Since evaluation computes all strategies, <code>plot</code> commands allow filtering to a specific one or generating a comparison.</li>
+  </ul>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Approve Hierarchy</h3>
+      <p>This structure is clean and covers all TODO requirements.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="modify" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Suggest Changes</h3>
+      <p>I'd like to adjust the commands or parameters.</p>
+    </div>
+  </div>
+</div>
