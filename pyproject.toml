@@ -41,7 +41,7 @@ dependencies = [
 pyalex = "pyalex.cli:app"
 
 [tool.setuptools]
-packages = ["pyalex"]
+packages = {find = {include = ["pyalex*"]}}
 
 [dependency-groups]
 dev = [
