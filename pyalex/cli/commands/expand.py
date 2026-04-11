@@ -24,9 +24,11 @@ from ..command_patterns import validate_output_format_options
 from ..utils import _async_retrieve_entities
 from ..utils import _handle_cli_exception
 from ..utils import _output_results
+from .help_panels import ACCESS_PANEL
 from .help_panels import METADATA_PANEL
 from .help_panels import OUTPUT_PANEL
 from .rehydrate import rehydrate_ids
+from .utils import apply_open_access_filter
 from .utils import apply_publication_year_filter
 
 
@@ -174,6 +176,33 @@ def expand(
             rich_help_panel=METADATA_PANEL,
         ),
     ] = None,
+    is_oa: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--is-oa/--not-oa",
+            help="Filter by open access availability (default: no filter). Only applies to modes returning Works.",
+            rich_help_panel=ACCESS_PANEL,
+        ),
+    ] = None,
+    oa_status: Annotated[
+        Optional[str],
+        typer.Option(
+            "--oa-status",
+            help=(
+                "Filter by specific OA status. Supports ranges (e.g. 'green:', ':gold'). "
+                "Ranking: diamond > gold > green > hybrid > bronze > closed. Only applies to modes returning Works."
+            ),
+            rich_help_panel=ACCESS_PANEL,
+        ),
+    ] = None,
+    has_fulltext: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--has-fulltext/--no-fulltext",
+            help="Filter by availability of any fulltext link. Only applies to modes returning Works.",
+            rich_help_panel=ACCESS_PANEL,
+        ),
+    ] = None,
 ):
     """
     Expand a set of entities by fetching related entities.
@@ -204,6 +233,17 @@ def expand(
     }:
         typer.echo(
             f"Warning: --year is only used in modes returning Works (not {mode.value}); ignored.",
+            err=True,
+        )
+    if (is_oa is not None or oa_status or has_fulltext is not None) and mode not in {
+        ExpandMode.author_work,
+        ExpandMode.work_forward,
+        ExpandMode.work_related,
+        ExpandMode.work_backward,
+        ExpandMode.topic_work,
+    }:
+        typer.echo(
+            f"Warning: OA filters are only used in modes returning Works (not {mode.value}); ignored.",
             err=True,
         )
     effective_limit: int | None = limit
@@ -380,6 +420,10 @@ def expand(
             query = add_id_list_option_to_command(query, id_string, "works_cites", Works)
             if publication_year:
                 query = apply_publication_year_filter(query, publication_year)
+            query = apply_open_access_filter(query, is_oa=is_oa, oa_status=oa_status)
+            if has_fulltext is not None:
+                query = query.filter(has_fulltext=has_fulltext)
+
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
@@ -406,6 +450,10 @@ def expand(
             query = add_id_list_option_to_command(query, id_string, "works_author", Works)
             if publication_year:
                 query = apply_publication_year_filter(query, publication_year)
+            query = apply_open_access_filter(query, is_oa=is_oa, oa_status=oa_status)
+            if has_fulltext is not None:
+                query = query.filter(has_fulltext=has_fulltext)
+
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
@@ -438,6 +486,10 @@ def expand(
             query = add_id_list_option_to_command(query, id_string, "works_topic", Works)
             if publication_year:
                 query = apply_publication_year_filter(query, publication_year)
+            query = apply_open_access_filter(query, is_oa=is_oa, oa_status=oa_status)
+            if has_fulltext is not None:
+                query = query.filter(has_fulltext=has_fulltext)
+
             if effective_limit is not None:
                 query = query.sort(cited_by_count="desc")
 
@@ -477,12 +529,22 @@ def expand(
 
         else:
             # work_backward and work_related
-            if publication_year:
+            has_work_filters = any([
+                publication_year,
+                is_oa is not None,
+                oa_status,
+                has_fulltext is not None
+            ])
+            if has_work_filters:
                 query = Works()
                 id_string = ",".join(formatted_ids)
                 # Use openalex_id filter for direct ID matches
                 query = add_id_list_option_to_command(query, id_string, "openalex_id", Works)
-                query = apply_publication_year_filter(query, publication_year)
+                if publication_year:
+                    query = apply_publication_year_filter(query, publication_year)
+                query = apply_open_access_filter(query, is_oa=is_oa, oa_status=oa_status)
+                if has_fulltext is not None:
+                    query = query.filter(has_fulltext=has_fulltext)
 
                 if effective_limit is not None:
                     query = query.sort(cited_by_count="desc")

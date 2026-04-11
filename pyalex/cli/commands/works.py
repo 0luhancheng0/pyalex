@@ -31,7 +31,7 @@ from .help_panels import OUTPUT_PANEL
 from .help_panels import PAGINATION_PANEL
 from .help_panels import RESULT_PANEL
 from .help_panels import SEARCH_PANEL
-from .utils import StdinSentinelCommand, apply_publication_year_filter
+from .utils import StdinSentinelCommand, apply_open_access_filter, apply_publication_year_filter
 
 
 class _WorksCommand(StdinSentinelCommand):
@@ -780,50 +780,7 @@ def create_works_command(app):
                     query, award_ids, "works_award", Works
                 )
 
-            if oa_status:
-                # Handle OA status hierarchy ranges
-                # Ranking from lowest (closed) to highest (diamond) openness
-                oa_ranks = ["closed", "bronze", "hybrid", "green", "gold", "diamond"]
-                
-                if ":" in oa_status:
-                    start_stat, end_stat = oa_status.split(":", 1)
-                    start_stat = start_stat.strip().lower()
-                    end_stat = end_stat.strip().lower()
-                    
-                    start_idx = 0
-                    end_idx = len(oa_ranks) - 1
-                    
-                    if start_stat:
-                        if start_stat not in oa_ranks:
-                             typer.echo(
-                                 f"Error: Invalid OA status '{start_stat}'. "
-                                 f"Valid statuses: {', '.join(oa_ranks)}", 
-                                 err=True
-                             )
-                             raise typer.Exit(1)
-                        start_idx = oa_ranks.index(start_stat)
-                    
-                    if end_stat:
-                        if end_stat not in oa_ranks:
-                             typer.echo(
-                                 f"Error: Invalid OA status '{end_stat}'. "
-                                 f"Valid statuses: {', '.join(oa_ranks)}", 
-                                 err=True
-                             )
-                             raise typer.Exit(1)
-                        end_idx = oa_ranks.index(end_stat)
-                    
-                    if start_idx > end_idx:
-                         typer.echo("Error: Start status rank is higher than end status.", err=True)
-                         raise typer.Exit(1)
-                         
-                    # Join selected statuses with OR operator (|)
-                    selected_stats = oa_ranks[start_idx : end_idx + 1]
-                    oa_status = "|".join(selected_stats)
-
-                query = query.filter_by_open_access(oa_status=oa_status)
-            elif is_oa is not None:
-                query = query.filter_by_open_access(is_oa=is_oa)
+            query = apply_open_access_filter(query, is_oa=is_oa, oa_status=oa_status)
 
             if has_fulltext is not None:
                 query = query.filter(has_fulltext=has_fulltext)

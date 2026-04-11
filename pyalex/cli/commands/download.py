@@ -278,7 +278,7 @@ def create_download_command(app):
                 "-c",
                 help="Number of concurrent downloads",
             ),
-        ] = 64,
+        ] = 32,
     ):
         """
         Download PDFs or full-text Markdown from a PyAlex Works JSONL export.
