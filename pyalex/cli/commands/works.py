@@ -32,7 +32,11 @@ from .help_panels import OUTPUT_PANEL
 from .help_panels import PAGINATION_PANEL
 from .help_panels import RESULT_PANEL
 from .help_panels import SEARCH_PANEL
-from .utils import StdinSentinelCommand, apply_open_access_filter, apply_publication_year_filter
+from .utils import (
+    StdinSentinelCommand,
+    apply_open_access_filter,
+    apply_publication_year_filter,
+)
 
 
 class _WorksCommand(StdinSentinelCommand):
@@ -80,9 +84,7 @@ def _apply_citation_percentile_value_filter(query, raw_value: str):
 
         if start_str:
             start_val = _parse_numeric(start_str)
-            query = query.filter_gt(
-                citation_normalized_percentile={"value": start_val}
-            )
+            query = query.filter_gt(citation_normalized_percentile={"value": start_val})
 
         if end_str:
             end_val = _parse_numeric(end_str)
@@ -90,9 +92,7 @@ def _apply_citation_percentile_value_filter(query, raw_value: str):
                 raise ValueError(
                     "Citation percentile start value must not exceed end value"
                 )
-            query = query.filter_lt(
-                citation_normalized_percentile={"value": end_val}
-            )
+            query = query.filter_lt(citation_normalized_percentile={"value": end_val})
 
         return query
 
@@ -109,9 +109,7 @@ def _apply_citation_percentile_value_filter(query, raw_value: str):
                 citation_normalized_percentile={"value": numeric_value}
             )
 
-        return query.filter_lt(
-            citation_normalized_percentile={"value": numeric_value}
-        )
+        return query.filter_lt(citation_normalized_percentile={"value": numeric_value})
 
     exact_value = _parse_numeric(value)
     return query.filter(citation_normalized_percentile={"value": exact_value})
@@ -355,9 +353,7 @@ def create_works_command(app):
             bool | None,
             typer.Option(
                 "--citation-percentile-top-1/--no-citation-percentile-top-1",
-                help=(
-                    "Filter by citation_normalized_percentile.is_in_top_1_percent"
-                ),
+                help=("Filter by citation_normalized_percentile.is_in_top_1_percent"),
                 rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
@@ -365,9 +361,7 @@ def create_works_command(app):
             bool | None,
             typer.Option(
                 "--citation-percentile-top-10/--no-citation-percentile-top-10",
-                help=(
-                    "Filter by citation_normalized_percentile.is_in_top_10_percent"
-                ),
+                help=("Filter by citation_normalized_percentile.is_in_top_10_percent"),
                 rich_help_panel=METRICS_PANEL,
             ),
         ] = None,
@@ -429,6 +423,14 @@ def create_works_command(app):
             typer.Option(
                 "--has-fulltext/--no-fulltext",
                 help="Filter by availability of any fulltext link",
+                rich_help_panel=ACCESS_PANEL,
+            ),
+        ] = None,
+        has_abstract: Annotated[
+            bool | None,
+            typer.Option(
+                "--has-abstract/--no-abstract",
+                help="Filter by availability of abstract (inverted_abstract_index is not empty)",
                 rich_help_panel=ACCESS_PANEL,
             ),
         ] = None,
@@ -591,9 +593,7 @@ def create_works_command(app):
             )
 
             author_ids = resolve_ids_option(author_ids, "--author-ids")
-            institution_ids = resolve_ids_option(
-                institution_ids, "--institution-ids"
-            )
+            institution_ids = resolve_ids_option(institution_ids, "--institution-ids")
             institutions_country_code = resolve_ids_option(
                 institutions_country_code, "--institutions-country-code"
             )
@@ -602,9 +602,7 @@ def create_works_command(app):
             funder_ids = resolve_ids_option(funder_ids, "--funder-ids")
             award_ids = resolve_ids_option(award_ids, "--award-ids")
             source_ids = resolve_ids_option(source_ids, "--source-ids")
-            host_venue_ids = resolve_ids_option(
-                host_venue_ids, "--host-venue-ids"
-            )
+            host_venue_ids = resolve_ids_option(host_venue_ids, "--host-venue-ids")
             source_issn = resolve_ids_option(
                 source_issn, "--source-issn", id_field="issn"
             )
@@ -804,6 +802,9 @@ def create_works_command(app):
             if has_fulltext is not None:
                 query = query.filter(has_fulltext=has_fulltext)
 
+            if has_abstract is not None:
+                query = query.filter(has_abstract=has_abstract)
+
             if is_retracted is not None:
                 query = query.filter(is_retracted=is_retracted)
 
@@ -831,9 +832,7 @@ def create_works_command(app):
                         for field in raw_select_fields
                         if field.lower() not in {"abstract"}
                     ]
-                    lower_sanitized = {
-                        field.lower() for field in sanitized_fields
-                    }
+                    lower_sanitized = {field.lower() for field in sanitized_fields}
                     if "abstract_inverted_index" not in lower_sanitized:
                         sanitized_fields.append("abstract_inverted_index")
                     select_for_query = ",".join(sanitized_fields)

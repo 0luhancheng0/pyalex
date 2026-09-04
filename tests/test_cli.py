@@ -49,7 +49,6 @@ def test_topics_help():
 
 def test_topics_search_filters(monkeypatch):
     """Topics CLI should map field-specific search filters."""
-    
 
     from pyalex.cli import main as cli_main
     from pyalex.cli.commands import entities as entities_module
@@ -140,6 +139,7 @@ def test_topics_search_filters(monkeypatch):
     for expected in expected_filters:
         assert expected in recorded["search_filters"]
 
+
 def test_funders_search_filters(monkeypatch):
     """Funders CLI should map display name and description search filters."""
 
@@ -213,6 +213,7 @@ def test_funders_search_filters(monkeypatch):
     for expected in expected_filters:
         assert expected in recorded["search_filters"]
 
+
 def test_concepts_help():
     """Test that the concepts subcommand help works."""
     result = subprocess.run(
@@ -237,7 +238,9 @@ def test_show_help():
         ["pyalex", "show", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
-    assert "Display a JSON/JSONL or Parquet file containing OpenAlex data" in result.stdout
+    assert (
+        "Display a JSON/JSONL or Parquet file containing OpenAlex data" in result.stdout
+    )
 
 
 def test_works_search():
@@ -352,7 +355,6 @@ def test_works_select_abstract_requests_inverted_index(monkeypatch):
         "title",
         "abstract_inverted_index",
     ]
-
 
 
 def test_works_json_outputs_jsonl(monkeypatch, tmp_path):
@@ -894,6 +896,7 @@ def test_works_content_filters(monkeypatch):
         [
             "works",
             "--no-fulltext",
+            "--has-abstract",
             "--is-retracted",
             "--abstract-search",
             "graphene",
@@ -912,6 +915,7 @@ def test_works_content_filters(monkeypatch):
 
     assert result.exit_code == 0, result.stdout or result.stderr
     assert {"has_fulltext": False} in recorded["filters"]
+    assert {"has_abstract": True} in recorded["filters"]
     assert {"is_retracted": True} in recorded["filters"]
     expected_search_filters = [
         {"title": "vaccine"},
@@ -922,6 +926,7 @@ def test_works_content_filters(monkeypatch):
     ]
     for expected in expected_search_filters:
         assert expected in recorded["search_filters"]
+
 
 def test_authors_institution_ids_from_stdin(monkeypatch):
     """Authors command should read institution IDs from stdin when omitted."""
@@ -1204,6 +1209,7 @@ def test_authors_defaults_to_h_index_sort(monkeypatch):
 
     assert result.exit_code == 0, result.stdout or result.stderr
     assert captured["sort_by"] == "summary_stats.h_index:desc"
+
 
 def test_works_cited_by_count_range(monkeypatch):
     """Works command should apply range filter for cited-by-count option."""
