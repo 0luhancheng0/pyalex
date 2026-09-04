@@ -8,7 +8,6 @@ dependencies = [
     "anywidget>=0.9.13",
     "docling>=1.11.0",
     "fastmcp>=2.14.4",
-    "fitz>=0.0.1.dev2",
     "httpx[http2]>=0.28.1",
     "ipython>=9.7.0",
     "jupyter>=1.1.1",
